@@ -24,6 +24,9 @@ export class Model {
         }
         return ret[0] >>> 0;
     }
+    cancel_generation() {
+        wasm.model_cancel_generation(this.__wbg_ptr);
+    }
     /**
      * @returns {Float32Array | undefined}
      */
