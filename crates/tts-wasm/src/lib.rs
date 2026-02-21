@@ -225,6 +225,10 @@ impl Model {
         self.generation_step_().map_err(|e| JsError::new(&e.to_string()))
     }
 
+    pub fn cancel_generation(&mut self) {
+        self.gen_state = None;
+    }
+
     pub fn sample_rate(&self) -> usize {
         self.inner.sample_rate()
     }
