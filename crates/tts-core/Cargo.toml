@@ -1,0 +1,15 @@
+[package]
+name = "tts-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mimi-rs = { path = "../../../mimi-rs" }
+candle-core = "0.9"
+candle-nn = "0.9"
+rand = "0.9"
+rand_distr = "0.5"
+
+[dev-dependencies]
+safetensors = "0.4"
+half = "2"

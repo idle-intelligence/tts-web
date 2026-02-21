@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTS — Browser Text-to-Speech</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+            color: #111;
+            background: #fafafa;
+        }
+        h1 {
+            margin-bottom: 0.5rem;
+            font-size: 2rem;
+            font-weight: 600;
+        }
+        .subtitle {
+            margin-bottom: 2rem;
+            color: #666;
+            font-size: 0.95rem;
+        }
+        .card {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .card h2 {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #888;
+            margin-bottom: 1rem;
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #999;
+            flex-shrink: 0;
+        }
+        .status-dot.loading { background: #f0ad4e; }
+        .status-dot.ready { background: #5cb85c; }
+        .status-dot.error { background: #d9534f; }
+        .status-dot.generating {
+            background: #007aff;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .progress {
+            height: 4px;
+            background: #eee;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 0.75rem;
+            display: none;
+        }
+        .progress.visible {
+            display: block;
+        }
+        .progress-bar {
+            height: 100%;
+            background: #007aff;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .info {
+            font-size: 0.85rem;
+            color: #888;
+        }
+        textarea {
+            font-family: inherit;
+            font-size: 0.95rem;
+            width: 100%;
+            min-height: 100px;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: #f9f9f9;
+            resize: vertical;
+            color: #111;
+            margin-bottom: 1rem;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: #007aff;
+            background: #fff;
+        }
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+        button {
+            font-family: inherit;
+            font-size: 0.95rem;
+            padding: 0.6rem 1.2rem;
+            cursor: pointer;
+            border: 1px solid #ccc;
+            background: #fff;
+            border-radius: 6px;
+            transition: all 0.15s;
+        }
+        button:hover:not(:disabled) {
+            background: #f5f5f5;
+            border-color: #999;
+        }
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        button.primary {
+            background: #007aff;
+            color: #fff;
+            border-color: #007aff;
+        }
+        button.primary:hover:not(:disabled) {
+            background: #0051d5;
+            border-color: #0051d5;
+        }
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            color: #555;
+        }
+        input[type="range"] {
+            width: 100px;
+            cursor: pointer;
+            accent-color: #007aff;
+        }
+        #stepInfo {
+            font-size: 0.85rem;
+            color: #888;
+            margin-top: 0.75rem;
+            min-height: 1.2em;
+        }
+        #audioSection {
+            display: none;
+        }
+        audio {
+            width: 100%;
+            margin-top: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>Text-to-Speech</h1>
+    <p class="subtitle">Client-side TTS — runs entirely in your browser via WebAssembly.</p>
+
+    <div class="card">
+        <h2>Status</h2>
+        <div class="status">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Initializing...</span>
+        </div>
+        <div class="progress" id="progressBar">
+            <div class="progress-bar" id="progressFill"></div>
+        </div>
+        <p class="info" id="progressInfo"></p>
+    </div>
+
+    <div class="card">
+        <h2>Generate</h2>
+        <textarea id="textInput">Hello, this is a test of the text to speech system.</textarea>
+        <div class="controls">
+            <button id="generateBtn" class="primary" disabled>Generate</button>
+            <div class="slider-group">
+                <label for="tempSlider">Temperature</label>
+                <input type="range" id="tempSlider" min="0.1" max="1.5" step="0.05" value="0.7">
+                <span id="tempValue">0.7</span>
+            </div>
+        </div>
+        <div id="stepInfo"></div>
+    </div>
+
+    <div class="card" id="audioSection">
+        <h2>Output</h2>
+        <audio id="audioPlayer" controls></audio>
+    </div>
+
+    <script type="module">
+        import { TtsClient } from './tts-client.js';
+
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        const progressInfo = document.getElementById('progressInfo');
+        const generateBtn = document.getElementById('generateBtn');
+        const textInput = document.getElementById('textInput');
+        const tempSlider = document.getElementById('tempSlider');
+        const tempValue = document.getElementById('tempValue');
+        const stepInfo = document.getElementById('stepInfo');
+        const audioSection = document.getElementById('audioSection');
+        const audioPlayer = document.getElementById('audioPlayer');
+
+        let audioChunks = [];
+        let generating = false;
+
+        function updateStatus(state, text) {
+            statusDot.className = 'status-dot ' + state;
+            statusText.textContent = text;
+        }
+
+        function formatBytes(bytes) {
+            const mb = bytes / (1024 * 1024);
+            return mb >= 1 ? `${mb.toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} KB`;
+        }
+
+        tempSlider.addEventListener('input', () => {
+            tempValue.textContent = parseFloat(tempSlider.value).toFixed(2);
+        });
+
+        const tts = new TtsClient({
+            onStatus: (text, ready, progress) => {
+                if (ready) {
+                    updateStatus('ready', text);
+                    generateBtn.disabled = false;
+                    progressBar.classList.remove('visible');
+                    progressInfo.textContent = '';
+                } else {
+                    updateStatus('loading', text);
+                    if (progress) {
+                        progressBar.classList.add('visible');
+                        const percent = progress.total > 0
+                            ? (progress.loaded / progress.total) * 100
+                            : 0;
+                        progressFill.style.width = percent + '%';
+                        progressInfo.textContent = `${formatBytes(progress.loaded)} / ${formatBytes(progress.total)}`;
+                    }
+                }
+            },
+            onError: (err) => {
+                updateStatus('error', 'Error: ' + err.message);
+                generateBtn.disabled = false;
+                generating = false;
+                stepInfo.textContent = '';
+                console.error(err);
+            },
+            onGenStart: (numTokens) => {
+                audioChunks = [];
+                audioSection.style.display = 'none';
+                stepInfo.textContent = `Generating... (${numTokens} tokens)`;
+                updateStatus('generating', 'Generating...');
+            },
+            onChunk: (data, step) => {
+                audioChunks.push(new Float32Array(data));
+                stepInfo.textContent = `Generating... step ${step + 1}`;
+            },
+            onDone: (totalSteps) => {
+                generating = false;
+                generateBtn.disabled = false;
+                stepInfo.textContent = `Done — ${totalSteps} steps`;
+                updateStatus('ready', 'Ready');
+
+                // Concatenate all chunks
+                const totalLength = audioChunks.reduce((sum, c) => sum + c.length, 0);
+                if (totalLength === 0) return;
+
+                console.log(`[audio] ${audioChunks.length} chunks, total ${totalLength} samples (${(totalLength/tts.sampleRate).toFixed(2)}s at ${tts.sampleRate}Hz)`);
+
+                const pcm = new Float32Array(totalLength);
+                let offset = 0;
+                for (const chunk of audioChunks) {
+                    pcm.set(chunk, offset);
+                    offset += chunk.length;
+                }
+
+                // Debug: PCM stats
+                let min = Infinity, max = -Infinity, nanCount = 0;
+                for (let i = 0; i < pcm.length; i++) {
+                    const v = pcm[i];
+                    if (isNaN(v)) { nanCount++; continue; }
+                    if (v < min) min = v;
+                    if (v > max) max = v;
+                }
+                console.log(`[audio] PCM min=${min.toFixed(6)} max=${max.toFixed(6)} nan=${nanCount}`);
+
+                // Encode to WAV and set as audio source
+                const wav = encodeWav(pcm, tts.sampleRate);
+                const blob = new Blob([wav], { type: 'audio/wav' });
+                const url = URL.createObjectURL(blob);
+                audioPlayer.src = url;
+                audioSection.style.display = 'block';
+                audioPlayer.play();
+            }
+        });
+
+        generateBtn.addEventListener('click', () => {
+            const text = textInput.value.trim();
+            if (!text) return;
+            if (generating) return;
+            generating = true;
+            generateBtn.disabled = true;
+            const temperature = parseFloat(tempSlider.value);
+            tts.generate(text, temperature);
+        });
+
+        (async () => {
+            try {
+                updateStatus('loading', 'Initializing...');
+                await tts.init();
+            } catch (err) {
+                updateStatus('error', 'Failed to initialize: ' + err.message);
+                console.error(err);
+            }
+        })();
+
+        // ---- WAV encoder ----
+        function encodeWav(samples, sampleRate) {
+            const numChannels = 1;
+            const bitsPerSample = 32;
+            const blockAlign = numChannels * (bitsPerSample / 8);
+            const byteRate = sampleRate * blockAlign;
+            const dataSize = samples.length * 4;
+            const buffer = new ArrayBuffer(44 + dataSize);
+            const view = new DataView(buffer);
+
+            function writeStr(offset, str) {
+                for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+            }
+
+            writeStr(0, 'RIFF');
+            view.setUint32(4, 36 + dataSize, true);
+            writeStr(8, 'WAVE');
+            writeStr(12, 'fmt ');
+            view.setUint32(16, 16, true);          // chunk size
+            view.setUint16(20, 3, true);            // PCM float = type 3
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitsPerSample, true);
+            writeStr(36, 'data');
+            view.setUint32(40, dataSize, true);
+
+            const floatView = new Float32Array(buffer, 44);
+            floatView.set(samples);
+
+            return buffer;
+        }
+    </script>
+</body>
+</html>
