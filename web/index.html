@@ -3,184 +3,265 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TTS — Browser Text-to-Speech</title>
+    <title>tts-web — idle intelligence</title>
+    <link rel="icon" href="favicon.ico">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg: #fdfdfd;
+            --text: #1a1a1a;
+            --muted: #555;
+            --faint: #999;
+            --border: #ddd;
+            --green: #2d7d46;
+            --yellow: #b58900;
+            --red: #c0392b;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'SF Mono', Monaco, Consolas, monospace;
-            max-width: 800px;
+            font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+            max-width: 640px;
             margin: 0 auto;
-            padding: 2rem;
-            color: #111;
-            background: #fafafa;
+            padding: 48px 24px 96px;
+            color: var(--text);
+            background: var(--bg);
+            line-height: 1.5;
+            font-size: 15px;
+        }
+        a { color: var(--text); }
+        a:hover { color: var(--muted); }
+
+        header { margin-bottom: 48px; }
+        .org {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--muted);
+            letter-spacing: 0.02em;
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .org img {
+            width: 16px;
+            height: 16px;
+            border-radius: 2px;
         }
         h1 {
-            margin-bottom: 0.5rem;
-            font-size: 2rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 24px;
             font-weight: 600;
+            margin-bottom: 8px;
         }
-        .subtitle {
-            margin-bottom: 2rem;
-            color: #666;
-            font-size: 0.95rem;
+        .tagline {
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.6;
         }
-        .card {
-            background: #fff;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
+        .tagline a { text-decoration: underline; color: var(--muted); }
+        .tagline a:hover { color: var(--text); }
+        .repo {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            margin-top: 4px;
         }
-        .card h2 {
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #888;
-            margin-bottom: 1rem;
+        .repo a { color: var(--faint); text-decoration: none; }
+        .repo a:hover { color: var(--muted); }
+
+        section {
+            border-top: 1px solid var(--border);
+            padding: 24px 0;
         }
+        section h2 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+            color: var(--faint);
+            margin-bottom: 12px;
+        }
+        section h2 .sub {
+            font-weight: 400;
+        }
+
         .status {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-            font-size: 0.9rem;
+            gap: 8px;
+            font-size: 14px;
         }
         .status-dot {
-            width: 8px;
-            height: 8px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
-            background: #999;
+            background: var(--faint);
             flex-shrink: 0;
         }
-        .status-dot.loading { background: #f0ad4e; }
-        .status-dot.ready { background: #5cb85c; }
-        .status-dot.error { background: #d9534f; }
+        .status-dot.loading { background: var(--yellow); }
+        .status-dot.ready { background: var(--green); }
+        .status-dot.error { background: var(--red); }
         .status-dot.generating {
-            background: #007aff;
+            background: var(--text);
             animation: pulse 1s infinite;
         }
         @keyframes pulse {
             0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+            50% { opacity: 0.4; }
         }
         .progress {
-            height: 4px;
-            background: #eee;
-            border-radius: 2px;
+            height: 2px;
+            background: var(--border);
+            border-radius: 1px;
             overflow: hidden;
-            margin-bottom: 0.75rem;
+            margin-top: 12px;
             display: none;
         }
-        .progress.visible {
-            display: block;
-        }
+        .progress.visible { display: block; }
         .progress-bar {
             height: 100%;
-            background: #007aff;
+            background: var(--text);
             width: 0%;
             transition: width 0.3s;
         }
-        .info {
-            font-size: 0.85rem;
-            color: #888;
+        #progressInfo {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: var(--faint);
+            margin-top: 4px;
         }
+
         textarea {
-            font-family: inherit;
-            font-size: 0.95rem;
+            font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+            font-size: 15px;
             width: 100%;
             min-height: 100px;
-            padding: 0.75rem;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            background: #f9f9f9;
+            padding: 12px;
+            border: 1px solid var(--border);
+            background: transparent;
             resize: vertical;
-            color: #111;
-            margin-bottom: 1rem;
+            color: var(--text);
+            margin-bottom: 12px;
+            line-height: 1.5;
         }
         textarea:focus {
             outline: none;
-            border-color: #007aff;
-            background: #fff;
+            border-color: var(--text);
         }
         .controls {
             display: flex;
             align-items: center;
-            gap: 0.75rem;
+            gap: 12px;
             flex-wrap: wrap;
         }
         button {
-            font-family: inherit;
-            font-size: 0.95rem;
-            padding: 0.6rem 1.2rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 8px 16px;
             cursor: pointer;
-            border: 1px solid #ccc;
-            background: #fff;
-            border-radius: 6px;
-            transition: all 0.15s;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            border-radius: 0;
+            transition: border-color 0.15s;
         }
         button:hover:not(:disabled) {
-            background: #f5f5f5;
-            border-color: #999;
+            border-color: var(--text);
         }
         button:disabled {
-            opacity: 0.4;
+            opacity: 0.3;
             cursor: not-allowed;
         }
         button.primary {
-            background: #007aff;
-            color: #fff;
-            border-color: #007aff;
+            background: var(--text);
+            color: var(--bg);
+            border-color: var(--text);
         }
         button.primary:hover:not(:disabled) {
-            background: #0051d5;
-            border-color: #0051d5;
+            background: var(--muted);
+            border-color: var(--muted);
         }
         .slider-group {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            font-size: 0.9rem;
-            color: #555;
+            gap: 8px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--muted);
         }
         input[type="range"] {
             width: 100px;
             cursor: pointer;
-            accent-color: #007aff;
+        }
+        .info {
+            font-size: 13px;
+            color: var(--faint);
+            margin-top: 12px;
         }
         #stepInfo {
-            font-size: 0.85rem;
-            color: #888;
-            margin-top: 0.75rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: var(--faint);
+            margin-top: 12px;
             min-height: 1.2em;
         }
-        #audioSection {
-            display: none;
-        }
+        #audioSection { display: none; }
         audio {
             width: 100%;
-            margin-top: 0.5rem;
+            margin-top: 4px;
         }
+
+        footer {
+            border-top: 1px solid var(--border);
+            padding-top: 24px;
+            margin-top: 24px;
+        }
+        footer a {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--faint);
+            text-decoration: none;
+        }
+        footer a:hover { color: var(--muted); }
     </style>
 </head>
 <body>
-    <h1>Text-to-Speech</h1>
-    <p class="subtitle"><a href="https://github.com/kyutai-labs/pocket-tts" target="_blank">Pocket TTS</a> running in the browser via WebAssembly using <a href="https://github.com/huggingface/candle" target="_blank">candle</a></p>
+    <header>
+        <p class="org"><img src="apple-touch-icon.png" alt="II">idle intelligence</p>
+        <h1>tts-web</h1>
+        <p class="tagline">
+            Quantized to int8.
+            <a href="https://github.com/kyutai-labs/pocket-tts">Pocket TTS</a>
+            running in the browser via WebAssembly using
+            <a href="https://github.com/huggingface/candle">Candle</a>
+        </p>
+        <p class="repo">
+            <a href="https://github.com/idle-intelligence/tts-web">github.com/idle-intelligence/tts-web</a>
+        </p>
+    </header>
 
-    <div class="card">
-        <h2>Status</h2>
+    <section>
+        <h2>status</h2>
         <div class="status">
-            <div class="status-dot" id="statusDot"></div>
-            <span id="statusText">Initializing...</span>
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Checking...</span>
         </div>
         <div class="progress" id="progressBar">
             <div class="progress-bar" id="progressFill"></div>
         </div>
-        <p class="info" id="progressInfo"></p>
-    </div>
+        <p id="progressInfo"></p>
+        <div style="margin-top:12px">
+            <button id="downloadBtn" class="primary" style="display:none">Download Model</button>
+        </div>
+    </section>
 
-    <div class="card">
-        <h2>Generate</h2>
-        <textarea id="textInput">Hello, this is a test of the text to speech system.</textarea>
+    <section>
+        <h2>input <span class="sub">· text</span></h2>
+        <p class="info">Text stays on this device.</p>
+        <textarea id="textInput">Hello, this is a test of the text-to-speech system.</textarea>
         <div class="controls">
             <button id="generateBtn" class="primary" disabled>Generate</button>
             <div class="slider-group">
@@ -190,12 +271,16 @@
             </div>
         </div>
         <div id="stepInfo"></div>
-    </div>
+    </section>
 
-    <div class="card" id="audioSection">
-        <h2>Output</h2>
+    <section id="audioSection">
+        <h2>output <span class="sub">· audio wav file</span></h2>
         <audio id="audioPlayer" controls></audio>
-    </div>
+    </section>
+
+    <footer>
+        <a href="https://idleintelligence.org">idleintelligence.org</a>
+    </footer>
 
     <script type="module">
         import { TtsClient } from './tts-client.js';
@@ -205,6 +290,7 @@
         const progressBar = document.getElementById('progressBar');
         const progressFill = document.getElementById('progressFill');
         const progressInfo = document.getElementById('progressInfo');
+        const downloadBtn = document.getElementById('downloadBtn');
         const generateBtn = document.getElementById('generateBtn');
         const textInput = document.getElementById('textInput');
         const tempSlider = document.getElementById('tempSlider');
@@ -215,10 +301,8 @@
 
         let allChunks = [];
         let generating = false;
+        let tts = null;
 
-        // ---- Streaming audio playback ----
-        // Accumulate chunks into batches (~500ms), schedule each batch
-        // as a single AudioBuffer to avoid per-chunk scratching artifacts.
         const BATCH_MS = 500;
         let audioCtx = null;
         let nextStartTime = 0;
@@ -226,28 +310,22 @@
         let pendingSamples = 0;
         let playbackStarted = false;
 
-        // ---- Metrics ----
         let genStartTime = 0;
         let firstChunkTime = 0;
         let totalAudioSamples = 0;
 
         function flushAudioBatch() {
             if (pendingChunks.length === 0) return;
-
-            // Don't start playback until we have 2 batches buffered,
-            // so generation stays ahead of playback.
             if (!playbackStarted) {
                 playbackStarted = true;
                 nextStartTime = audioCtx.currentTime;
             }
-
             const totalLen = pendingSamples;
             const pcm = new Float32Array(totalLen);
             let off = 0;
             for (const c of pendingChunks) { pcm.set(c, off); off += c.length; }
             pendingChunks = [];
             pendingSamples = 0;
-
             const buf = audioCtx.createBuffer(1, totalLen, tts.sampleRate);
             buf.getChannelData(0).set(pcm);
             const src = audioCtx.createBufferSource();
@@ -271,122 +349,128 @@
             tempValue.textContent = parseFloat(tempSlider.value).toFixed(2);
         });
 
-        const tts = new TtsClient({
-            onStatus: (text, ready, progress) => {
-                if (ready) {
-                    updateStatus('ready', text);
-                    generateBtn.disabled = false;
-                    progressBar.classList.remove('visible');
-                    progressInfo.textContent = '';
-                } else {
-                    updateStatus('loading', text);
-                    if (progress) {
-                        progressBar.classList.add('visible');
-                        const percent = progress.total > 0
-                            ? (progress.loaded / progress.total) * 100
-                            : 0;
-                        progressFill.style.width = percent + '%';
-                        progressInfo.textContent = `${formatBytes(progress.loaded)} / ${formatBytes(progress.total)}`;
-                    }
-                }
-            },
-            onError: (err) => {
-                updateStatus('error', 'Error: ' + err.message);
-                generateBtn.disabled = false;
-                generating = false;
-                stepInfo.textContent = '';
-                console.error(err);
-            },
-            onGenStart: (numTokens) => {
-                allChunks = [];
-                pendingChunks = [];
-                pendingSamples = 0;
-                playbackStarted = false;
-                totalAudioSamples = 0;
-                genStartTime = performance.now();
-                firstChunkTime = 0;
-                audioSection.style.display = 'none';
-                stepInfo.textContent = `Generating... (${numTokens} tokens)`;
-                updateStatus('generating', 'Generating...');
-                // Create AudioContext on user gesture (generate click)
-                audioCtx = new AudioContext({ sampleRate: tts.sampleRate });
-                nextStartTime = 0;
-            },
-            onChunk: (data, step) => {
-                if (!firstChunkTime) firstChunkTime = performance.now();
-                const chunk = new Float32Array(data);
-                allChunks.push(chunk);
-                pendingChunks.push(chunk);
-                pendingSamples += chunk.length;
-                totalAudioSamples += chunk.length;
-
-                const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
-                const audioDur = (totalAudioSamples / tts.sampleRate).toFixed(1);
-                const rtf = (totalAudioSamples / tts.sampleRate) / ((performance.now() - genStartTime) / 1000);
-                stepInfo.textContent = `Step ${step + 1} — ${audioDur}s audio in ${elapsed}s (${rtf.toFixed(2)}x realtime)`;
-
-                const batchSamples = (BATCH_MS / 1000) * tts.sampleRate;
-                // First flush: wait for 2x batch to build a buffer head start
-                // Subsequent flushes: every batch
-                const threshold = playbackStarted ? batchSamples : batchSamples * 2;
-                if (pendingSamples >= threshold) {
-                    flushAudioBatch();
-                }
-            },
-            onDone: (totalSteps) => {
-                // Flush any remaining samples
-                flushAudioBatch();
-
-                const totalTime = ((performance.now() - genStartTime) / 1000).toFixed(2);
-                const ttfb = ((firstChunkTime - genStartTime) / 1000).toFixed(2);
-                const audioDur = (totalAudioSamples / tts.sampleRate).toFixed(2);
-                const rtf = (totalAudioSamples / tts.sampleRate / parseFloat(totalTime)).toFixed(2);
-
-                generating = false;
-                generateBtn.disabled = false;
-                stepInfo.textContent = `${audioDur}s audio in ${totalTime}s — TTFB ${ttfb}s — ${rtf}x realtime`;
-                updateStatus('ready', 'Ready');
-
-                // Build WAV for replay/download
-                const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
-                if (totalLength === 0) return;
-
-                const pcm = new Float32Array(totalLength);
-                let offset = 0;
-                for (const chunk of allChunks) {
-                    pcm.set(chunk, offset);
-                    offset += chunk.length;
-                }
-
-                const wav = encodeWav(pcm, tts.sampleRate);
-                const blob = new Blob([wav], { type: 'audio/wav' });
-                const url = URL.createObjectURL(blob);
-                audioPlayer.src = url;
-                audioSection.style.display = 'block';
-            }
-        });
-
-        generateBtn.addEventListener('click', () => {
-            const text = textInput.value.trim();
-            if (!text) return;
-            if (generating) return;
-            generating = true;
-            generateBtn.disabled = true;
-            const temperature = parseFloat(tempSlider.value);
-            tts.generate(text, temperature);
-        });
-
-        (async () => {
+        // Check if model is already cached
+        const MODEL_CACHE = 'tts-model-v1';
+        const MODEL_CHECK_URL = 'https://huggingface.co/idle-intelligence/pocket-tts-int8/resolve/main/model.safetensors';
+        async function isModelCached() {
             try {
-                updateStatus('loading', 'Initializing...');
+                const cache = await caches.open(MODEL_CACHE);
+                return !!(await cache.match(MODEL_CHECK_URL));
+            } catch { return false; }
+        }
+
+        function makeClient() {
+            return new TtsClient({
+                onStatus: (text, ready, progress) => {
+                    if (ready) {
+                        updateStatus('ready', text);
+                        generateBtn.disabled = false;
+                        progressBar.classList.remove('visible');
+                        progressInfo.textContent = '';
+                        downloadBtn.style.display = 'none';
+                    } else {
+                        updateStatus('loading', text);
+                        if (progress) {
+                            progressBar.classList.add('visible');
+                            const percent = progress.total > 0 ? (progress.loaded / progress.total) * 100 : 0;
+                            progressFill.style.width = percent + '%';
+                            progressInfo.textContent = `${formatBytes(progress.loaded)} / ${formatBytes(progress.total)}`;
+                        }
+                    }
+                },
+                onError: (err) => {
+                    updateStatus('error', 'Error: ' + err.message);
+                    generateBtn.disabled = false;
+                    generating = false;
+                    stepInfo.textContent = '';
+                    console.error(err);
+                },
+                onGenStart: (numTokens) => {
+                    allChunks = [];
+                    pendingChunks = [];
+                    pendingSamples = 0;
+                    playbackStarted = false;
+                    totalAudioSamples = 0;
+                    genStartTime = performance.now();
+                    firstChunkTime = 0;
+                    audioSection.style.display = 'none';
+                    stepInfo.textContent = `Generating... (${numTokens} tokens)`;
+                    updateStatus('generating', 'Generating...');
+                    audioCtx = new AudioContext({ sampleRate: tts.sampleRate });
+                    nextStartTime = 0;
+                },
+                onChunk: (data, step) => {
+                    if (!firstChunkTime) firstChunkTime = performance.now();
+                    const chunk = new Float32Array(data);
+                    allChunks.push(chunk);
+                    pendingChunks.push(chunk);
+                    pendingSamples += chunk.length;
+                    totalAudioSamples += chunk.length;
+                    const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
+                    const audioDur = (totalAudioSamples / tts.sampleRate).toFixed(1);
+                    const rtf = (totalAudioSamples / tts.sampleRate) / ((performance.now() - genStartTime) / 1000);
+                    stepInfo.textContent = `Step ${step + 1} — ${audioDur}s audio in ${elapsed}s (${rtf.toFixed(2)}x realtime)`;
+                    const batchSamples = (BATCH_MS / 1000) * tts.sampleRate;
+                    const threshold = playbackStarted ? batchSamples : batchSamples * 2;
+                    if (pendingSamples >= threshold) flushAudioBatch();
+                },
+                onDone: (totalSteps) => {
+                    flushAudioBatch();
+                    const totalTime = ((performance.now() - genStartTime) / 1000).toFixed(2);
+                    const ttfb = ((firstChunkTime - genStartTime) / 1000).toFixed(2);
+                    const audioDur = (totalAudioSamples / tts.sampleRate).toFixed(2);
+                    const rtf = (totalAudioSamples / tts.sampleRate / parseFloat(totalTime)).toFixed(2);
+                    generating = false;
+                    generateBtn.disabled = false;
+                    stepInfo.textContent = `${audioDur}s audio in ${totalTime}s — TTFB ${ttfb}s — ${rtf}x realtime`;
+                    updateStatus('ready', 'Ready');
+                    const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
+                    if (totalLength === 0) return;
+                    const pcm = new Float32Array(totalLength);
+                    let offset = 0;
+                    for (const chunk of allChunks) { pcm.set(chunk, offset); offset += chunk.length; }
+                    const wav = encodeWav(pcm, tts.sampleRate);
+                    const blob = new Blob([wav], { type: 'audio/wav' });
+                    audioPlayer.src = URL.createObjectURL(blob);
+                    audioSection.style.display = 'block';
+                }
+            });
+        }
+
+        async function initClient() {
+            try {
                 await tts.init();
             } catch (err) {
                 updateStatus('error', 'Failed to initialize: ' + err.message);
+                downloadBtn.style.display = '';
+                downloadBtn.disabled = false;
                 console.error(err);
             }
-        })();
+        }
 
-        // ---- WAV encoder ----
+        // Init flow: auto-load if cached, otherwise show download button
+        tts = makeClient();
+        const cached = await isModelCached();
+        if (cached) {
+            updateStatus('loading', 'Loading from cache...');
+            await initClient();
+        } else {
+            updateStatus('', 'Model not downloaded');
+            downloadBtn.style.display = '';
+            downloadBtn.addEventListener('click', async () => {
+                downloadBtn.disabled = true;
+                await initClient();
+            });
+        }
+
+        generateBtn.addEventListener('click', () => {
+            const text = textInput.value.trim();
+            if (!text || generating) return;
+            generating = true;
+            generateBtn.disabled = true;
+            tts.generate(text, parseFloat(tempSlider.value));
+        });
+
         function encodeWav(samples, sampleRate) {
             const numChannels = 1;
             const bitsPerSample = 32;
@@ -395,17 +479,15 @@
             const dataSize = samples.length * 4;
             const buffer = new ArrayBuffer(44 + dataSize);
             const view = new DataView(buffer);
-
             function writeStr(offset, str) {
                 for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
             }
-
             writeStr(0, 'RIFF');
             view.setUint32(4, 36 + dataSize, true);
             writeStr(8, 'WAVE');
             writeStr(12, 'fmt ');
-            view.setUint32(16, 16, true);          // chunk size
-            view.setUint16(20, 3, true);            // PCM float = type 3
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 3, true);
             view.setUint16(22, numChannels, true);
             view.setUint32(24, sampleRate, true);
             view.setUint32(28, byteRate, true);
@@ -413,10 +495,7 @@
             view.setUint16(34, bitsPerSample, true);
             writeStr(36, 'data');
             view.setUint32(40, dataSize, true);
-
-            const floatView = new Float32Array(buffer, 44);
-            floatView.set(samples);
-
+            new Float32Array(buffer, 44).set(samples);
             return buffer;
         }
     </script>

@@ -1,4 +1,4 @@
-const HF_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
+const HF_BASE = 'https://huggingface.co/idle-intelligence/pocket-tts-int8/resolve/main';
 
 let model = null;
 let tokenizer = null;
@@ -194,24 +194,27 @@ async function handleLoad(config) {
 
     // 1. Import WASM
     post('status', { text: 'Loading WASM module...' });
-    const wasmModule = await import(base + '/pkg/tts_wasm.js');
-    await wasmModule.default(base + '/pkg/tts_wasm_bg.wasm');
+    const wasmJsUrl = base ? (base + '/pkg/tts_wasm.js') : new URL('../pkg/tts_wasm.js', import.meta.url).href;
+    const wasmBgUrl = base ? (base + '/pkg/tts_wasm_bg.wasm') : new URL('../pkg/tts_wasm_bg.wasm', import.meta.url).href;
+    const wasmModule = await import(wasmJsUrl);
+    await wasmModule.default(wasmBgUrl);
 
     // 2. Download and load tokenizer
     const tokUrl = config.tokenizerUrl || `${HF_BASE}/tokenizer.model`;
+    const VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
     const tokBuf = await cachedFetch(tokUrl, 'Downloading tokenizer');
     const pieces = decodeSentencepieceModel(new Uint8Array(tokBuf));
     tokenizer = new UnigramTokenizer(pieces);
     post('status', { text: `Tokenizer loaded (${pieces.length} pieces)` });
 
     // 3. Download and init model
-    const modelUrl = config.modelUrl || './model_int8.safetensors';
+    const modelUrl = config.modelUrl || `${HF_BASE}/model.safetensors`;
     const modelBuf = await cachedFetch(modelUrl, 'Downloading model');
     post('status', { text: 'Initializing model...' });
     model = new wasmModule.Model(new Uint8Array(modelBuf));
 
     // 4. Download and add voice
-    const voiceUrl = config.voiceUrl || `${HF_BASE}/embeddings_v2/alba.safetensors`;
+    const voiceUrl = config.voiceUrl || `${VOICE_BASE}/embeddings_v2/alba.safetensors`;
     const voiceBuf = await cachedFetch(voiceUrl, 'Downloading voice');
     post('status', { text: 'Loading voice...' });
     model.add_voice(new Uint8Array(voiceBuf));
