@@ -208,6 +208,41 @@
             margin-top: 12px;
             min-height: 1.2em;
         }
+        .voice-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+        }
+        .voice-btn {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 6px 0;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            border-radius: 0;
+            text-align: center;
+            transition: border-color 0.15s, background 0.15s, color 0.15s;
+        }
+        .voice-btn:hover:not(:disabled) {
+            border-color: var(--text);
+        }
+        .voice-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        .voice-btn.active {
+            background: var(--text);
+            color: var(--bg);
+            border-color: var(--text);
+        }
+        .voice-btn.loading {
+            border-color: var(--yellow);
+            color: var(--yellow);
+        }
+
         #audioSection { display: none; }
         audio {
             width: 100%;
@@ -259,6 +294,11 @@
     </section>
 
     <section>
+        <h2>voice</h2>
+        <div class="voice-grid" id="voiceGrid"></div>
+    </section>
+
+    <section>
         <h2>input <span class="sub">· text</span></h2>
         <p class="info">Text stays on this device.</p>
         <textarea id="textInput">Hello, this is a test of the text-to-speech system.</textarea>
@@ -299,9 +339,15 @@
         const audioSection = document.getElementById('audioSection');
         const audioPlayer = document.getElementById('audioPlayer');
 
+        const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
+        const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
+
         let allChunks = [];
         let generating = false;
         let tts = null;
+        let activeVoice = null;
+        let loadingVoice = false;
+        let isDemoGen = false;
 
         const BATCH_MS = 500;
         let audioCtx = null;
@@ -359,13 +405,59 @@
             } catch { return false; }
         }
 
+        // ---- Voice grid ----
+        const voiceGrid = document.getElementById('voiceGrid');
+        for (const name of VOICES) {
+            const btn = document.createElement('button');
+            btn.className = 'voice-btn';
+            btn.textContent = name;
+            btn.disabled = true;
+            btn.dataset.voice = name;
+            btn.addEventListener('click', () => selectVoice(name));
+            voiceGrid.appendChild(btn);
+        }
+
+        function setVoiceBtnsEnabled(enabled) {
+            voiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
+                btn.disabled = !enabled || (generating && btn.dataset.voice !== activeVoice);
+            });
+        }
+
+        function selectVoice(name) {
+            if (loadingVoice || generating) return;
+            loadingVoice = true;
+            setVoiceBtnsEnabled(false);
+            voiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.dataset.voice === name) btn.classList.add('loading');
+            });
+            tts.loadVoice(name);
+        }
+
         function makeClient() {
             return new TtsClient({
                 workerUrl: './worker.js',
+                onVoiceLoaded: (name) => {
+                    loadingVoice = false;
+                    activeVoice = name;
+                    voiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
+                        btn.classList.remove('loading');
+                        if (btn.dataset.voice === name) btn.classList.add('active');
+                        else btn.classList.remove('active');
+                    });
+                    generateBtn.disabled = false;
+                    setVoiceBtnsEnabled(true);
+                    // Auto-generate demo
+                    isDemoGen = true;
+                    generating = true;
+                    generateBtn.disabled = true;
+                    setVoiceBtnsEnabled(false);
+                    tts.generate(DEMO_TEXT, parseFloat(tempSlider.value));
+                },
                 onStatus: (text, ready, progress) => {
                     if (ready) {
                         updateStatus('ready', text);
-                        generateBtn.disabled = false;
+                        setVoiceBtnsEnabled(true);
                         progressBar.classList.remove('visible');
                         progressInfo.textContent = '';
                         downloadBtn.style.display = 'none';
@@ -381,8 +473,11 @@
                 },
                 onError: (err) => {
                     updateStatus('error', 'Error: ' + err.message);
-                    generateBtn.disabled = false;
                     generating = false;
+                    loadingVoice = false;
+                    isDemoGen = false;
+                    generateBtn.disabled = !activeVoice;
+                    setVoiceBtnsEnabled(true);
                     stepInfo.textContent = '';
                     console.error(err);
                 },
@@ -423,8 +518,13 @@
                     const rtf = (totalAudioSamples / tts.sampleRate / parseFloat(totalTime)).toFixed(2);
                     generating = false;
                     generateBtn.disabled = false;
+                    setVoiceBtnsEnabled(true);
                     stepInfo.textContent = `${audioDur}s audio in ${totalTime}s — TTFB ${ttfb}s — ${rtf}x realtime`;
                     updateStatus('ready', 'Ready');
+                    if (isDemoGen) {
+                        isDemoGen = false;
+                        return;
+                    }
                     const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
                     if (totalLength === 0) return;
                     const pcm = new Float32Array(totalLength);
@@ -466,9 +566,11 @@
 
         generateBtn.addEventListener('click', () => {
             const text = textInput.value.trim();
-            if (!text || generating) return;
+            if (!text || generating || !activeVoice) return;
+            isDemoGen = false;
             generating = true;
             generateBtn.disabled = true;
+            setVoiceBtnsEnabled(false);
             tts.generate(text, parseFloat(tempSlider.value));
         });
 

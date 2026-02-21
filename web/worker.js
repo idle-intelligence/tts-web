@@ -1,7 +1,10 @@
 const HF_BASE = 'https://huggingface.co/idle-intelligence/pocket-tts-int8/resolve/main';
+const VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
 
 let model = null;
 let tokenizer = null;
+let voiceIndices = {};   // name → voice_index
+let activeVoiceIndex = -1;
 
 function post(type, data = {}, transferables = []) {
     self.postMessage({ type, ...data }, transferables);
@@ -201,7 +204,6 @@ async function handleLoad(config) {
 
     // 2. Download and load tokenizer
     const tokUrl = config.tokenizerUrl || `${HF_BASE}/tokenizer.model`;
-    const VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
     const tokBuf = await cachedFetch(tokUrl, 'Downloading tokenizer');
     const pieces = decodeSentencepieceModel(new Uint8Array(tokBuf));
     tokenizer = new UnigramTokenizer(pieces);
@@ -213,16 +215,27 @@ async function handleLoad(config) {
     post('status', { text: 'Initializing model...' });
     model = new wasmModule.Model(new Uint8Array(modelBuf));
 
-    // 4. Download and add voice
-    const voiceUrl = config.voiceUrl || `${VOICE_BASE}/embeddings_v2/alba.safetensors`;
-    const voiceBuf = await cachedFetch(voiceUrl, 'Downloading voice');
-    post('status', { text: 'Loading voice...' });
-    model.add_voice(new Uint8Array(voiceBuf));
-
-    // 5. Ready
+    // 4. Ready (voice loaded separately)
     const sampleRate = model.sample_rate();
-    post('status', { text: 'Ready', ready: true });
+    post('status', { text: 'Select a voice', ready: true });
     post('loaded', { sampleRate });
+}
+
+async function handleLoadVoice(name) {
+    if (name in voiceIndices) {
+        activeVoiceIndex = voiceIndices[name];
+        post('voice_loaded', { name, voiceIndex: activeVoiceIndex });
+        return;
+    }
+
+    const url = `${VOICE_BASE}/embeddings_v2/${name}.safetensors`;
+    const voiceBuf = await cachedFetch(url, `Downloading voice: ${name}`);
+    post('status', { text: `Loading voice: ${name}...` });
+    const voiceIndex = model.add_voice(new Uint8Array(voiceBuf));
+    voiceIndices[name] = voiceIndex;
+    activeVoiceIndex = voiceIndex;
+    post('status', { text: 'Ready', ready: true });
+    post('voice_loaded', { name, voiceIndex });
 }
 
 async function handleGenerate(text, temperature) {
@@ -231,7 +244,7 @@ async function handleGenerate(text, temperature) {
 
     post('gen_start', { numTokens: tokenIds.length });
 
-    model.start_generation(0, tokenIds, framesAfterEos, temperature);
+    model.start_generation(activeVoiceIndex, tokenIds, framesAfterEos, temperature);
 
     let step = 0;
     while (true) {
@@ -258,6 +271,8 @@ self.onmessage = async (e) => {
     try {
         if (type === 'load') {
             await handleLoad(data.config || {});
+        } else if (type === 'load_voice') {
+            await handleLoadVoice(data.name);
         } else if (type === 'generate') {
             await handleGenerate(data.text, data.temperature || 0.7);
         }
