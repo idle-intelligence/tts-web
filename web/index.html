@@ -209,20 +209,21 @@
             min-height: 1.2em;
         }
         .voice-grid {
-            display: flex;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
             gap: 8px;
         }
         .voice-btn {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 13px;
             font-weight: 500;
-            padding: 6px 14px;
+            padding: 6px 0;
             cursor: pointer;
             border: 1px solid var(--border);
             background: transparent;
             color: var(--text);
             border-radius: 0;
+            text-align: center;
             transition: border-color 0.15s, background 0.15s, color 0.15s;
         }
         .voice-btn:hover:not(:disabled) {

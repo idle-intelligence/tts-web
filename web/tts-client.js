@@ -25,9 +25,13 @@ export class TtsClient {
             this.worker = new Worker(this.workerUrl, { type: 'module' });
             this.worker.onmessage = (e) => this._handleMessage(e);
             this.worker.onerror = (err) => {
-                this.onError(new Error(`Worker error: ${err.message || err}`));
+                const msg = err.message || err.filename
+                    ? `Worker error: ${err.message} (${err.filename}:${err.lineno}:${err.colno})`
+                    : 'Worker failed to load — check browser console';
+                console.error('[tts-client] worker error event:', err);
+                this.onError(new Error(msg));
                 if (this._pendingReject) {
-                    this._pendingReject(new Error(err.message || String(err)));
+                    this._pendingReject(new Error(msg));
                     this._pendingReject = null;
                     this._pendingResolve = null;
                 }
