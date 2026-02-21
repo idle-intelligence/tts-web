@@ -301,7 +301,7 @@
     <section>
         <h2>input <span class="sub">· text</span></h2>
         <p class="info">Text stays on this device.</p>
-        <textarea id="textInput">Hello, this is a test of the text-to-speech system.</textarea>
+        <textarea id="textInput" placeholder="Hello, this is a test of the text-to-speech system."></textarea>
         <div class="controls">
             <button id="generateBtn" class="primary" disabled>Generate</button>
             <div class="slider-group">
@@ -447,12 +447,13 @@
                     });
                     generateBtn.disabled = false;
                     setVoiceBtnsEnabled(true);
-                    // Auto-generate demo
-                    isDemoGen = true;
+                    // Auto-generate: use user text if present, otherwise demo text
+                    const userText = textInput.value.trim();
+                    isDemoGen = !userText;
                     generating = true;
                     generateBtn.disabled = true;
                     setVoiceBtnsEnabled(false);
-                    tts.generate(DEMO_TEXT, parseFloat(tempSlider.value));
+                    tts.generate(userText || DEMO_TEXT, parseFloat(tempSlider.value));
                 },
                 onStatus: (text, ready, progress) => {
                     if (ready) {
