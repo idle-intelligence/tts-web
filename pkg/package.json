@@ -1,0 +1,15 @@
+{
+  "name": "tts-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "tts_wasm_bg.wasm",
+    "tts_wasm.js",
+    "tts_wasm.d.ts"
+  ],
+  "main": "tts_wasm.js",
+  "types": "tts_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

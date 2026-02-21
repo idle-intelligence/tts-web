@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>tts-web — idle intelligence</title>
+    <link rel="icon" href="favicon.ico">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #fdfdfd;
+            --text: #1a1a1a;
+            --muted: #555;
+            --faint: #999;
+            --border: #ddd;
+            --green: #2d7d46;
+            --yellow: #b58900;
+            --red: #c0392b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 48px 24px 96px;
+            color: var(--text);
+            background: var(--bg);
+            line-height: 1.5;
+            font-size: 15px;
+        }
+        a { color: var(--text); }
+        a:hover { color: var(--muted); }
+
+        header { margin-bottom: 48px; }
+        .org {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--muted);
+            letter-spacing: 0.02em;
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .org img {
+            width: 16px;
+            height: 16px;
+            border-radius: 2px;
+        }
+        h1 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .tagline {
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .tagline a { text-decoration: underline; color: var(--muted); }
+        .tagline a:hover { color: var(--text); }
+        .repo {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        .repo a { color: var(--faint); text-decoration: none; }
+        .repo a:hover { color: var(--muted); }
+
+        section {
+            border-top: 1px solid var(--border);
+            padding: 24px 0;
+        }
+        section h2 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+            color: var(--faint);
+            margin-bottom: 12px;
+        }
+        section h2 .sub {
+            font-weight: 400;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--faint);
+            flex-shrink: 0;
+        }
+        .status-dot.loading { background: var(--yellow); }
+        .status-dot.ready { background: var(--green); }
+        .status-dot.error { background: var(--red); }
+        .status-dot.generating {
+            background: var(--text);
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .progress {
+            height: 2px;
+            background: var(--border);
+            border-radius: 1px;
+            overflow: hidden;
+            margin-top: 12px;
+            display: none;
+        }
+        .progress.visible { display: block; }
+        .progress-bar {
+            height: 100%;
+            background: var(--text);
+            width: 0%;
+            transition: width 0.3s;
+        }
+        #progressInfo {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: var(--faint);
+            margin-top: 4px;
+        }
+
+        textarea {
+            font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+            font-size: 15px;
+            width: 100%;
+            min-height: 100px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            background: transparent;
+            resize: vertical;
+            color: var(--text);
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: var(--text);
+        }
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        button {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 8px 16px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            border-radius: 0;
+            transition: border-color 0.15s;
+        }
+        button:hover:not(:disabled) {
+            border-color: var(--text);
+        }
+        button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        button.primary {
+            background: var(--text);
+            color: var(--bg);
+            border-color: var(--text);
+        }
+        button.primary:hover:not(:disabled) {
+            background: var(--muted);
+            border-color: var(--muted);
+        }
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--muted);
+        }
+        input[type="range"] {
+            width: 100px;
+            cursor: pointer;
+        }
+        .info {
+            font-size: 13px;
+            color: var(--faint);
+            margin-top: 12px;
+        }
+        #stepInfo {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: var(--faint);
+            margin-top: 12px;
+            min-height: 1.2em;
+        }
+        #audioSection { display: none; }
+        audio {
+            width: 100%;
+            margin-top: 4px;
+        }
+
+        footer {
+            border-top: 1px solid var(--border);
+            padding-top: 24px;
+            margin-top: 24px;
+        }
+        footer a {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--faint);
+            text-decoration: none;
+        }
+        footer a:hover { color: var(--muted); }
+    </style>
+</head>
+<body>
+    <header>
+        <p class="org"><img src="apple-touch-icon.png" alt="II">idle intelligence</p>
+        <h1>tts-web</h1>
+        <p class="tagline">
+            Quantized to int8.
+            <a href="https://github.com/kyutai-labs/pocket-tts">Pocket TTS</a>
+            running in the browser via WebAssembly using
+            <a href="https://github.com/huggingface/candle">Candle</a>
+        </p>
+        <p class="repo">
+            <a href="https://github.com/idle-intelligence/tts-web">github.com/idle-intelligence/tts-web</a>
+        </p>
+    </header>
+
+    <section>
+        <h2>status</h2>
+        <div class="status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Checking...</span>
+        </div>
+        <div class="progress" id="progressBar">
+            <div class="progress-bar" id="progressFill"></div>
+        </div>
+        <p id="progressInfo"></p>
+        <div style="margin-top:12px">
+            <button id="downloadBtn" class="primary" style="display:none">Download Model</button>
+        </div>
+    </section>
+
+    <section>
+        <h2>input <span class="sub">· text</span></h2>
+        <p class="info">Text stays on this device.</p>
+        <textarea id="textInput">Hello, this is a test of the text-to-speech system.</textarea>
+        <div class="controls">
+            <button id="generateBtn" class="primary" disabled>Generate</button>
+            <div class="slider-group">
+                <label for="tempSlider">Temperature</label>
+                <input type="range" id="tempSlider" min="0.1" max="1.5" step="0.05" value="0.7">
+                <span id="tempValue">0.7</span>
+            </div>
+        </div>
+        <div id="stepInfo"></div>
+    </section>
+
+    <section id="audioSection">
+        <h2>output <span class="sub">· audio wav file</span></h2>
+        <audio id="audioPlayer" controls></audio>
+    </section>
+
+    <footer>
+        <a href="https://idleintelligence.org">idleintelligence.org</a>
+    </footer>
+
+    <script type="module">
+        import { TtsClient } from './tts-client.js';
+
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        const progressInfo = document.getElementById('progressInfo');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const generateBtn = document.getElementById('generateBtn');
+        const textInput = document.getElementById('textInput');
+        const tempSlider = document.getElementById('tempSlider');
+        const tempValue = document.getElementById('tempValue');
+        const stepInfo = document.getElementById('stepInfo');
+        const audioSection = document.getElementById('audioSection');
+        const audioPlayer = document.getElementById('audioPlayer');
+
+        let allChunks = [];
+        let generating = false;
+        let tts = null;
+
+        const BATCH_MS = 500;
+        let audioCtx = null;
+        let nextStartTime = 0;
+        let pendingChunks = [];
+        let pendingSamples = 0;
+        let playbackStarted = false;
+
+        let genStartTime = 0;
+        let firstChunkTime = 0;
+        let totalAudioSamples = 0;
+
+        function flushAudioBatch() {
+            if (pendingChunks.length === 0) return;
+            if (!playbackStarted) {
+                playbackStarted = true;
+                nextStartTime = audioCtx.currentTime;
+            }
+            const totalLen = pendingSamples;
+            const pcm = new Float32Array(totalLen);
+            let off = 0;
+            for (const c of pendingChunks) { pcm.set(c, off); off += c.length; }
+            pendingChunks = [];
+            pendingSamples = 0;
+            const buf = audioCtx.createBuffer(1, totalLen, tts.sampleRate);
+            buf.getChannelData(0).set(pcm);
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(audioCtx.destination);
+            src.start(nextStartTime);
+            nextStartTime += totalLen / tts.sampleRate;
+        }
+
+        function updateStatus(state, text) {
+            statusDot.className = 'status-dot ' + state;
+            statusText.textContent = text;
+        }
+
+        function formatBytes(bytes) {
+            const mb = bytes / (1024 * 1024);
+            return mb >= 1 ? `${mb.toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} KB`;
+        }
+
+        tempSlider.addEventListener('input', () => {
+            tempValue.textContent = parseFloat(tempSlider.value).toFixed(2);
+        });
+
+        // Check if model is already cached
+        const MODEL_CACHE = 'tts-model-v1';
+        const MODEL_CHECK_URL = 'https://huggingface.co/idle-intelligence/pocket-tts-int8/resolve/main/model.safetensors';
+        async function isModelCached() {
+            try {
+                const cache = await caches.open(MODEL_CACHE);
+                return !!(await cache.match(MODEL_CHECK_URL));
+            } catch { return false; }
+        }
+
+        function makeClient() {
+            return new TtsClient({
+                onStatus: (text, ready, progress) => {
+                    if (ready) {
+                        updateStatus('ready', text);
+                        generateBtn.disabled = false;
+                        progressBar.classList.remove('visible');
+                        progressInfo.textContent = '';
+                        downloadBtn.style.display = 'none';
+                    } else {
+                        updateStatus('loading', text);
+                        if (progress) {
+                            progressBar.classList.add('visible');
+                            const percent = progress.total > 0 ? (progress.loaded / progress.total) * 100 : 0;
+                            progressFill.style.width = percent + '%';
+                            progressInfo.textContent = `${formatBytes(progress.loaded)} / ${formatBytes(progress.total)}`;
+                        }
+                    }
+                },
+                onError: (err) => {
+                    updateStatus('error', 'Error: ' + err.message);
+                    generateBtn.disabled = false;
+                    generating = false;
+                    stepInfo.textContent = '';
+                    console.error(err);
+                },
+                onGenStart: (numTokens) => {
+                    allChunks = [];
+                    pendingChunks = [];
+                    pendingSamples = 0;
+                    playbackStarted = false;
+                    totalAudioSamples = 0;
+                    genStartTime = performance.now();
+                    firstChunkTime = 0;
+                    audioSection.style.display = 'none';
+                    stepInfo.textContent = `Generating... (${numTokens} tokens)`;
+                    updateStatus('generating', 'Generating...');
+                    audioCtx = new AudioContext({ sampleRate: tts.sampleRate });
+                    nextStartTime = 0;
+                },
+                onChunk: (data, step) => {
+                    if (!firstChunkTime) firstChunkTime = performance.now();
+                    const chunk = new Float32Array(data);
+                    allChunks.push(chunk);
+                    pendingChunks.push(chunk);
+                    pendingSamples += chunk.length;
+                    totalAudioSamples += chunk.length;
+                    const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
+                    const audioDur = (totalAudioSamples / tts.sampleRate).toFixed(1);
+                    const rtf = (totalAudioSamples / tts.sampleRate) / ((performance.now() - genStartTime) / 1000);
+                    stepInfo.textContent = `Step ${step + 1} — ${audioDur}s audio in ${elapsed}s (${rtf.toFixed(2)}x realtime)`;
+                    const batchSamples = (BATCH_MS / 1000) * tts.sampleRate;
+                    const threshold = playbackStarted ? batchSamples : batchSamples * 2;
+                    if (pendingSamples >= threshold) flushAudioBatch();
+                },
+                onDone: (totalSteps) => {
+                    flushAudioBatch();
+                    const totalTime = ((performance.now() - genStartTime) / 1000).toFixed(2);
+                    const ttfb = ((firstChunkTime - genStartTime) / 1000).toFixed(2);
+                    const audioDur = (totalAudioSamples / tts.sampleRate).toFixed(2);
+                    const rtf = (totalAudioSamples / tts.sampleRate / parseFloat(totalTime)).toFixed(2);
+                    generating = false;
+                    generateBtn.disabled = false;
+                    stepInfo.textContent = `${audioDur}s audio in ${totalTime}s — TTFB ${ttfb}s — ${rtf}x realtime`;
+                    updateStatus('ready', 'Ready');
+                    const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
+                    if (totalLength === 0) return;
+                    const pcm = new Float32Array(totalLength);
+                    let offset = 0;
+                    for (const chunk of allChunks) { pcm.set(chunk, offset); offset += chunk.length; }
+                    const wav = encodeWav(pcm, tts.sampleRate);
+                    const blob = new Blob([wav], { type: 'audio/wav' });
+                    audioPlayer.src = URL.createObjectURL(blob);
+                    audioSection.style.display = 'block';
+                }
+            });
+        }
+
+        async function initClient() {
+            try {
+                await tts.init();
+            } catch (err) {
+                updateStatus('error', 'Failed to initialize: ' + err.message);
+                downloadBtn.style.display = '';
+                downloadBtn.disabled = false;
+                console.error(err);
+            }
+        }
+
+        // Init flow: auto-load if cached, otherwise show download button
+        tts = makeClient();
+        const cached = await isModelCached();
+        if (cached) {
+            updateStatus('loading', 'Loading from cache...');
+            await initClient();
+        } else {
+            updateStatus('', 'Model not downloaded');
+            downloadBtn.style.display = '';
+            downloadBtn.addEventListener('click', async () => {
+                downloadBtn.disabled = true;
+                await initClient();
+            });
+        }
+
+        generateBtn.addEventListener('click', () => {
+            const text = textInput.value.trim();
+            if (!text || generating) return;
+            generating = true;
+            generateBtn.disabled = true;
+            tts.generate(text, parseFloat(tempSlider.value));
+        });
+
+        function encodeWav(samples, sampleRate) {
+            const numChannels = 1;
+            const bitsPerSample = 32;
+            const blockAlign = numChannels * (bitsPerSample / 8);
+            const byteRate = sampleRate * blockAlign;
+            const dataSize = samples.length * 4;
+            const buffer = new ArrayBuffer(44 + dataSize);
+            const view = new DataView(buffer);
+            function writeStr(offset, str) {
+                for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+            }
+            writeStr(0, 'RIFF');
+            view.setUint32(4, 36 + dataSize, true);
+            writeStr(8, 'WAVE');
+            writeStr(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 3, true);
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitsPerSample, true);
+            writeStr(36, 'data');
+            view.setUint32(40, dataSize, true);
+            new Float32Array(buffer, 44).set(samples);
+            return buffer;
+        }
+    </script>
+</body>
+</html>
