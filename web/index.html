@@ -224,9 +224,23 @@
         let nextStartTime = 0;
         let pendingChunks = [];
         let pendingSamples = 0;
+        let playbackStarted = false;
+
+        // ---- Metrics ----
+        let genStartTime = 0;
+        let firstChunkTime = 0;
+        let totalAudioSamples = 0;
 
         function flushAudioBatch() {
             if (pendingChunks.length === 0) return;
+
+            // Don't start playback until we have 2 batches buffered,
+            // so generation stays ahead of playback.
+            if (!playbackStarted) {
+                playbackStarted = true;
+                nextStartTime = audioCtx.currentTime;
+            }
+
             const totalLen = pendingSamples;
             const pcm = new Float32Array(totalLen);
             let off = 0;
@@ -239,8 +253,6 @@
             const src = audioCtx.createBufferSource();
             src.buffer = buf;
             src.connect(audioCtx.destination);
-            // If we fell behind, skip ahead to now
-            nextStartTime = Math.max(nextStartTime, audioCtx.currentTime);
             src.start(nextStartTime);
             nextStartTime += totalLen / tts.sampleRate;
         }
@@ -289,6 +301,10 @@
                 allChunks = [];
                 pendingChunks = [];
                 pendingSamples = 0;
+                playbackStarted = false;
+                totalAudioSamples = 0;
+                genStartTime = performance.now();
+                firstChunkTime = 0;
                 audioSection.style.display = 'none';
                 stepInfo.textContent = `Generating... (${numTokens} tokens)`;
                 updateStatus('generating', 'Generating...');
@@ -297,15 +313,23 @@
                 nextStartTime = 0;
             },
             onChunk: (data, step) => {
+                if (!firstChunkTime) firstChunkTime = performance.now();
                 const chunk = new Float32Array(data);
                 allChunks.push(chunk);
                 pendingChunks.push(chunk);
                 pendingSamples += chunk.length;
-                stepInfo.textContent = `Generating... step ${step + 1}`;
+                totalAudioSamples += chunk.length;
 
-                // Flush when we've accumulated enough for a batch
+                const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
+                const audioDur = (totalAudioSamples / tts.sampleRate).toFixed(1);
+                const rtf = (totalAudioSamples / tts.sampleRate) / ((performance.now() - genStartTime) / 1000);
+                stepInfo.textContent = `Step ${step + 1} — ${audioDur}s audio in ${elapsed}s (${rtf.toFixed(2)}x realtime)`;
+
                 const batchSamples = (BATCH_MS / 1000) * tts.sampleRate;
-                if (pendingSamples >= batchSamples) {
+                // First flush: wait for 2x batch to build a buffer head start
+                // Subsequent flushes: every batch
+                const threshold = playbackStarted ? batchSamples : batchSamples * 2;
+                if (pendingSamples >= threshold) {
                     flushAudioBatch();
                 }
             },
@@ -313,9 +337,14 @@
                 // Flush any remaining samples
                 flushAudioBatch();
 
+                const totalTime = ((performance.now() - genStartTime) / 1000).toFixed(2);
+                const ttfb = ((firstChunkTime - genStartTime) / 1000).toFixed(2);
+                const audioDur = (totalAudioSamples / tts.sampleRate).toFixed(2);
+                const rtf = (totalAudioSamples / tts.sampleRate / parseFloat(totalTime)).toFixed(2);
+
                 generating = false;
                 generateBtn.disabled = false;
-                stepInfo.textContent = `Done — ${totalSteps} steps`;
+                stepInfo.textContent = `${audioDur}s audio in ${totalTime}s — TTFB ${ttfb}s — ${rtf}x realtime`;
                 updateStatus('ready', 'Ready');
 
                 // Build WAV for replay/download
