@@ -361,6 +361,7 @@
 
         function makeClient() {
             return new TtsClient({
+                workerUrl: './worker.js',
                 onStatus: (text, ready, progress) => {
                     if (ready) {
                         updateStatus('ready', text);
