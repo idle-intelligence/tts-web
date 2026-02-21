@@ -213,8 +213,37 @@
         const audioSection = document.getElementById('audioSection');
         const audioPlayer = document.getElementById('audioPlayer');
 
-        let audioChunks = [];
+        let allChunks = [];
         let generating = false;
+
+        // ---- Streaming audio playback ----
+        // Accumulate chunks into batches (~500ms), schedule each batch
+        // as a single AudioBuffer to avoid per-chunk scratching artifacts.
+        const BATCH_MS = 500;
+        let audioCtx = null;
+        let nextStartTime = 0;
+        let pendingChunks = [];
+        let pendingSamples = 0;
+
+        function flushAudioBatch() {
+            if (pendingChunks.length === 0) return;
+            const totalLen = pendingSamples;
+            const pcm = new Float32Array(totalLen);
+            let off = 0;
+            for (const c of pendingChunks) { pcm.set(c, off); off += c.length; }
+            pendingChunks = [];
+            pendingSamples = 0;
+
+            const buf = audioCtx.createBuffer(1, totalLen, tts.sampleRate);
+            buf.getChannelData(0).set(pcm);
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(audioCtx.destination);
+            // If we fell behind, skip ahead to now
+            nextStartTime = Math.max(nextStartTime, audioCtx.currentTime);
+            src.start(nextStartTime);
+            nextStartTime += totalLen / tts.sampleRate;
+        }
 
         function updateStatus(state, text) {
             statusDot.className = 'status-dot ' + state;
@@ -257,51 +286,54 @@
                 console.error(err);
             },
             onGenStart: (numTokens) => {
-                audioChunks = [];
+                allChunks = [];
+                pendingChunks = [];
+                pendingSamples = 0;
                 audioSection.style.display = 'none';
                 stepInfo.textContent = `Generating... (${numTokens} tokens)`;
                 updateStatus('generating', 'Generating...');
+                // Create AudioContext on user gesture (generate click)
+                audioCtx = new AudioContext({ sampleRate: tts.sampleRate });
+                nextStartTime = 0;
             },
             onChunk: (data, step) => {
-                audioChunks.push(new Float32Array(data));
+                const chunk = new Float32Array(data);
+                allChunks.push(chunk);
+                pendingChunks.push(chunk);
+                pendingSamples += chunk.length;
                 stepInfo.textContent = `Generating... step ${step + 1}`;
+
+                // Flush when we've accumulated enough for a batch
+                const batchSamples = (BATCH_MS / 1000) * tts.sampleRate;
+                if (pendingSamples >= batchSamples) {
+                    flushAudioBatch();
+                }
             },
             onDone: (totalSteps) => {
+                // Flush any remaining samples
+                flushAudioBatch();
+
                 generating = false;
                 generateBtn.disabled = false;
                 stepInfo.textContent = `Done — ${totalSteps} steps`;
                 updateStatus('ready', 'Ready');
 
-                // Concatenate all chunks
-                const totalLength = audioChunks.reduce((sum, c) => sum + c.length, 0);
+                // Build WAV for replay/download
+                const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
                 if (totalLength === 0) return;
-
-                console.log(`[audio] ${audioChunks.length} chunks, total ${totalLength} samples (${(totalLength/tts.sampleRate).toFixed(2)}s at ${tts.sampleRate}Hz)`);
 
                 const pcm = new Float32Array(totalLength);
                 let offset = 0;
-                for (const chunk of audioChunks) {
+                for (const chunk of allChunks) {
                     pcm.set(chunk, offset);
                     offset += chunk.length;
                 }
 
-                // Debug: PCM stats
-                let min = Infinity, max = -Infinity, nanCount = 0;
-                for (let i = 0; i < pcm.length; i++) {
-                    const v = pcm[i];
-                    if (isNaN(v)) { nanCount++; continue; }
-                    if (v < min) min = v;
-                    if (v > max) max = v;
-                }
-                console.log(`[audio] PCM min=${min.toFixed(6)} max=${max.toFixed(6)} nan=${nanCount}`);
-
-                // Encode to WAV and set as audio source
                 const wav = encodeWav(pcm, tts.sampleRate);
                 const blob = new Blob([wav], { type: 'audio/wav' });
                 const url = URL.createObjectURL(blob);
                 audioPlayer.src = url;
                 audioSection.style.display = 'block';
-                audioPlayer.play();
             }
         });
 
