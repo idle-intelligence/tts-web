@@ -5,6 +5,7 @@ export class TtsClient {
         this.onChunk = options.onChunk || (() => {});
         this.onDone = options.onDone || (() => {});
         this.onGenStart = options.onGenStart || (() => {});
+        this.onVoiceLoaded = options.onVoiceLoaded || (() => {});
 
         this.baseUrl = (options.baseUrl || '').replace(/\/+$/, '');
         this.workerUrl = options.workerUrl || (this.baseUrl + '/worker.js');
@@ -42,6 +43,11 @@ export class TtsClient {
         });
     }
 
+    loadVoice(name) {
+        if (!this._ready) throw new Error('Not initialized');
+        this.worker.postMessage({ type: 'load_voice', name });
+    }
+
     generate(text, temperature = 0.7) {
         if (!this._ready) throw new Error('Not initialized');
         this.worker.postMessage({ type: 'generate', text, temperature });
@@ -71,6 +77,9 @@ export class TtsClient {
                     this._pendingResolve = null;
                     this._pendingReject = null;
                 }
+                break;
+            case 'voice_loaded':
+                this.onVoiceLoaded(data.name, data.voiceIndex);
                 break;
             case 'gen_start':
                 this.onGenStart(data.numTokens);
