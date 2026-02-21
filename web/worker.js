@@ -218,7 +218,8 @@ async function handleLoad(config) {
     // 4. Ready (voice loaded separately)
     const sampleRate = model.sample_rate();
     post('status', { text: 'Select a voice', ready: true });
-    post('loaded', { sampleRate });}
+    post('loaded', { sampleRate });
+}
 
 async function handleLoadVoice(name) {
     if (name in voiceIndices) {
