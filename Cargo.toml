@@ -3,4 +3,5 @@ members = ["crates/tts-core", "crates/tts-wasm"]
 resolver = "3"
 
 [profile.release]
-debug = true
+lto = "fat"
+codegen-units = 1
