@@ -23,4 +23,11 @@ bun web/serve.mjs
 ## Architecture
 
 - **TTS model** (`crates/tts-wasm/`): Pocket TTS compiled to WebAssembly via Candle. Generates speech from text tokens using a voice embedding.
+- **[mimi-rs](https://github.com/idle-intelligence/mimi-rs)**: Shared Rust library for the Mimi audio codec (encoder + decoder + streaming transformer). Used by both tts-web and stt-web.
 - **Web UI** (`web/`): Web Worker orchestrates model loading and generation, streams audio chunks back to the main thread for real-time playback.
+
+## Quantization
+
+The model ships as INT8 safetensors (133MB). At load time, weights are dequantized to F32, loaded via candle's `VarBuilder`, then re-quantized to Q8\_0 in-place using `QMatMul`. This keeps ~97M quantized parameters as Q8\_0 in memory (~103MB vs ~388MB F32), reducing memory bandwidth ~4x per inference step.
+
+This INT8 → F32 → Q8\_0 roundtrip is an intermediary step. Future work: either go INT8 → Q8\_0 directly, or ship a GGUF model to skip dequantization entirely.
