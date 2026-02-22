@@ -1,6 +1,8 @@
 use crate::mlp::SimpleMLPAdaLN;
+use candle_core::quantized::GgmlDType;
 use candle_core::{DType, Result, Tensor};
-use candle_nn::{LayerNorm, Linear, Module, VarBuilder};
+use candle_nn::{LayerNorm, Module, VarBuilder};
+use mimi_rs::qlinear::QLinear;
 use mimi_rs::transformer::{Kind, StreamingTransformer, StreamingTransformerState};
 
 pub trait Rng {
@@ -80,9 +82,9 @@ pub struct FlowLM {
     pub emb_std: Tensor,
     pub emb_mean: Tensor,
     pub bos_emb: Tensor,
-    pub input_linear: Linear,
+    pub input_linear: QLinear,
     out_norm: LayerNorm,
-    out_eos: Linear,
+    out_eos: QLinear,
     pub dim: usize,
     pub ldim: usize,
 }
@@ -127,14 +129,14 @@ impl FlowLM {
         let emb_mean = vb.get((cfg.ldim,), "emb_mean")?;
         let bos_emb = vb.get((cfg.ldim,), "bos_emb")?;
         let input_linear =
-            candle_nn::linear_no_bias(cfg.ldim, cfg.d_model, vb.pp("input_linear"))?;
+            QLinear::from_linear(candle_nn::linear_no_bias(cfg.ldim, cfg.d_model, vb.pp("input_linear"))?);
 
         // Load out_norm weight/bias manually
         let out_norm_weight = vb.pp("out_norm").get((cfg.d_model,), "weight")?;
         let out_norm_bias = vb.pp("out_norm").get((cfg.d_model,), "bias")?;
         let out_norm = LayerNorm::new(out_norm_weight, out_norm_bias, 1e-5);
 
-        let out_eos = candle_nn::linear(cfg.d_model, 1, vb.pp("out_eos"))?;
+        let out_eos = QLinear::from_linear(candle_nn::linear(cfg.d_model, 1, vb.pp("out_eos"))?);
 
         Ok(Self {
             conditioner,
@@ -154,6 +156,14 @@ impl FlowLM {
     pub fn init_state(&self) -> FlowLMState {
         let transformer_state = self.transformer.init_state();
         FlowLMState { transformer_state }
+    }
+
+    pub fn quantize_weights(&mut self, dtype: GgmlDType) -> Result<()> {
+        self.input_linear.quantize_in_place(dtype)?;
+        self.out_eos.quantize_in_place(dtype)?;
+        self.flow_net.quantize_weights(dtype)?;
+        self.transformer.quantize_weights(dtype)?;
+        Ok(())
     }
 
     /// Run the backbone: concat text_embeddings + input, run transformer, strip prefix.

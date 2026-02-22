@@ -68,8 +68,10 @@ impl Model {
         let dequantized_bytes = mimi_rs::dequantize::dequantize_and_remap(model_weights);
         let vb = VarBuilder::from_buffered_safetensors(dequantized_bytes, DType::F32, &Device::Cpu)?;
         let cfg = tts_core::config::TTSConfig::v202601(0.7);
-        let inner = tts_core::tts_model::TTSModel::load(vb, &cfg)?;
+        let mut inner = tts_core::tts_model::TTSModel::load(vb, &cfg)?;
         console_log!("[Model::new] model loaded");
+        inner.quantize_weights()?;
+        console_log!("[Model::new] weights quantized to Q8_0");
 
         Ok(Model { inner, cfg, gen_state: None, voice_states: Vec::new() })
     }

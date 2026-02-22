@@ -1,5 +1,6 @@
 use crate::config::TTSConfig;
 use crate::flow_lm::{FlowLM, FlowLMState, Rng};
+use candle_core::quantized::GgmlDType;
 use candle_core::{Device, Result, Tensor};
 use candle_nn::{Module, VarBuilder};
 use mimi_rs::mimi::{MimiModel, MimiState};
@@ -27,6 +28,13 @@ impl TTSModel {
             lsd_decode_steps: cfg.lsd_decode_steps,
             eos_threshold: cfg.eos_threshold,
         })
+    }
+
+    pub fn quantize_weights(&mut self) -> Result<()> {
+        self.flow_lm.quantize_weights(GgmlDType::Q8_0)?;
+        self.mimi.quantize_encoder_transformer(GgmlDType::Q8_0)?;
+        self.mimi.quantize_decoder_transformer(GgmlDType::Q8_0)?;
+        Ok(())
     }
 
     pub fn sample_rate(&self) -> usize {

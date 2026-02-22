@@ -1,5 +1,7 @@
+use candle_core::quantized::GgmlDType;
 use candle_core::{DType, Result, Tensor, D};
-use candle_nn::{LayerNorm, LayerNormConfig, Linear, Module, VarBuilder};
+use candle_nn::{LayerNorm, LayerNormConfig, Module, VarBuilder};
+use mimi_rs::qlinear::QLinear;
 
 fn modulate(x: &Tensor, shift: &Tensor, scale: &Tensor) -> Result<Tensor> {
     let one_plus_scale = (scale + 1.0f64)?;
@@ -26,8 +28,8 @@ fn variance_norm(x: &Tensor, weight: &Tensor, eps: f64) -> Result<Tensor> {
 // ---- TimestepEmbedder ----
 
 pub struct TimestepEmbedder {
-    linear1: Linear,
-    linear2: Linear,
+    linear1: QLinear,
+    linear2: QLinear,
     rms_weight: Tensor,
     freqs: Tensor,
 }
@@ -39,8 +41,8 @@ impl TimestepEmbedder {
         frequency_embedding_size: usize,
     ) -> Result<Self> {
         let mlp = vb.pp("mlp");
-        let linear1 = candle_nn::linear(frequency_embedding_size, hidden_size, mlp.pp("0"))?;
-        let linear2 = candle_nn::linear(hidden_size, hidden_size, mlp.pp("2"))?;
+        let linear1 = QLinear::from_linear(candle_nn::linear(frequency_embedding_size, hidden_size, mlp.pp("0"))?);
+        let linear2 = QLinear::from_linear(candle_nn::linear(hidden_size, hidden_size, mlp.pp("2"))?);
 
         // Load RMSNorm weight (stored under "3.alpha")
         let rms_weight = mlp.get((hidden_size,), "3.alpha")?;
@@ -48,6 +50,12 @@ impl TimestepEmbedder {
         let freqs = vb.get((frequency_embedding_size / 2,), "freqs")?;
 
         Ok(Self { linear1, linear2, rms_weight, freqs })
+    }
+
+    pub fn quantize_weights(&mut self, dtype: GgmlDType) -> Result<()> {
+        self.linear1.quantize_in_place(dtype)?;
+        self.linear2.quantize_in_place(dtype)?;
+        Ok(())
     }
 
     pub fn forward(&self, t: &Tensor) -> Result<Tensor> {
@@ -70,9 +78,9 @@ impl TimestepEmbedder {
 
 pub struct ResBlock {
     in_ln: LayerNorm,
-    mlp_linear1: Linear,
-    mlp_linear2: Linear,
-    ada_ln_silu_linear: Linear,
+    mlp_linear1: QLinear,
+    mlp_linear2: QLinear,
+    ada_ln_silu_linear: QLinear,
 }
 
 impl ResBlock {
@@ -83,11 +91,18 @@ impl ResBlock {
             vb.pp("in_ln"),
         )?;
         let mlp = vb.pp("mlp");
-        let mlp_linear1 = candle_nn::linear(channels, channels, mlp.pp("0"))?;
-        let mlp_linear2 = candle_nn::linear(channels, channels, mlp.pp("2"))?;
+        let mlp_linear1 = QLinear::from_linear(candle_nn::linear(channels, channels, mlp.pp("0"))?);
+        let mlp_linear2 = QLinear::from_linear(candle_nn::linear(channels, channels, mlp.pp("2"))?);
         let ada = vb.pp("adaLN_modulation");
-        let ada_ln_silu_linear = candle_nn::linear(channels, 3 * channels, ada.pp("1"))?;
+        let ada_ln_silu_linear = QLinear::from_linear(candle_nn::linear(channels, 3 * channels, ada.pp("1"))?);
         Ok(Self { in_ln, mlp_linear1, mlp_linear2, ada_ln_silu_linear })
+    }
+
+    pub fn quantize_weights(&mut self, dtype: GgmlDType) -> Result<()> {
+        self.mlp_linear1.quantize_in_place(dtype)?;
+        self.mlp_linear2.quantize_in_place(dtype)?;
+        self.ada_ln_silu_linear.quantize_in_place(dtype)?;
+        Ok(())
     }
 
     pub fn forward(&self, x: &Tensor, y: &Tensor) -> Result<Tensor> {
@@ -113,8 +128,8 @@ impl ResBlock {
 
 pub struct FinalLayer {
     norm_final: LayerNorm,
-    linear: Linear,
-    ada_ln_silu_linear: Linear,
+    linear: QLinear,
+    ada_ln_silu_linear: QLinear,
 }
 
 impl FinalLayer {
@@ -124,11 +139,17 @@ impl FinalLayer {
         let ones = Tensor::ones((model_channels,), dtype, &dev)?;
         let zeros = Tensor::zeros((model_channels,), dtype, &dev)?;
         let norm_final = LayerNorm::new(ones, zeros, 1e-6);
-        let linear = candle_nn::linear(model_channels, out_channels, vb.pp("linear"))?;
+        let linear = QLinear::from_linear(candle_nn::linear(model_channels, out_channels, vb.pp("linear"))?);
         let ada = vb.pp("adaLN_modulation");
         let ada_ln_silu_linear =
-            candle_nn::linear(model_channels, 2 * model_channels, ada.pp("1"))?;
+            QLinear::from_linear(candle_nn::linear(model_channels, 2 * model_channels, ada.pp("1"))?);
         Ok(Self { norm_final, linear, ada_ln_silu_linear })
+    }
+
+    pub fn quantize_weights(&mut self, dtype: GgmlDType) -> Result<()> {
+        self.linear.quantize_in_place(dtype)?;
+        self.ada_ln_silu_linear.quantize_in_place(dtype)?;
+        Ok(())
     }
 
     pub fn forward(&self, x: &Tensor, c: &Tensor) -> Result<Tensor> {
@@ -147,8 +168,8 @@ impl FinalLayer {
 
 pub struct SimpleMLPAdaLN {
     time_embeds: Vec<TimestepEmbedder>,
-    cond_embed: Linear,
-    input_proj: Linear,
+    cond_embed: QLinear,
+    input_proj: QLinear,
     res_blocks: Vec<ResBlock>,
     final_layer: FinalLayer,
     pub num_time_conds: usize,
@@ -174,9 +195,10 @@ impl SimpleMLPAdaLN {
         }
 
         let cond_embed =
-            candle_nn::linear(cond_channels, model_channels, vb.pp("cond_embed"))?;
+            QLinear::from_linear(candle_nn::linear(cond_channels, model_channels, vb.pp("cond_embed"))?);
         let input_proj =
-            candle_nn::linear(in_channels, model_channels, vb.pp("input_proj"))?;
+            QLinear::from_linear(candle_nn::linear(in_channels, model_channels, vb.pp("input_proj"))?);
+
 
         let mut res_blocks = Vec::new();
         for i in 0..num_res_blocks {
@@ -195,6 +217,19 @@ impl SimpleMLPAdaLN {
             final_layer,
             num_time_conds,
         })
+    }
+
+    pub fn quantize_weights(&mut self, dtype: GgmlDType) -> Result<()> {
+        self.cond_embed.quantize_in_place(dtype)?;
+        self.input_proj.quantize_in_place(dtype)?;
+        for embed in &mut self.time_embeds {
+            embed.quantize_weights(dtype)?;
+        }
+        for block in &mut self.res_blocks {
+            block.quantize_weights(dtype)?;
+        }
+        self.final_layer.quantize_weights(dtype)?;
+        Ok(())
     }
 
     /// Forward pass.
