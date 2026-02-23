@@ -268,9 +268,8 @@
         <p class="org"><img src="apple-touch-icon.png" alt="II">idle intelligence</p>
         <h1>tts-web</h1>
         <p class="tagline">
-            Quantized to int8.
             <a href="https://github.com/kyutai-labs/pocket-tts">Pocket TTS</a>
-            running in the browser via WebAssembly using
+            quantized to Q8_0 (GGUF), running in the browser via WebAssembly using
             <a href="https://github.com/huggingface/candle">Candle</a>
         </p>
         <p class="repo">
@@ -396,9 +395,15 @@
         });
 
         // Check if model is already cached
-        const MODEL_CACHE = 'tts-model-v1';
-        const MODEL_CHECK_URL = 'https://huggingface.co/idle-intelligence/pocket-tts-int8/resolve/main/model.safetensors';
+        // Detect local dev server (not deployed to GitHub Pages)
+        const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+        const MODEL_CACHE = 'tts-model-v2';
+        const MODEL_CHECK_URL = isLocal
+            ? `${location.origin}/pocket-tts-q8_0.gguf`
+            : 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main/pocket-tts-q8_0.gguf';
         async function isModelCached() {
+            if (isLocal) return true; // always available from dev server
             try {
                 const cache = await caches.open(MODEL_CACHE);
                 return !!(await cache.match(MODEL_CHECK_URL));
@@ -437,6 +442,10 @@
         function makeClient() {
             return new TtsClient({
                 workerUrl: './worker.js',
+                ...(isLocal ? {
+                    modelUrl: '/pocket-tts-q8_0.gguf',
+                    tokenizerUrl: '/tokenizer.model',
+                } : {}),
                 onVoiceLoaded: (name) => {
                     loadingVoice = false;
                     activeVoice = name;

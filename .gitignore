@@ -1,6 +1,8 @@
 /refs
 /.venv
 *.safetensors
+*.gguf
+tokenizer.model
 /target
 __pycache__/
 *.pyc

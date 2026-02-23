@@ -26,6 +26,7 @@ const MIME = {
     ".bin":  "application/octet-stream",
     ".safetensors": "application/octet-stream",
     ".model": "application/octet-stream",
+    ".gguf":  "application/octet-stream",
 };
 
 const server = createServer((req, res) => {
@@ -43,6 +44,9 @@ const server = createServer((req, res) => {
     } else if (pathname.startsWith("/pkg/")) {
         // WASM build output from crates/tts-wasm/pkg/
         filePath = join(ROOT, "crates/tts-wasm", pathname);
+    } else if (pathname.endsWith(".gguf") || pathname === "/tokenizer.model") {
+        // Model files served from repo root
+        filePath = join(ROOT, pathname);
     } else {
         filePath = join(ROOT, "web", pathname);
     }
