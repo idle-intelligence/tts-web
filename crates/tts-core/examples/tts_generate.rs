@@ -9,8 +9,7 @@
 ///
 /// Writes a Float32 PCM WAV at 24000 Hz (mono).
 
-use candle_core::{DType, Device, Result as CResult, Tensor};
-use candle_nn::VarBuilder;
+use candle_core::{Device, Result as CResult, Tensor};
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};
 use tts_core::flow_lm::{FlowLMState, Rng};
 use tts_core::tts_model::{TTSState, prepare_text_prompt};
@@ -175,12 +174,9 @@ fn run() -> CResult<()> {
         .map_err(|e| candle_core::Error::Msg(format!("failed to read model: {e}")))?;
     eprintln!("  read {} MB", model_bytes.len() / (1024 * 1024));
 
-    let dequantized = mimi_rs::dequantize::dequantize_and_remap(&model_bytes);
-    eprintln!("  dequantized: {} MB", dequantized.len() / (1024 * 1024));
-
-    let vb = VarBuilder::from_buffered_safetensors(dequantized, DType::F32, &Device::Cpu)?;
+    let mut gguf = mimi_rs::gguf_loader::GgufTensors::from_bytes(&model_bytes, &Device::Cpu)?;
     let cfg = tts_core::config::TTSConfig::v202601(args.temperature);
-    let model = tts_core::tts_model::TTSModel::load(vb, &cfg)?;
+    let model = tts_core::tts_model::TTSModel::load_gguf(&mut gguf, &cfg)?;
 
     let sample_rate = model.sample_rate() as u32;
     eprintln!("  model loaded OK (sample_rate={})", sample_rate);

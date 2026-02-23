@@ -2,6 +2,9 @@
 members = ["crates/tts-core", "crates/tts-wasm"]
 resolver = "3"
 
+[patch."https://github.com/idle-intelligence/mimi-rs.git"]
+mimi-rs = { path = "../mimi-rs" }
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

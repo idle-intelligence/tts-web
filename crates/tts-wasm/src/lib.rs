@@ -1,5 +1,4 @@
-use candle_core::{DType, Device, Result as CResult, Tensor};
-use candle_nn::VarBuilder;
+use candle_core::{Device, Result as CResult, Tensor};
 use mimi_rs::mimi::MimiState;
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};
 use tts_core::flow_lm::{FlowLMState, Rng};
@@ -65,14 +64,10 @@ pub struct Model {
 
 impl Model {
     fn new_(model_weights: &[u8]) -> CResult<Model> {
-        let dequantized_bytes = mimi_rs::dequantize::dequantize_and_remap(model_weights);
-        let vb = VarBuilder::from_buffered_safetensors(dequantized_bytes, DType::F32, &Device::Cpu)?;
+        let mut gguf = mimi_rs::gguf_loader::GgufTensors::from_bytes(model_weights, &Device::Cpu)?;
         let cfg = tts_core::config::TTSConfig::v202601(0.7);
-        let mut inner = tts_core::tts_model::TTSModel::load(vb, &cfg)?;
-        console_log!("[Model::new] model loaded");
-        inner.quantize_weights()?;
-        console_log!("[Model::new] weights quantized to Q8_0");
-
+        let inner = tts_core::tts_model::TTSModel::load_gguf(&mut gguf, &cfg)?;
+        console_log!("[Model::new] model loaded from GGUF (Q8_0)");
         Ok(Model { inner, cfg, gen_state: None, voice_states: Vec::new() })
     }
 

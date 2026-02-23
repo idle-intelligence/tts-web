@@ -1,6 +1,6 @@
-use candle_core::quantized::GgmlDType;
 use candle_core::{DType, Result, Tensor, D};
 use candle_nn::{LayerNorm, LayerNormConfig, Module, VarBuilder};
+use mimi_rs::gguf_loader::GgufTensors;
 use mimi_rs::qlinear::QLinear;
 
 fn modulate(x: &Tensor, shift: &Tensor, scale: &Tensor) -> Result<Tensor> {
@@ -52,10 +52,13 @@ impl TimestepEmbedder {
         Ok(Self { linear1, linear2, rms_weight, freqs })
     }
 
-    pub fn quantize_weights(&mut self, dtype: GgmlDType) -> Result<()> {
-        self.linear1.quantize_in_place(dtype)?;
-        self.linear2.quantize_in_place(dtype)?;
-        Ok(())
+    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, hidden_size: usize, frequency_embedding_size: usize) -> Result<Self> {
+        let mlp_prefix = format!("{prefix}.mlp");
+        let linear1 = gguf.qlinear(&format!("{mlp_prefix}.0"))?;
+        let linear2 = gguf.qlinear(&format!("{mlp_prefix}.2"))?;
+        let rms_weight = gguf.tensor(&format!("{mlp_prefix}.3.alpha"))?;
+        let freqs = gguf.tensor(&format!("{prefix}.freqs"))?;
+        Ok(Self { linear1, linear2, rms_weight, freqs })
     }
 
     pub fn forward(&self, t: &Tensor) -> Result<Tensor> {
@@ -98,15 +101,20 @@ impl ResBlock {
         Ok(Self { in_ln, mlp_linear1, mlp_linear2, ada_ln_silu_linear })
     }
 
-    pub fn quantize_weights(&mut self, dtype: GgmlDType) -> Result<()> {
-        self.mlp_linear1.quantize_in_place(dtype)?;
-        self.mlp_linear2.quantize_in_place(dtype)?;
-        self.ada_ln_silu_linear.quantize_in_place(dtype)?;
-        Ok(())
+    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, channels: usize) -> Result<Self> {
+        let in_ln_w = gguf.tensor(&format!("{prefix}.in_ln.weight"))?;
+        let in_ln_b = gguf.tensor(&format!("{prefix}.in_ln.bias"))?;
+        let in_ln = LayerNorm::new(in_ln_w, in_ln_b, 1e-6);
+        let mlp_prefix = format!("{prefix}.mlp");
+        let mlp_linear1 = gguf.qlinear(&format!("{mlp_prefix}.0"))?;
+        let mlp_linear2 = gguf.qlinear(&format!("{mlp_prefix}.2"))?;
+        let ada_prefix = format!("{prefix}.adaLN_modulation");
+        let ada_ln_silu_linear = gguf.qlinear(&format!("{ada_prefix}.1"))?;
+        Ok(Self { in_ln, mlp_linear1, mlp_linear2, ada_ln_silu_linear })
     }
 
-    pub fn forward(&self, x: &Tensor, y: &Tensor) -> Result<Tensor> {
-        let ada = self.ada_ln_silu_linear.forward(&y.silu()?)?;
+    pub fn forward(&self, x: &Tensor, y_silu: &Tensor) -> Result<Tensor> {
+        let ada = self.ada_ln_silu_linear.forward(y_silu)?;
         let channels = x.dim(D::Minus1)?;
         let shift_mlp = ada.narrow(D::Minus1, 0, channels)?.contiguous()?;
         let scale_mlp = ada.narrow(D::Minus1, channels, channels)?.contiguous()?;
@@ -146,14 +154,19 @@ impl FinalLayer {
         Ok(Self { norm_final, linear, ada_ln_silu_linear })
     }
 
-    pub fn quantize_weights(&mut self, dtype: GgmlDType) -> Result<()> {
-        self.linear.quantize_in_place(dtype)?;
-        self.ada_ln_silu_linear.quantize_in_place(dtype)?;
-        Ok(())
+    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, model_channels: usize, out_channels: usize) -> Result<Self> {
+        let device = gguf.device.clone();
+        let ones = Tensor::ones((model_channels,), DType::F32, &device)?;
+        let zeros = Tensor::zeros((model_channels,), DType::F32, &device)?;
+        let norm_final = LayerNorm::new(ones, zeros, 1e-6);
+        let linear = gguf.qlinear(&format!("{prefix}.linear"))?;
+        let ada_prefix = format!("{prefix}.adaLN_modulation");
+        let ada_ln_silu_linear = gguf.qlinear(&format!("{ada_prefix}.1"))?;
+        Ok(Self { norm_final, linear, ada_ln_silu_linear })
     }
 
-    pub fn forward(&self, x: &Tensor, c: &Tensor) -> Result<Tensor> {
-        let ada = self.ada_ln_silu_linear.forward(&c.silu()?)?;
+    pub fn forward(&self, x: &Tensor, c_silu: &Tensor) -> Result<Tensor> {
+        let ada = self.ada_ln_silu_linear.forward(c_silu)?;
         let model_channels = x.dim(D::Minus1)?;
         let shift = ada.narrow(D::Minus1, 0, model_channels)?.contiguous()?;
         let scale = ada.narrow(D::Minus1, model_channels, model_channels)?.contiguous()?;
@@ -219,17 +232,26 @@ impl SimpleMLPAdaLN {
         })
     }
 
-    pub fn quantize_weights(&mut self, dtype: GgmlDType) -> Result<()> {
-        self.cond_embed.quantize_in_place(dtype)?;
-        self.input_proj.quantize_in_place(dtype)?;
-        for embed in &mut self.time_embeds {
-            embed.quantize_weights(dtype)?;
+    pub fn load_gguf(
+        gguf: &mut GgufTensors, prefix: &str,
+        in_channels: usize, model_channels: usize, out_channels: usize,
+        cond_channels: usize, num_res_blocks: usize, num_time_conds: usize,
+    ) -> Result<Self> {
+        let mut time_embeds = Vec::new();
+        for i in 0..num_time_conds {
+            time_embeds.push(TimestepEmbedder::load_gguf(
+                gguf, &format!("{prefix}.time_embed.{i}"),
+                model_channels, 256,
+            )?);
         }
-        for block in &mut self.res_blocks {
-            block.quantize_weights(dtype)?;
+        let cond_embed = gguf.qlinear(&format!("{prefix}.cond_embed"))?;
+        let input_proj = gguf.qlinear(&format!("{prefix}.input_proj"))?;
+        let mut res_blocks = Vec::new();
+        for i in 0..num_res_blocks {
+            res_blocks.push(ResBlock::load_gguf(gguf, &format!("{prefix}.res_blocks.{i}"), model_channels)?);
         }
-        self.final_layer.quantize_weights(dtype)?;
-        Ok(())
+        let final_layer = FinalLayer::load_gguf(gguf, &format!("{prefix}.final_layer"), model_channels, out_channels)?;
+        Ok(Self { time_embeds, cond_embed, input_proj, res_blocks, final_layer, num_time_conds })
     }
 
     /// Forward pass.
@@ -247,9 +269,10 @@ impl SimpleMLPAdaLN {
 
         let c = self.cond_embed.forward(c)?;
         let y = (&t_combined + &c)?;
+        let y_silu = y.silu()?;
         for block in &self.res_blocks {
-            x = block.forward(&x, &y)?;
+            x = block.forward(&x, &y_silu)?;
         }
-        self.final_layer.forward(&x, &y)
+        self.final_layer.forward(&x, &y_silu)
     }
 }

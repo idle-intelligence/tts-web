@@ -1,8 +1,8 @@
 use crate::config::TTSConfig;
 use crate::flow_lm::{FlowLM, FlowLMState, Rng};
-use candle_core::quantized::GgmlDType;
 use candle_core::{Device, Result, Tensor};
 use candle_nn::{Module, VarBuilder};
+use mimi_rs::gguf_loader::GgufTensors;
 use mimi_rs::mimi::{MimiModel, MimiState};
 
 pub struct TTSModel {
@@ -30,11 +30,14 @@ impl TTSModel {
         })
     }
 
-    pub fn quantize_weights(&mut self) -> Result<()> {
-        self.flow_lm.quantize_weights(GgmlDType::Q8_0)?;
-        self.mimi.quantize_encoder_transformer(GgmlDType::Q8_0)?;
-        self.mimi.quantize_decoder_transformer(GgmlDType::Q8_0)?;
-        Ok(())
+    pub fn load_gguf(gguf: &mut GgufTensors, cfg: &TTSConfig) -> Result<Self> {
+        let flow_lm = FlowLM::load_gguf(gguf, "flow_lm", &cfg.flow_lm)?;
+        let mimi = MimiModel::load_gguf(gguf, "mimi", &cfg.mimi)?;
+        Ok(Self {
+            flow_lm, mimi,
+            lsd_decode_steps: cfg.lsd_decode_steps,
+            eos_threshold: cfg.eos_threshold,
+        })
     }
 
     pub fn sample_rate(&self) -> usize {
@@ -89,30 +92,14 @@ impl TTSModel {
         latent: &Tensor,
         mimi_state: &mut MimiState,
     ) -> Result<Tensor> {
-        {
-            let d = latent.flatten_all()?.to_vec1::<f32>()?;
-            let std = self.flow_lm.emb_std.to_vec1::<f32>()?;
-            let mean = self.flow_lm.emb_mean.to_vec1::<f32>()?;
-            eprintln!("[DECODE] latent: first4={:?} emb_std: first4={:?} emb_mean: first4={:?}",
-                &d[..4.min(d.len())], &std[..4.min(std.len())], &mean[..4.min(mean.len())]);
-        }
         let denorm = latent
             .broadcast_mul(&self.flow_lm.emb_std)?
             .broadcast_add(&self.flow_lm.emb_mean)?;
-        {
-            let d = denorm.flatten_all()?.to_vec1::<f32>()?;
-            eprintln!("[DECODE] denorm: first8={:?}", &d[..8.min(d.len())]);
-        }
 
         // [B, T, C] -> [B, C, T]
         let transposed = denorm.transpose(1, 2)?.contiguous()?;
         // DummyQuantizer: project latent [B, quantizer_dim, T] -> [B, output_dim, T]
-        let quantized = self.mimi.quantizer.forward(&transposed)?;
-        {
-            let d = quantized.flatten_all()?.to_vec1::<f32>()?;
-            eprintln!("[DECODE] quantized: shape={:?} first8={:?} last4={:?}",
-                quantized.shape(), &d[..8.min(d.len())], &d[d.len().saturating_sub(4)..]);
-        }
+        let quantized = self.mimi.quantizer_forward(&transposed)?;
         self.mimi.decode_from_latent(&quantized, mimi_state)
     }
 

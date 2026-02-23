@@ -1,7 +1,7 @@
 use crate::mlp::SimpleMLPAdaLN;
-use candle_core::quantized::GgmlDType;
 use candle_core::{DType, Result, Tensor};
 use candle_nn::{LayerNorm, Module, VarBuilder};
+use mimi_rs::gguf_loader::GgufTensors;
 use mimi_rs::qlinear::QLinear;
 use mimi_rs::transformer::{Kind, StreamingTransformer, StreamingTransformerState};
 
@@ -22,6 +22,11 @@ pub struct LUTConditioner {
 impl LUTConditioner {
     pub fn load(vb: VarBuilder, n_bins: usize, dim: usize, output_dim: usize) -> Result<Self> {
         let embed = vb.get((n_bins + 1, dim), "embed.weight")?;
+        Ok(Self { embed, dim, output_dim })
+    }
+
+    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, n_bins: usize, dim: usize, output_dim: usize) -> Result<Self> {
+        let embed = gguf.tensor(&format!("{prefix}.embed.weight"))?;
         Ok(Self { embed, dim, output_dim })
     }
 
@@ -158,12 +163,35 @@ impl FlowLM {
         FlowLMState { transformer_state }
     }
 
-    pub fn quantize_weights(&mut self, dtype: GgmlDType) -> Result<()> {
-        self.input_linear.quantize_in_place(dtype)?;
-        self.out_eos.quantize_in_place(dtype)?;
-        self.flow_net.quantize_weights(dtype)?;
-        self.transformer.quantize_weights(dtype)?;
-        Ok(())
+    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, cfg: &crate::config::FlowLMConfig) -> Result<Self> {
+        let conditioner = LUTConditioner::load_gguf(gguf, &format!("{prefix}.conditioner"), cfg.n_bins, cfg.lut_dim, cfg.d_model)?;
+
+        let flow_net = SimpleMLPAdaLN::load_gguf(
+            gguf, &format!("{prefix}.flow_net"),
+            cfg.ldim, cfg.flow_dim, cfg.ldim, cfg.d_model, cfg.flow_depth, 2,
+        )?;
+
+        let transformer = StreamingTransformer::load_gguf(
+            gguf, &format!("{prefix}.transformer"),
+            cfg.d_model, cfg.num_heads, cfg.num_layers, None, cfg.dim_feedforward,
+            None, cfg.max_period, Kind::FlowLm,
+        )?;
+
+        let emb_std = gguf.tensor(&format!("{prefix}.emb_std"))?;
+        let emb_mean = gguf.tensor(&format!("{prefix}.emb_mean"))?;
+        let bos_emb = gguf.tensor(&format!("{prefix}.bos_emb"))?;
+        let input_linear = gguf.qlinear(&format!("{prefix}.input_linear"))?;
+
+        let out_norm_weight = gguf.tensor(&format!("{prefix}.out_norm.weight"))?;
+        let out_norm_bias = gguf.tensor(&format!("{prefix}.out_norm.bias"))?;
+        let out_norm = LayerNorm::new(out_norm_weight, out_norm_bias, 1e-5);
+
+        let out_eos = gguf.qlinear(&format!("{prefix}.out_eos"))?;
+
+        Ok(Self {
+            conditioner, flow_net, transformer, emb_std, emb_mean, bos_emb,
+            input_linear, out_norm, out_eos, dim: cfg.d_model, ldim: cfg.ldim,
+        })
     }
 
     /// Run the backbone: concat text_embeddings + input, run transformer, strip prefix.
