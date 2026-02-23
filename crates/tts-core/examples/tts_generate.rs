@@ -20,7 +20,7 @@ use tts_core::tts_model::{TTSState, prepare_text_prompt};
 
 struct Args {
     model_path: String,
-    voice_path: String,
+    voice_path: Option<String>,
     output_path: String,
     temperature: f32,
 }
@@ -61,7 +61,7 @@ fn parse_args() -> Args {
 
     Args {
         model_path: model_path.expect("--model required"),
-        voice_path: voice_path.expect("--voice required"),
+        voice_path,
         output_path: output_path.expect("--output required"),
         temperature,
     }
@@ -164,7 +164,7 @@ fn run() -> CResult<()> {
 
     eprintln!("=== TTS Generate ===");
     eprintln!("model: {}", args.model_path);
-    eprintln!("voice: {}", args.voice_path);
+    eprintln!("voice: {:?}", args.voice_path);
     eprintln!("output: {}", args.output_path);
     eprintln!("temperature: {}", args.temperature);
 
@@ -182,48 +182,66 @@ fn run() -> CResult<()> {
     eprintln!("  model loaded OK (sample_rate={})", sample_rate);
     eprintln!("  ldim={} dim={}", cfg.flow_lm.ldim, cfg.flow_lm.d_model);
 
-    // --- Load voice ---
-    eprintln!("\n[2] Loading voice from {}...", args.voice_path);
-    let voice_bytes = std::fs::read(&args.voice_path)
-        .map_err(|e| candle_core::Error::Msg(format!("failed to read voice: {e}")))?;
-    eprintln!("  read {} KB", voice_bytes.len() / 1024);
+    // --- Load voice (optional) ---
+    let voice_state = if let Some(ref voice_path) = args.voice_path {
+        eprintln!("\n[2] Loading voice from {}...", voice_path);
+        let voice_bytes = std::fs::read(voice_path)
+            .map_err(|e| candle_core::Error::Msg(format!("failed to read voice: {e}")))?;
+        eprintln!("  read {} KB", voice_bytes.len() / 1024);
 
-    let tensors = candle_core::safetensors::load_buffer(&voice_bytes, &Device::Cpu)?;
-    eprintln!("  loaded {} tensors from voice file", tensors.len());
+        let tensors = candle_core::safetensors::load_buffer(&voice_bytes, &Device::Cpu)?;
+        eprintln!("  loaded {} tensors from voice file", tensors.len());
 
-    let num_layers = 6usize;
-    let mut layer_states = Vec::with_capacity(num_layers);
+        // Check format: KV cache (per-layer) or audio_prompt (single tensor)
+        if tensors.contains_key("audio_prompt") {
+            // audio_prompt format: feed through backbone to build KV cache
+            let audio_prompt = tensors.get("audio_prompt").unwrap();
+            eprintln!("  audio_prompt shape: {:?}", audio_prompt.shape());
+            let mut state = model.init_flow_lm_state();
+            model.prompt_text(&mut state, &[])?; // no text tokens, but we need to init
+            // Feed audio_prompt as backbone input (it's already in embedding space)
+            // For now, use prompt_text with empty tokens + backbone directly
+            eprintln!("  WARN: audio_prompt voice format not yet supported for backbone injection");
+            eprintln!("  Using empty state instead");
+            model.init_flow_lm_state()
+        } else {
+            // KV cache format
+            let num_layers = 6usize;
+            let mut layer_states = Vec::with_capacity(num_layers);
 
-    for i in 0..num_layers {
-        let cache_name = format!("transformer.layers.{i}.self_attn/cache");
-        let cache = tensors
-            .get(&cache_name)
-            .ok_or_else(|| candle_core::Error::Msg(format!("missing tensor: {cache_name}")))?;
+            for i in 0..num_layers {
+                let cache_name = format!("transformer.layers.{i}.self_attn/cache");
+                let cache = tensors
+                    .get(&cache_name)
+                    .ok_or_else(|| candle_core::Error::Msg(format!("missing tensor: {cache_name}")))?;
 
-        // cache shape: [2, 1, seq_len, num_heads, head_dim]
-        // k = index 0, v = index 1; squeeze batch dim
-        let k = cache.narrow(0, 0, 1)?.squeeze(0)?; // [1, seq_len, H, D]
-        let v = cache.narrow(0, 1, 1)?.squeeze(0)?;
+                let k = cache.narrow(0, 0, 1)?.squeeze(0)?;
+                let v = cache.narrow(0, 1, 1)?.squeeze(0)?;
+                let seq_len = k.dim(1)?;
 
-        let seq_len = k.dim(1)?;
-        if i == 0 {
-            eprintln!("  voice seq_len from layer 0: {seq_len}");
-            eprintln!("  k shape: {:?}", k.shape());
+                if i == 0 {
+                    eprintln!("  voice seq_len from layer 0: {seq_len}");
+                    eprintln!("  k shape: {:?}", k.shape());
+                }
+
+                layer_states.push(LayerAttentionState::FlowLm(StreamingMHAState::with_kv(
+                    k.contiguous()?,
+                    v.contiguous()?,
+                    seq_len,
+                )));
+            }
+
+            TTSState {
+                flow_lm_state: FlowLMState {
+                    transformer_state: StreamingTransformerState { layer_states },
+                },
+            }
         }
-
-        layer_states.push(LayerAttentionState::FlowLm(StreamingMHAState::with_kv(
-            k.contiguous()?,
-            v.contiguous()?,
-            seq_len,
-        )));
-    }
-
-    let voice_state = TTSState {
-        flow_lm_state: FlowLMState {
-            transformer_state: StreamingTransformerState { layer_states },
-        },
+    } else {
+        eprintln!("\n[2] No voice file, using empty state");
+        model.init_flow_lm_state()
     };
-    eprintln!("  voice loaded OK ({num_layers} layers)");
+    eprintln!("  voice state ready");
 
     // --- Prepare text and token IDs ---
     eprintln!("\n[3] Preparing text...");

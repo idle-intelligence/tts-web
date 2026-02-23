@@ -396,12 +396,19 @@ def main() -> None:
     writer.add_uint32("pocket-tts.frame_rate", 12)
 
     # Add Q8_0 tensors
+    # gguf library expects ndarray shaped so last dim is a multiple of
+    # Q8_0 type_size (34 bytes).  quant_shape_from_byte_shape then
+    # converts byte-shape -> logical element shape in the metadata.
     n_q8 = 0
     for name, (raw_bytes, shape) in sorted(q8_raw.items()):
+        data = np.frombuffer(raw_bytes, dtype=np.uint8)
+        # Reshape: [..., ceil(cols/32)*34] so the library can infer logical shape
+        n_last_blocks = (shape[-1] + BLOCK_SIZE - 1) // BLOCK_SIZE
+        byte_shape = list(shape[:-1]) + [n_last_blocks * BYTES_PER_BLOCK]
+        data = data.reshape(byte_shape)
         writer.add_tensor(
             name,
-            raw_bytes,
-            shape,
+            data,
             raw_dtype=gguf.GGMLQuantizationType.Q8_0,
         )
         n_q8 += 1
