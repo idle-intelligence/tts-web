@@ -1,4 +1,4 @@
-const HF_BASE = 'https://huggingface.co/idle-intelligence/pocket-tts-int8/resolve/main';
+const HF_BASE = 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main';
 const VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
 
 let model = null;
@@ -11,7 +11,7 @@ function post(type, data = {}, transferables = []) {
 }
 
 // ---- Fetch with Cache API + progress ----
-const CACHE_NAME = 'tts-model-v1';
+const CACHE_NAME = 'tts-model-v2';
 
 async function cachedFetch(url, label) {
     const cache = await caches.open(CACHE_NAME);
@@ -210,7 +210,7 @@ async function handleLoad(config) {
     post('status', { text: `Tokenizer loaded (${pieces.length} pieces)` });
 
     // 3. Download and init model
-    const modelUrl = config.modelUrl || `${HF_BASE}/model.safetensors`;
+    const modelUrl = config.modelUrl || `${HF_BASE}/pocket-tts-q8_0.gguf`;
     const modelBuf = await cachedFetch(modelUrl, 'Downloading model');
     post('status', { text: 'Initializing model...' });
     model = new wasmModule.Model(new Uint8Array(modelBuf));

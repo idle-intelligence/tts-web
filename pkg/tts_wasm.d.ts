@@ -5,6 +5,7 @@ export class Model {
     free(): void;
     [Symbol.dispose](): void;
     add_voice(voice_bytes: Uint8Array): number;
+    cancel_generation(): void;
     generation_step(): Float32Array | undefined;
     constructor(model_weights: Uint8Array);
     prepare_text(text: string): Array<any>;
@@ -18,6 +19,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_model_free: (a: number, b: number) => void;
     readonly model_add_voice: (a: number, b: number, c: number) => [number, number, number];
+    readonly model_cancel_generation: (a: number) => void;
     readonly model_generation_step: (a: number) => [number, number, number];
     readonly model_new: (a: number, b: number) => [number, number, number];
     readonly model_prepare_text: (a: number, b: number, c: number) => any;
