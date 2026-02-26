@@ -535,7 +535,7 @@
                         if (rtf >= 1.0) {
                             dynamicPrebuffer = 0;
                         } else {
-                            const needed = (1 - rtf) * TARGET_DURATION * tts.sampleRate;
+                            const needed = (1.1 - rtf) * TARGET_DURATION * tts.sampleRate;
                             dynamicPrebuffer = Math.min(needed, MAX_PREBUFFER_S * tts.sampleRate);
                         }
                         console.log(`[prebuffer] rtf=${rtf.toFixed(2)} prebuffer=${(dynamicPrebuffer / tts.sampleRate).toFixed(2)}s pending=${(pendingSamples / tts.sampleRate).toFixed(2)}s`);
