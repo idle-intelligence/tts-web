@@ -28,6 +28,4 @@ bun web/serve.mjs
 
 ## Quantization
 
-The model ships as INT8 safetensors (133MB). At load time, weights are dequantized to F32, loaded via candle's `VarBuilder`, then re-quantized to Q8\_0 in-place using `QMatMul`. This keeps ~97M quantized parameters as Q8\_0 in memory (~103MB vs ~388MB F32), reducing memory bandwidth ~4x per inference step.
-
-This INT8 → F32 → Q8\_0 roundtrip is an intermediary step. Future work: either go INT8 → Q8\_0 directly, or ship a GGUF model to skip dequantization entirely.
+The model ships as a [GGUF Q8\_0 file](https://huggingface.co/idle-intelligence/pocket-tts-gguf) (~130MB). Weights are loaded directly as Q8\_0 via candle's `QMatMul`, keeping ~97M quantized parameters in memory (~103MB vs ~388MB F32) and reducing memory bandwidth ~4x per inference step.
