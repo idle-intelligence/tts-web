@@ -552,7 +552,7 @@
                             return;
                         }
                     } else {
-                        if (pendingSamples >= batchSamples) flushAudioBatch();
+                        flushAudioBatch();
                     }
                     stepInfo.textContent = `Step ${step + 1} — ${audioDur.toFixed(1)}s audio in ${elapsed.toFixed(1)}s (${rtf.toFixed(2)}x realtime)`;
                 },
