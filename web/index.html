@@ -398,7 +398,7 @@
         // Detect local dev server (not deployed to GitHub Pages)
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
-        const MODEL_CACHE = 'tts-model-v2';
+        const MODEL_CACHE = 'tts-model-v3';
         const MODEL_CHECK_URL = isLocal
             ? `${location.origin}/pocket-tts-q8_0.gguf`
             : 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main/pocket-tts-q8_0.gguf';

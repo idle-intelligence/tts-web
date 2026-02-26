@@ -47,6 +47,9 @@ except ImportError:
 # HF → internal name remapping
 # ---------------------------------------------------------------------------
 
+_SKIP_ENCODER = False  # Set by --no-encoder flag
+
+
 def remap_key(name: str) -> str | None:
     """Map HF tensor name to internal model name. Returns None to skip."""
     if any(s in name for s in [
@@ -56,6 +59,18 @@ def remap_key(name: str) -> str | None:
         "learnt_padding",
     ]):
         return None
+    # Skip encoder components (not needed for TTS-only GGUF).
+    # HF names use both `mimi.encoder.` and `mimi.model.encoder.` patterns.
+    if _SKIP_ENCODER and any(s in name for s in [
+        "mimi.encoder.",
+        "mimi.encoder_transformer.",
+        "mimi.downsample.",
+        "mimi.model.encoder.",
+        "mimi.model.encoder_transformer.",
+        "mimi.model.downsample.",
+    ]):
+        return None
+
     name = name.replace(
         "flow_lm.condition_provider.conditioners.speaker_wavs.output_proj.weight",
         "flow_lm.speaker_proj_weight",
@@ -289,7 +304,15 @@ def main() -> None:
         action="store_true",
         help="Run tensor-level validation after quantization",
     )
+    parser.add_argument(
+        "--no-encoder",
+        action="store_true",
+        help="Strip mimi encoder/encoder_transformer/downsample (TTS only needs decoder)",
+    )
     args = parser.parse_args()
+
+    global _SKIP_ENCODER
+    _SKIP_ENCODER = args.no_encoder
 
     # ---- Resolve input path ----
     if args.model_id:

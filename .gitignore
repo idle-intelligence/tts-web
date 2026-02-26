@@ -7,3 +7,4 @@ tokenizer.model
 __pycache__/
 *.pyc
 .DS_Store
+/prompts

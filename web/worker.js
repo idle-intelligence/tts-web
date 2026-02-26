@@ -11,7 +11,7 @@ function post(type, data = {}, transferables = []) {
 }
 
 // ---- Fetch with Cache API + progress ----
-const CACHE_NAME = 'tts-model-v2';
+const CACHE_NAME = 'tts-model-v3';
 
 async function cachedFetch(url, label) {
     const cache = await caches.open(CACHE_NAME);
