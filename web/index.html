@@ -352,7 +352,7 @@
         const TARGET_DURATION = 8;
         const MAX_PREBUFFER_S = 4;
         let audioCtx = null;
-        let nextStartTime = 0;
+        let workletNode = null;
         let pendingChunks = [];
         let pendingSamples = 0;
         let playbackStarted = false;
@@ -365,25 +365,25 @@
         let playbackStartTime = 0;
 
         function flushAudioBatch() {
-            if (pendingChunks.length === 0) return;
+            if (!workletNode || pendingChunks.length === 0) return;
             if (!playbackStarted) {
                 playbackStartTime = performance.now();
                 playbackStarted = true;
-                nextStartTime = audioCtx.currentTime;
             }
-            const totalLen = pendingSamples;
-            const pcm = new Float32Array(totalLen);
+            const pcm = new Float32Array(pendingSamples);
             let off = 0;
             for (const c of pendingChunks) { pcm.set(c, off); off += c.length; }
+            workletNode.port.postMessage({ type: 'chunk', samples: pcm }, [pcm.buffer]);
             pendingChunks = [];
             pendingSamples = 0;
-            const buf = audioCtx.createBuffer(1, totalLen, tts.sampleRate);
-            buf.getChannelData(0).set(pcm);
-            const src = audioCtx.createBufferSource();
-            src.buffer = buf;
-            src.connect(audioCtx.destination);
-            src.start(nextStartTime);
-            nextStartTime += totalLen / tts.sampleRate;
+        }
+
+        async function ensureAudioContext() {
+            if (audioCtx) return;
+            audioCtx = new AudioContext({ sampleRate: tts.sampleRate });
+            await audioCtx.audioWorklet.addModule('./audio-worklet.js');
+            workletNode = new AudioWorkletNode(audioCtx, 'streaming-audio');
+            workletNode.connect(audioCtx.destination);
         }
 
         function updateStatus(state, text) {
@@ -497,7 +497,7 @@
                     stepInfo.textContent = '';
                     console.error(err);
                 },
-                onGenStart: (numTokens) => {
+                onGenStart: async (numTokens) => {
                     allChunks = [];
                     pendingChunks = [];
                     pendingSamples = 0;
@@ -511,8 +511,9 @@
                     audioSection.style.display = 'none';
                     stepInfo.textContent = `Generating... (${numTokens} tokens)`;
                     updateStatus('generating', 'Generating...');
-                    audioCtx = new AudioContext({ sampleRate: tts.sampleRate });
-                    nextStartTime = 0;
+                    if (workletNode) workletNode.port.postMessage({ type: 'clear' });
+                    await ensureAudioContext();
+                    if (audioCtx.state === 'suspended') audioCtx.resume();
                 },
                 onChunk: (data, step) => {
                     if (!firstChunkTime) firstChunkTime = performance.now();
