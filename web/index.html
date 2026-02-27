@@ -563,7 +563,8 @@
                         ? ((playbackStartTime - genStartTime) / 1000).toFixed(2)
                         : '0.00';
                     const audioDur = (totalAudioSamples / tts.sampleRate).toFixed(2);
-                    const rtf = (totalAudioSamples / tts.sampleRate / parseFloat(totalTime)).toFixed(2);
+                    const genTime = (performance.now() - firstChunkTime) / 1000;
+                    const rtf = (genTime > 0.01 ? totalAudioSamples / tts.sampleRate / genTime : 0).toFixed(2);
                     generating = false;
                     generateBtn.disabled = false;
                     setVoiceBtnsEnabled(true);
