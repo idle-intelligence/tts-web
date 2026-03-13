@@ -9,7 +9,8 @@
 ///     [--noise-temp 0.9] \
 ///     [--flow-steps 10] \
 ///     [--text "Hello world"] \
-///     [--voice /path/to/voice.safetensors]
+///     [--voice /path/to/voice.safetensors] \
+///     [--transition-steps 5]
 ///
 /// Default model path: /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-q4_0.gguf
 /// Default tokenizer:  tokenizer.json (repo root)
@@ -41,6 +42,18 @@ struct Args {
     cpu: bool,
     /// Optional path to a `.safetensors` voice-prompt file.
     voice_path: Option<String>,
+    /// Number of transition steps (default 5, matching Python reference).
+    ///
+    /// When > 0 and a voice prompt is loaded:
+    ///   - The last `transition_steps` acoustic frames of the voice prompt are
+    ///     withheld from the autoregressive prefix (transition gap).
+    ///   - The first `transition_steps - 1` generated acoustic frames are
+    ///     stripped from the output before decoding.
+    transition_steps: usize,
+    /// Maximum allowed time_before value. Values above this are clamped to
+    /// prevent anomalous durations (e.g. 59, 196) from inserting large blocks
+    /// of silence/noise frames. Normal speech values are ~1-37.
+    max_time_before: u32,
 }
 
 fn parse_args() -> Args {
@@ -55,6 +68,9 @@ fn parse_args() -> Args {
     let mut text = String::from("Hello world");
     let mut cpu = false;
     let mut voice_path: Option<String> = None;
+
+    let mut transition_steps = 5usize;
+    let mut max_time_before = 40u32;
 
     let mut i = 1;
     while i < args.len() {
@@ -98,9 +114,17 @@ fn parse_args() -> Args {
                 i += 1;
                 voice_path = Some(args[i].clone());
             }
+            "--transition-steps" => {
+                i += 1;
+                transition_steps = args[i].parse().expect("transition-steps must be usize");
+            }
+            "--max-time-before" => {
+                i += 1;
+                max_time_before = args[i].parse().expect("max-time-before must be u32");
+            }
             other => {
                 eprintln!("Unknown arg: {other}");
-                eprintln!("Usage: tada_generate --model <path.gguf> --tokenizer <path.json> --output <path.wav> [--cpu] [--temperature 0.9] [--noise-temp 0.9] [--flow-steps 10] [--max-gen 128] [--text \"Hello world\"] [--voice <path.safetensors>]");
+                eprintln!("Usage: tada_generate --model <path.gguf> --tokenizer <path.json> --output <path.wav> [--cpu] [--temperature 0.9] [--noise-temp 0.9] [--flow-steps 10] [--max-gen 128] [--text \"Hello world\"] [--voice <path.safetensors>] [--transition-steps 5] [--max-time-before 40]");
                 std::process::exit(1);
             }
         }
@@ -118,6 +142,8 @@ fn parse_args() -> Args {
         text,
         cpu,
         voice_path,
+        transition_steps,
+        max_time_before,
     }
 }
 
@@ -336,6 +362,7 @@ fn run() -> CResult<()> {
     eprintln!("max_gen:     {}", args.max_gen);
     if let Some(ref vp) = args.voice_path {
         eprintln!("voice:       {}", vp);
+        eprintln!("transition_steps: {}", args.transition_steps);
     }
 
     // --- Load model ---
@@ -433,7 +460,9 @@ fn run() -> CResult<()> {
     //   - First prefix_len_py steps: feed zeros, mask=0
     //   - Next effective_voice_len steps: feed voice features, mask=1
     // After prompt phase: autoregressive (feed predictions, mask=1)
-    let num_transition_steps: usize = if has_voice { 5 } else { 0 };
+    // Only apply transition steps in voice-prompted mode (Python's default is 5,
+    // zero-shot mode uses 0).
+    let num_transition_steps: usize = if has_voice { args.transition_steps } else { 0 };
     let prefix_len_py = prefix_len.saturating_sub(1); // Python's prefix_len excludes BOS
     let effective_voice_len = voice_prompt
         .as_ref()
@@ -486,8 +515,9 @@ fn run() -> CResult<()> {
         // Forward step
         let hidden = model.forward_step(&input_embeds)?;
 
-        // Generate acoustics after shift_acoustic steps
-        if step >= shift_acoustic {
+        // Generate acoustics after shift_acoustic steps, but NOT during EOS countdown
+        // (post-EOS hidden states are conditioned on EOT tokens and decode to noise)
+        if step >= shift_acoustic && eos_countdown.is_none() {
             let (acou, tb, ta) = model.generate_acoustic(
                 &hidden,
                 args.noise_temp,
@@ -642,8 +672,22 @@ fn run() -> CResult<()> {
     // Python also adds one extra time_before at the end (from the last step)
     // and removes leading silence: wav[..., int(24000 * time_before[0] / 50):]
     // For now, add trailing time entry (use first times_before or 0).
-    let trailing_time = *times_before.first().unwrap_or(&0);
+    let trailing_time = *times_before.last().unwrap_or(&0);
     times_before.push(trailing_time);
+
+    // --- Clamp anomalous time_before values ---
+    // Some frames get pathological values (e.g. 59, 196) that cause
+    // expand_durations to insert many zero frames decoding to noise ("dzouib").
+    // Normal speech values are ~1-37; clamp anything above max_time_before.
+    for (i, tb) in times_before.iter_mut().enumerate() {
+        if *tb > args.max_time_before {
+            eprintln!(
+                "  Clamped time_before[{i}] from {tb} to {}",
+                args.max_time_before
+            );
+            *tb = args.max_time_before;
+        }
+    }
 
     // --- Validate generation ---
     let num_text_tokens = prompt_len - shift_acoustic; // just the actual text tokens

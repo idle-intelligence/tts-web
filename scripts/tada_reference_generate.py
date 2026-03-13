@@ -36,14 +36,20 @@ import torchaudio
 # ---------------------------------------------------------------------------
 def _ensure_llama_tokenizer_local():
     import os
-    local_path = "/tmp/llama-3.2-1b-tokenizer"
-    if not os.path.exists(os.path.join(local_path, "tokenizer.json")):
+    # Use the locally cached Llama-3.2-1B tokenizer directly (avoids HF hub fetch
+    # which may return TokenizersBackend class not supported by older transformers).
+    local_path = "/Users/tc/Code/idle-intelligence/hf/Llama-3.2-1B"
+    if os.path.exists(os.path.join(local_path, "tokenizer.json")):
+        return local_path
+    # Fallback: download to /tmp if local copy not present
+    tmp_path = "/tmp/llama-3.2-1b-tokenizer"
+    if not os.path.exists(os.path.join(tmp_path, "tokenizer.json")):
         print("[tada-ref] Downloading Llama-3.2-1B tokenizer from unsloth mirror ...", file=sys.stderr)
         from transformers import AutoTokenizer
         tok = AutoTokenizer.from_pretrained("unsloth/Llama-3.2-1B-Instruct")
-        tok.save_pretrained(local_path)
-        print(f"[tada-ref] Tokenizer saved to {local_path}", file=sys.stderr)
-    return local_path
+        tok.save_pretrained(tmp_path)
+        print(f"[tada-ref] Tokenizer saved to {tmp_path}", file=sys.stderr)
+    return tmp_path
 
 _LLAMA_TOKENIZER_PATH = _ensure_llama_tokenizer_local()
 
@@ -226,8 +232,8 @@ def main():
 
         # Tokenize the voice text to get text_tokens_len (used by generate() to split prompt vs. target)
         from tada.modules.aligner import AlignerConfig
-        from transformers import AutoTokenizer
-        tokenizer = AutoTokenizer.from_pretrained(AlignerConfig.tokenizer_name)
+        from transformers import PreTrainedTokenizerFast
+        tokenizer = PreTrainedTokenizerFast.from_pretrained(AlignerConfig.tokenizer_name)
         text_token_ids = tokenizer.encode(voice_text, add_special_tokens=False)
         text_tokens_len = torch.tensor([len(text_token_ids)], dtype=torch.long, device=device)
         text_tokens = torch.tensor([text_token_ids], dtype=torch.long, device=device)

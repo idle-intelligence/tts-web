@@ -15,7 +15,7 @@ use burn::tensor::Tensor;
 
 use model::{LayerCaches, TadaLlama};
 use tada_core::config::TadaConfig;
-use tada_core::tada_model::{self, BOS_TOKEN_ID, EOS_TOKEN_ID, EOT_TOKEN_ID};
+use tada_core::tada_model::{self, BOS_TOKEN_ID, EOS_TOKEN_ID, EOT_TOKEN_ID, VoicePrompt};
 
 // ---------------------------------------------------------------------------
 // WasmRng — WASM-compatible RNG
@@ -69,6 +69,17 @@ struct GenState {
     is_done: bool,
     eos_countdown: Option<usize>,
     cache: LayerCaches,
+    // Voice prompt alignment parameters (all zero/None in zero-shot mode).
+    voice_prompt: Option<VoicePrompt>,
+    /// Number of transition steps (Python default: 5, zero-shot: 0).
+    num_transition_steps: usize,
+    /// prefix_len_py = number of text/prefix tokens before voice acoustic data starts
+    /// (excludes BOS — matches Python's prefix_len).
+    prefix_len_py: usize,
+    /// effective_voice_len = voice_prompt.len() - num_transition_steps
+    effective_voice_len: usize,
+    /// prompt_phase_len = prefix_len_py + effective_voice_len
+    prompt_phase_len: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -159,17 +170,57 @@ impl HybridTadaModel {
     }
 
     /// Start a new generation run.
+    ///
+    /// `voice_prompt` — optional pre-computed voice prompt (pass `None` for
+    ///   zero-shot mode).
+    /// `prefix_len`   — number of tokens before the prompt text starts
+    ///   (BOS + header prefix).  Used to align acoustic features during the
+    ///   voice prompt phase.  Pass 0 for zero-shot mode.
+    /// `transition_steps` — number of acoustic frames to withhold from the
+    ///   prompt tail and skip at the start of generated output (Python default
+    ///   is 5 for voice-prompted mode, 0 for zero-shot).
     pub fn start_generation(
         &mut self,
         token_ids: &[u32],
         temperature: f32,
         noise_temp: f32,
         num_flow_steps: u32,
+        voice_prompt: Option<VoicePrompt>,
+        prefix_len: usize,
+        transition_steps: usize,
     ) {
         let acoustic_dim = self.cfg.acoustic_dim;
+        let shift_acoustic = self.cfg.shift_acoustic;
+        let has_voice = voice_prompt.is_some();
+
+        // In voice-prompted mode Python runs for exactly prompt_len steps.
+        // In zero-shot mode we add extra autoregressive steps.
+        let prompt_len = token_ids.len();
         let max_gen = 128;
-        let total_tokens = token_ids.len() + max_gen;
+        let total_tokens = if has_voice {
+            prompt_len
+        } else {
+            prompt_len + max_gen
+        };
         let max_cache_len = total_tokens + 64;
+
+        // Compute voice prompt alignment parameters (mirror of tada_generate.rs).
+        //
+        // Python pads prompt_acoustic_features with `prefix_len` zeros at the front,
+        // then truncates the last `num_transition_steps` entries:
+        //   padded length = prefix_len + T
+        //   after truncation = prefix_len + T - num_transition_steps
+        //
+        // During generation, step `s` reads voice index `s - shift_acoustic - prefix_len_py`.
+        // prefix_len_py = prefix_len (excluding BOS from our count, matching Python).
+        let num_transition_steps = if has_voice { transition_steps } else { 0 };
+        // Python's prefix_len excludes BOS (prefix_len_py = prefix_len - 1 in tada_generate.rs).
+        let prefix_len_py = prefix_len.saturating_sub(1);
+        let effective_voice_len = voice_prompt
+            .as_ref()
+            .map(|vp| vp.len().saturating_sub(num_transition_steps))
+            .unwrap_or(0);
+        let prompt_phase_len = prefix_len_py + effective_voice_len;
 
         // Clear candle model state
         self.candle_model.clear_state();
@@ -188,7 +239,7 @@ impl HybridTadaModel {
             time_after: 0,
             step: 0,
             total_tokens,
-            shift_acoustic: self.cfg.shift_acoustic,
+            shift_acoustic,
             rng: WasmRng::new(),
             temperature,
             noise_temp,
@@ -196,6 +247,11 @@ impl HybridTadaModel {
             is_done: false,
             eos_countdown: None,
             cache,
+            voice_prompt,
+            num_transition_steps,
+            prefix_len_py,
+            effective_voice_len,
+            prompt_phase_len,
         });
     }
 
@@ -243,8 +299,10 @@ impl HybridTadaModel {
             &candle_core::Device::Cpu,
         )?;
 
-        // If past the acoustic shift, run flow matching (candle/CPU)
-        if step >= state.shift_acoustic {
+        // If past the acoustic shift, run flow matching (candle/CPU).
+        // Skip during EOS countdown — post-EOS hidden states are conditioned on
+        // EOT tokens and decode to noise/parasite voice.
+        if step >= state.shift_acoustic && state.eos_countdown.is_none() {
             let (acoustic, time_before, time_after) = self.candle_model.generate_acoustic(
                 &hidden_candle,
                 state.noise_temp,
@@ -259,7 +317,7 @@ impl HybridTadaModel {
             state.times_after.push(time_after);
         }
 
-        // Sample next token
+        // Sample next token after prompt
         let mut is_eos = false;
         let mut sampled_id = current_token;
         if step >= prompt_len - 1 {
@@ -274,20 +332,53 @@ impl HybridTadaModel {
             sampled_id = token_id;
             is_eos = eos;
             state.next_token = sampled_id;
+        }
 
-            // Update acoustic/time for next step
-            if step >= state.shift_acoustic {
-                if let Some(ac) = state.acoustics.last() {
-                    state.acoustic = ac.clone();
-                    state.acoustic_mask = 1;
-                    state.time_before = *state.times_before.last().unwrap_or(&0);
-                    state.time_after = *state.times_after.last().unwrap_or(&0);
+        // Update acoustic/time for the next step input.
+        //
+        // Mirrors tada_generate.rs logic:
+        //   - During prompt phase (voice-prompted mode): feed zeros or voice features
+        //   - After prompt phase: autoregressive (use model's own last prediction)
+        if step >= state.shift_acoustic {
+            let prompt_idx = step - state.shift_acoustic;
+            let has_voice = state.voice_prompt.is_some();
+
+            if has_voice && prompt_idx < state.prompt_phase_len {
+                // In prompt phase — check if we're in the voice feature region
+                if prompt_idx >= state.prefix_len_py
+                    && prompt_idx < state.prefix_len_py + state.effective_voice_len
+                {
+                    // Feed voice features from prompt
+                    if let Some(vp) = state.voice_prompt.as_ref() {
+                        let voice_step_offset = state.shift_acoustic + state.prefix_len_py;
+                        if let Some((vp_acoustic, vp_mask, vp_tb, vp_ta)) =
+                            vp.get_step(step, voice_step_offset)
+                        {
+                            state.acoustic = vp_acoustic.clone();
+                            state.acoustic_mask = vp_mask;
+                            state.time_before = vp_tb;
+                            state.time_after = vp_ta;
+                        }
+                    }
+                } else {
+                    // Padding region: feed zeros, mask=0
+                    let acoustic_dim = self.cfg.acoustic_dim;
+                    state.acoustic = vec![0.0; acoustic_dim];
+                    state.acoustic_mask = 0;
+                    state.time_before = 0;
+                    state.time_after = 0;
                 }
+            } else if let Some(ac) = state.acoustics.last() {
+                // Autoregressive: use the model's own last prediction
+                state.acoustic = ac.clone();
+                state.acoustic_mask = 1;
+                state.time_before = *state.times_before.last().unwrap_or(&0);
+                state.time_after = *state.times_after.last().unwrap_or(&0);
             }
         }
 
-        // EOS countdown
-        if is_eos && state.eos_countdown.is_none() {
+        // EOS countdown (only in zero-shot mode; voice mode runs for exactly prompt_len steps)
+        if state.voice_prompt.is_none() && is_eos && state.eos_countdown.is_none() {
             state.eos_countdown = Some(state.shift_acoustic);
         }
         if let Some(ref mut countdown) = state.eos_countdown {
@@ -312,15 +403,65 @@ impl HybridTadaModel {
     }
 
     /// Decode accumulated acoustics to PCM audio (candle/CPU).
+    ///
+    /// When a voice prompt was used, strips the leading `prompt_phase_len +
+    /// num_transition_steps - 1` acoustic frames before decoding — matching
+    /// Python's:
+    ///   `encoded = acoustic_features[..., num_prompt_tokens + num_transition_steps - 1:, :]`
+    /// where `num_prompt_tokens = prompt_phase_len`.
     pub fn decode_audio(&self) -> anyhow::Result<Vec<f32>> {
         let state = self
             .gen_state
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no generation state"))?;
 
+        // Strip leading prompt + transition frames (voice-prompted mode only).
+        // Python: strip index = num_prompt_tokens + num_transition_steps - 1
+        //       = prompt_phase_len + num_transition_steps - 1
+        let strip_frames = if state.voice_prompt.is_some()
+            && state.prompt_phase_len + state.num_transition_steps >= 1
+        {
+            state.prompt_phase_len + state.num_transition_steps - 1
+        } else {
+            0
+        };
+
+        let acoustics: &[Vec<f32>];
+        let times_before: &[u32];
+        let stripped_acoustics;
+        let stripped_times;
+
+        if strip_frames > 0 && strip_frames < state.acoustics.len() {
+            stripped_acoustics = state.acoustics[strip_frames..].to_vec();
+            stripped_times = state.times_before[strip_frames..].to_vec();
+            acoustics = &stripped_acoustics;
+            times_before = &stripped_times;
+        } else {
+            acoustics = &state.acoustics;
+            times_before = &state.times_before;
+        }
+
+        // Clamp anomalous time_before values to prevent trailing noise.
+        // Values like 59 or 196 cause expand_durations to insert many zero
+        // frames that decode to noise ("dzouib"). Normal range is ~1-37.
+        const MAX_TIME_BEFORE: u32 = 40;
+        let clamped_times: Vec<u32> = times_before
+            .iter()
+            .enumerate()
+            .map(|(i, &tb)| {
+                if tb > MAX_TIME_BEFORE {
+                    eprintln!("[tada] Clamped time_before[{i}] from {tb} to {MAX_TIME_BEFORE}");
+                    MAX_TIME_BEFORE
+                } else {
+                    tb
+                }
+            })
+            .collect();
+        let times_before = &clamped_times[..];
+
         let samples = self
             .candle_model
-            .decode_audio(&state.acoustics, &state.times_before)?;
+            .decode_audio(acoustics, times_before)?;
 
         Ok(samples)
     }
@@ -532,6 +673,13 @@ pub mod web {
         }
 
         /// Start generation from token IDs.
+        ///
+        /// `voice_prompt_bytes` — optional raw safetensors bytes for the voice
+        ///   prompt.  Pass an empty `Uint8Array` (or omit) for zero-shot mode.
+        /// `prefix_len` — number of tokens before prompt text starts (BOS +
+        ///   header prefix).  Pass 0 for zero-shot mode.
+        /// `transition_steps` — transition gap size (Python default: 5 for
+        ///   voice-prompted, 0 for zero-shot).
         #[wasm_bindgen(js_name = startGeneration)]
         pub fn start_generation(
             &mut self,
@@ -539,9 +687,36 @@ pub mod web {
             temperature: f32,
             noise_temp: f32,
             num_flow_steps: u32,
+            voice_prompt_bytes: Option<Vec<u8>>,
+            prefix_len: u32,
+            transition_steps: u32,
         ) -> Result<(), JsError> {
-            self.model_mut()?
-                .start_generation(token_ids, temperature, noise_temp, num_flow_steps);
+            let model = self.model_mut()?;
+            let cfg = model.cfg.clone();
+
+            // Load voice prompt if bytes were provided
+            let voice_prompt = match voice_prompt_bytes {
+                Some(bytes) if !bytes.is_empty() => {
+                    let vp = VoicePrompt::load(
+                        &bytes,
+                        cfg.acoustic_dim,
+                        cfg.num_time_classes as u32,
+                    )
+                    .map_err(|e| JsError::new(&format!("Failed to load voice prompt: {e}")))?;
+                    Some(vp)
+                }
+                _ => None,
+            };
+
+            model.start_generation(
+                token_ids,
+                temperature,
+                noise_temp,
+                num_flow_steps,
+                voice_prompt,
+                prefix_len as usize,
+                transition_steps as usize,
+            );
             Ok(())
         }
 
