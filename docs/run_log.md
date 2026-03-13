@@ -76,6 +76,29 @@ All runs: Metal, seed=42, text="The quick brown fox jumps over the lazy dog.", v
 
 ---
 
+## Run 5 (2026-03-13) — Mixed-precision variant comparison
+
+**Hypothesis going in**: The trailing noise seen in bench8 run3/run4 (4.14s audio vs 3.04s baseline) was suspected to come from VibeVoice quantization errors. The mixed model used Q8_0 for VibeVoice weights, so the plan was to test whether upgrading VV to F16 or F32 would fix the gray-code misprediction (`times_before[12]` = 59 instead of 4) that causes the extra ~1.1s.
+
+All runs: seed=42, temp=0.9, noise_temp=0.9, flow_steps=10, voice=ljspeech, Metal GPU. Two texts tested: "The quick brown fox jumps over the lazy dog." (fox) and "Time is money, who can afford to pay attention?" (time).
+
+| Variant | VibeVoice | Embeddings | GGUF Size | fox tb[12] | fox dur | time tb[12] | time dur |
+|---------|-----------|------------|-----------|-----------|---------|------------|----------|
+| baseline | F32 | Q4_0 | 2.64 GB | 4 | 3.04s | 4 | 3.88s |
+| A | F16 | Q8_0 | 1.88 GB | 4 | 3.04s | 59 | 4.98s |
+| B | F32 | Q8_0 | 2.68 GB | 4 | 3.04s | 59 | 4.98s |
+| C | Q8_0 | Q4_0 | 1.38 GB | 59 | 4.10s | 59 | 4.98s |
+| D | Q8_0 | Q8_0 | 1.52 GB | 59 | 4.14s | 59 | 4.98s |
+| E | F16 | Q4_0 | 1.75 GB | 4 | 3.04s | 4 | 3.88s |
+
+**The surprise**: Variant B (F32 VibeVoice + Q8_0 embeddings) still mispredicts the "time" text. VibeVoice precision is not the culprit — Q8_0 embeddings are sufficient to cause the bit flip, regardless of how precise the flow-matching computation is downstream.
+
+**The real story**: The gray-code time token is predicted by the LLM, which attends over token embeddings. Q8_0 embedding quantization introduces enough error in the "time" text's context to flip bit 5 in the gray-coded duration prediction (gray(4)=00000110 → gray(59)=00100110). Q4_0 embeddings, despite being coarser in absolute terms, happen to preserve the critical activations correctly for both test texts.
+
+**Conclusion**: Variant E (VibeVoice F16 + Embeddings Q4_0) is the winner. At 1.75 GB it is 34% smaller than the 2.64 GB baseline, loads faster, and produces identical audio for both test texts. VibeVoice at F16 is sufficient precision — F32 adds 0.89 GB with no measurable benefit.
+
+---
+
 ## Earlier samples (pre-benchmark, 2026-03-12)
 
 | File | Config | Notes |

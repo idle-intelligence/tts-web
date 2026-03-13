@@ -23,6 +23,31 @@
 | 8r3 | 2026-03-12 | Mixed Q4+Q8 v1 Metal (decoder attn Q4_0) | 1.48 GB | 1.0s | **2.2s** | 3.4s | 4.14s | **0.54x** | `bench8_run3_mixedv1_metal.wav` | Near-identical quality; 3x faster gen; trailing noise |
 | 8r4 | 2026-03-12 | Mixed Q4+Q8 v2 Metal (decoder attn Q8_0) | 1.52 GB | 1.0s | **2.3s** | 3.5s | 4.14s | **0.56x** | `bench8_run4_mixedv2_metal.wav` | Identical to 8r3 — decoder quant type irrelevant |
 
+## Mixed-Precision Variant Comparison (2026-03-13)
+
+Testing which model components tolerate lower precision without gray-code mispredictions.
+
+**Setup**: seed=42, temp=0.9, noise_temp=0.9, flow_steps=10, voice=ljspeech, Metal GPU.
+**Texts**: "fox" = "The quick brown fox jumps over the lazy dog." / "time" = "Time is money, who can afford to pay attention?"
+**Key metric**: `times_before[12]` — gray-code time prediction. Correct value = 4 (gray(4) = 00000110). Misprediction = 59 (gray(59) = 00100110, bit 5 flipped), causing +1.1s trailing noise.
+
+| Variant | VibeVoice | Embeddings | GGUF Size | fox tb[12] | fox dur | time tb[12] | time dur | Gray-code correct? |
+|---------|-----------|------------|-----------|-----------|---------|------------|----------|-------------------|
+| baseline | F32 | Q4_0 | 2.64 GB | 4 | 3.04s | 4 | 3.88s | Both correct |
+| A | F16 | Q8_0 | 1.88 GB | 4 | 3.04s | 59 | 4.98s | fox only |
+| B | F32 | Q8_0 | 2.68 GB | 4 | 3.04s | 59 | 4.98s | fox only |
+| C | Q8_0 | Q4_0 | 1.38 GB | 59 | 4.10s | 59 | 4.98s | Neither |
+| D | Q8_0 | Q8_0 | 1.52 GB | 59 | 4.14s | 59 | 4.98s | Neither |
+| **E** | **F16** | **Q4_0** | **1.75 GB** | **4** | **3.04s** | **4** | **3.88s** | **Both correct** |
+
+**Winner: Variant E** — VibeVoice F16 + Embeddings Q4_0. Matches baseline perfectly, 34% smaller (2.64 GB → 1.75 GB), zero gray-code errors.
+
+**Key findings:**
+- Embedding precision is the dominant factor: Q8_0 embeddings cause gray-code mispredictions even when VibeVoice is kept at F32 (variant B).
+- VibeVoice F16 is sufficient: F16 VibeVoice with Q4_0 embeddings (variant E) matches the F32 baseline exactly.
+- VibeVoice Q8_0 introduces independent errors: even with correct Q4_0 embeddings (variant C), VV Q8_0 mispredicts the fox text.
+- Misprediction is always a single gray-code bit flip: gray(4)=00000110 → gray(59)=00100110 (bit 5).
+
 ### Skipped / Invalid
 
 | Run | Date | Config | Notes |

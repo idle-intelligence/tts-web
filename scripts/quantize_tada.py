@@ -3,13 +3,14 @@
 
 Usage:
     python3 scripts/quantize_tada.py [--input PATH] [--output PATH] [--format mixed|q4_0|f16|f32]
+                                     [--vv-type f32|f16|q8_0|q4_0] [--embed-type f32|f16|q8_0|q4_0]
 
 Requires numpy for fast vectorized quantization.
 
 Mixed precision strategy (default):
   - Llama backbone (model.layers.*) → Q4_0  (GPU, validated)
-  - Embeddings (model.embed_tokens) → Q8_0  (biggest single win)
-  - VibeVoice (prediction_head.*)   → Q8_0  (near-lossless for flow matching)
+  - Embeddings (model.embed_tokens) → Q8_0  (biggest single win, configurable via --embed-type)
+  - VibeVoice (prediction_head.*)   → Q8_0  (near-lossless for flow matching, configurable via --vv-type)
   - Decoder attention               → Q8_0  (Q4_0 destroys decoder quality)
   - Decoder convs/Snake1d           → F32   (small + precision-sensitive)
   - Norms, adapters, small tensors  → F32
@@ -270,6 +271,57 @@ def get_quant_type(name: str, shape: list[int]) -> str:
     return 'f32'
 
 
+def get_quant_type_custom(name: str, shape: list[int],
+                          vv_type: str = 'q8_0', embed_type: str = 'q8_0') -> str:
+    """Determine quantization type for a tensor with configurable VV and embed types.
+
+    Works like get_quant_type but allows overriding the VibeVoice (prediction_head.*)
+    and embedding (model.embed_tokens.weight) quantization types.
+
+    vv_type / embed_type: 'f32', 'f16', 'q8_0', or 'q4_0'
+
+    Strategy:
+      - Llama backbone (model.layers.*) → Q4_0  (always, not overridable)
+      - Embeddings (model.embed_tokens) → embed_type
+      - VibeVoice (prediction_head.*)   → vv_type
+      - Decoder attention               → Q8_0  (Q4_0 destroys decoder quality)
+      - Decoder convs/Snake1d           → F32   (small + precision-sensitive)
+      - Norms, adapters, small tensors  → F32
+    """
+    # Must be 2D weight tensor with dims divisible by 32 for any quantization
+    if not name.endswith('.weight') or len(shape) != 2:
+        return 'f32'
+    if 'layernorm' in name or 'norm.weight' in name:
+        return 'f32'
+
+    # Llama backbone layers → Q4_0 (always)
+    if name.startswith('model.layers.'):
+        if any(d % 32 != 0 for d in shape):
+            return 'f32'
+        return 'q4_0'
+
+    # Embeddings → embed_type (fall back to f32 if dims not divisible by 32)
+    if name == 'model.embed_tokens.weight':
+        if embed_type in ('q4_0', 'q8_0') and any(d % 32 != 0 for d in shape):
+            return 'f32'
+        return embed_type
+
+    # VibeVoice prediction head → vv_type (fall back to f32 if dims not divisible by 32)
+    if name.startswith('prediction_head.'):
+        if vv_type in ('q4_0', 'q8_0') and any(d % 32 != 0 for d in shape):
+            return 'f32'
+        return vv_type
+
+    # Decoder local attention → Q8_0 (Q4_0 destroys decoder quality)
+    if '_decoder.' in name and 'local_attention_decoder' in name:
+        if any(d % 32 != 0 for d in shape):
+            return 'f32'
+        return 'q8_0'
+
+    # Everything else (decoder convs, Snake1d, adapters) → F32
+    return 'f32'
+
+
 # ---------------------------------------------------------------------------
 # Weight norm fusion
 # ---------------------------------------------------------------------------
@@ -362,12 +414,21 @@ def main():
                         help='Output GGUF file (default: tada-1b-{format}.gguf in input dir)')
     parser.add_argument('--format', type=str, default='mixed', choices=['mixed', 'q4_0', 'f16', 'f32'],
                         help='Output format: mixed (Q4_0+Q8_0+F32), q4_0 (legacy), f16, f32')
+    parser.add_argument('--vv-type', type=str, default='q8_0', choices=['f32', 'f16', 'q8_0', 'q4_0'],
+                        help='Quantization type for VibeVoice (prediction_head.*) in mixed mode (default: q8_0)')
+    parser.add_argument('--embed-type', type=str, default='q8_0', choices=['f32', 'f16', 'q8_0', 'q4_0'],
+                        help='Quantization type for embeddings (model.embed_tokens.weight) in mixed mode (default: q8_0)')
     args = parser.parse_args()
 
     input_path = args.input
     output_format = args.format
     if args.output:
         output_path = args.output
+    elif output_format == 'mixed':
+        output_path = os.path.join(
+            os.path.dirname(input_path),
+            f'tada-1b-mixed-vv{args.vv_type}-e{args.embed_type}.gguf'
+        )
     else:
         output_path = os.path.join(os.path.dirname(input_path), f'tada-1b-{output_format}.gguf')
 
@@ -448,7 +509,7 @@ def main():
         for s in shape:
             n_elements *= s
         if output_format == 'mixed':
-            qt = get_quant_type(name, shape)
+            qt = get_quant_type_custom(name, shape, args.vv_type, args.embed_type)
         elif output_format == 'q4_0':
             # Legacy: only Llama backbone to Q4_0
             qt = 'q4_0' if should_quantize_q4_0(name, shape, n_elements) else 'f32'
@@ -473,9 +534,10 @@ def main():
 
     n_q4 = sum(1 for _, _, qt in output_plan if qt == 'q4_0')
     n_q8 = sum(1 for _, _, qt in output_plan if qt == 'q8_0')
+    n_f16 = sum(1 for _, _, qt in output_plan if qt == 'f16')
     n_f32 = sum(1 for _, _, qt in output_plan if qt == 'f32')
     print(f"Skipping {skipped} tensors (precomputed masks, rope_freqs)")
-    print(f"Output tensors: {len(output_plan)} ({n_q4} Q4_0, {n_q8} Q8_0, {n_f32} F32)")
+    print(f"Output tensors: {len(output_plan)} ({n_q4} Q4_0, {n_q8} Q8_0, {n_f16} F16, {n_f32} F32)")
     print(flush=True)
 
     # -----------------------------------------------------------------------
@@ -483,6 +545,7 @@ def main():
     # -----------------------------------------------------------------------
     tensor_data = []  # list of (name, shape, gguf_type, raw_bytes)
     total_f32_params = 0
+    total_f16_params = 0
     total_q4_params = 0
     total_q8_params = 0
 
@@ -530,7 +593,7 @@ def main():
         elif quant_type == 'f16':
             raw = f32_to_f16_bytes(values)
             gguf_type = GGUF_TENSOR_F16
-            total_f32_params += n_elements
+            total_f16_params += n_elements
             label = "F16"
         else:
             raw = f32_to_bytes(values)
@@ -552,6 +615,7 @@ def main():
     print(f"Processed {len(tensor_data)} tensors in {time.time() - t0:.1f}s")
     print(f"  Q4_0 params: {total_q4_params:,}")
     print(f"  Q8_0 params: {total_q8_params:,}")
+    print(f"  F16 params:  {total_f16_params:,}")
     print(f"  F32 params:  {total_f32_params:,}")
 
     # -----------------------------------------------------------------------
@@ -561,10 +625,16 @@ def main():
     print("Writing GGUF file...")
 
     # Metadata KVs we'll write
+    if output_format == 'mixed':
+        quant_str = (
+            f"Q4_0+vv{args.vv_type.upper()}+e{args.embed_type.upper()}+Q8_0+F32"
+        )
+    else:
+        quant_str = output_format.upper()
     metadata = [
         ("general.architecture", "tada", "string"),
         ("general.name", "TADA-1B", "string"),
-        ("general.quantization", "Q4_0+Q8_0+F32" if output_format == 'mixed' else output_format.upper(), "string"),
+        ("general.quantization", quant_str, "string"),
     ]
     n_metadata = len(metadata)
     n_tensors = len(tensor_data)
