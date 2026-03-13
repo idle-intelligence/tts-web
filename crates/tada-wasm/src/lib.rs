@@ -339,20 +339,25 @@ impl HybridTadaModel {
         // Mirrors tada_generate.rs logic:
         //   - During prompt phase (voice-prompted mode): feed zeros or voice features
         //   - After prompt phase: autoregressive (use model's own last prediction)
+        //
+        // IMPORTANT: the update prepares the INPUT for step+1, so we check
+        // whether *next* step's prompt_idx is still within the prompt phase.
+        // Using the current step's prompt_idx caused the first AR step to
+        // receive zeros/voice-features instead of the model's own prediction.
         if step >= state.shift_acoustic {
-            let prompt_idx = step - state.shift_acoustic;
+            let next_prompt_idx = (step + 1) - state.shift_acoustic;
             let has_voice = state.voice_prompt.is_some();
 
-            if has_voice && prompt_idx < state.prompt_phase_len {
-                // In prompt phase — check if we're in the voice feature region
-                if prompt_idx >= state.prefix_len_py
-                    && prompt_idx < state.prefix_len_py + state.effective_voice_len
+            if has_voice && next_prompt_idx < state.prompt_phase_len {
+                // Next step is still in the prompt phase — prepare its input.
+                if next_prompt_idx >= state.prefix_len_py
+                    && next_prompt_idx < state.prefix_len_py + state.effective_voice_len
                 {
-                    // Feed voice features from prompt
+                    // Next step is in the voice-feature region: look up step+1's features.
                     if let Some(vp) = state.voice_prompt.as_ref() {
                         let voice_step_offset = state.shift_acoustic + state.prefix_len_py;
                         if let Some((vp_acoustic, vp_mask, vp_tb, vp_ta)) =
-                            vp.get_step(step, voice_step_offset)
+                            vp.get_step(step + 1, voice_step_offset)
                         {
                             state.acoustic = vp_acoustic.clone();
                             state.acoustic_mask = vp_mask;
@@ -361,7 +366,7 @@ impl HybridTadaModel {
                         }
                     }
                 } else {
-                    // Padding region: feed zeros, mask=0
+                    // Next step is in the padding region: feed zeros, mask=0.
                     let acoustic_dim = self.cfg.acoustic_dim;
                     state.acoustic = vec![0.0; acoustic_dim];
                     state.acoustic_mask = 0;
@@ -369,7 +374,7 @@ impl HybridTadaModel {
                     state.time_after = 0;
                 }
             } else if let Some(ac) = state.acoustics.last() {
-                // Autoregressive: use the model's own last prediction
+                // Next step is autoregressive: use the model's own last prediction.
                 state.acoustic = ac.clone();
                 state.acoustic_mask = 1;
                 state.time_before = *state.times_before.last().unwrap_or(&0);

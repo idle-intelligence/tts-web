@@ -13,6 +13,34 @@ use mimi_rs::gguf_loader::GgufTensors;
 use mimi_rs::qlinear::QLinear;
 
 // ---------------------------------------------------------------------------
+// Debug dump
+// ---------------------------------------------------------------------------
+
+/// Per-step intermediates captured during `generate_acoustic`.
+pub struct AcousticDebugInfo {
+    /// LLM hidden state (condition vector) passed to flow matching — [hidden_size].
+    pub hidden_state: Vec<f32>,
+    /// Initial noise sample passed into the flow matching ODE — [total_latent_dim].
+    pub flow_input: Vec<f32>,
+    /// Full flow matching output (acoustic + time bits) — [total_latent_dim].
+    pub flow_output: Vec<f32>,
+    /// Acoustic features extracted from flow_output — [acoustic_dim].
+    pub acoustic: Vec<f32>,
+    /// Raw time bit floats before thresholding — [time_dim].
+    pub time_bits: Vec<f32>,
+    /// Decoded time_before integer.
+    pub time_before: u32,
+    /// Decoded time_after integer.
+    pub time_after: u32,
+    /// Token ID that was the input at this step.
+    pub token_id: u32,
+    /// time_before value that was fed as input to this step.
+    pub time_before_input: u32,
+    /// time_after value that was fed as input to this step.
+    pub time_after_input: u32,
+}
+
+// ---------------------------------------------------------------------------
 // VoicePrompt
 // ---------------------------------------------------------------------------
 
@@ -361,6 +389,26 @@ impl TadaModel {
         rng: &mut dyn Rng,
         num_steps: usize,
     ) -> Result<(Tensor, u32, u32)> {
+        let (acoustic, time_before, time_after, _debug) =
+            self.generate_acoustic_debug(hidden, noise_temp, rng, num_steps, false)?;
+        Ok((acoustic, time_before, time_after))
+    }
+
+    /// Like `generate_acoustic` but optionally captures intermediate tensors
+    /// for debugging.  When `capture_debug` is true the returned
+    /// `Option<AcousticDebugInfo>` is `Some`; otherwise it is `None`.
+    ///
+    /// The extra scalar inputs `token_id`, `time_before_input`, and
+    /// `time_after_input` are not computed here — the caller must fill them in
+    /// after the call (they are initialised to 0 inside the returned struct).
+    pub fn generate_acoustic_debug(
+        &self,
+        hidden: &Tensor,
+        noise_temp: f32,
+        rng: &mut dyn Rng,
+        num_steps: usize,
+        capture_debug: bool,
+    ) -> Result<(Tensor, u32, u32, Option<AcousticDebugInfo>)> {
         // Squeeze hidden from [1, 1, hidden_size] → [1, hidden_size]
         let cond = hidden.squeeze(1)?;
 
@@ -369,7 +417,7 @@ impl TadaModel {
         let noise_data: Vec<f32> = (0..total_dim)
             .map(|_| rng.sample_normal() * noise_temp)
             .collect();
-        let noise = Tensor::from_vec(noise_data, (1, total_dim), hidden.device())?;
+        let noise = Tensor::from_vec(noise_data.clone(), (1, total_dim), hidden.device())?;
 
         // Flow matching ODE solve
         let result = solve_flow_matching(
@@ -400,7 +448,30 @@ impl TadaModel {
         let time_before = time_before_t.to_vec1::<u32>()?[0];
         let time_after = time_after_t.to_vec1::<u32>()?[0];
 
-        Ok((acoustic, time_before, time_after))
+        let debug_info = if capture_debug {
+            let hidden_state = cond.flatten_all()?.to_vec1::<f32>()?;
+            let flow_input = noise_data; // already Vec<f32>
+            let flow_output = result.flatten_all()?.to_vec1::<f32>()?;
+            let acoustic_vec = acoustic.flatten_all()?.to_vec1::<f32>()?;
+            let time_bits_vec = time_bits.flatten_all()?.to_vec1::<f32>()?;
+            Some(AcousticDebugInfo {
+                hidden_state,
+                flow_input,
+                flow_output,
+                acoustic: acoustic_vec,
+                time_bits: time_bits_vec,
+                time_before,
+                time_after,
+                // Caller fills these in after the call
+                token_id: 0,
+                time_before_input: 0,
+                time_after_input: 0,
+            })
+        } else {
+            None
+        };
+
+        Ok((acoustic, time_before, time_after, debug_info))
     }
 
     /// Sample the next text token from the LLM hidden state.

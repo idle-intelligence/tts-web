@@ -24,7 +24,7 @@
 use candle_core::{Device, Result as CResult, Tensor};
 use tada_core::audio_check::{check_generation, AudioStats};
 use tada_core::config::TadaConfig;
-use tada_core::tada_model::{Rng, TadaModel, VoicePrompt};
+use tada_core::tada_model::{AcousticDebugInfo, Rng, TadaModel, VoicePrompt};
 
 // ---------------------------------------------------------------------------
 // CLI arg parsing (manual, no external deps)
@@ -54,6 +54,11 @@ struct Args {
     /// prevent anomalous durations (e.g. 59, 196) from inserting large blocks
     /// of silence/noise frames. Normal speech values are ~1-37.
     max_time_before: u32,
+    /// Optional path for debug dump directory. When set, each acoustic
+    /// generation step writes intermediate tensors to `PATH/step_NNN/`.
+    debug_dump: Option<String>,
+    /// RNG seed for reproducible generation (default 42).
+    seed: u64,
 }
 
 fn parse_args() -> Args {
@@ -71,6 +76,8 @@ fn parse_args() -> Args {
 
     let mut transition_steps = 5usize;
     let mut max_time_before = 40u32;
+    let mut debug_dump: Option<String> = None;
+    let mut seed = 42u64;
 
     let mut i = 1;
     while i < args.len() {
@@ -122,9 +129,17 @@ fn parse_args() -> Args {
                 i += 1;
                 max_time_before = args[i].parse().expect("max-time-before must be u32");
             }
+            "--debug-dump" => {
+                i += 1;
+                debug_dump = Some(args[i].clone());
+            }
+            "--seed" => {
+                i += 1;
+                seed = args[i].parse().expect("seed must be u64");
+            }
             other => {
                 eprintln!("Unknown arg: {other}");
-                eprintln!("Usage: tada_generate --model <path.gguf> --tokenizer <path.json> --output <path.wav> [--cpu] [--temperature 0.9] [--noise-temp 0.9] [--flow-steps 10] [--max-gen 128] [--text \"Hello world\"] [--voice <path.safetensors>] [--transition-steps 5] [--max-time-before 40]");
+                eprintln!("Usage: tada_generate --model <path.gguf> --tokenizer <path.json> --output <path.wav> [--cpu] [--temperature 0.9] [--noise-temp 0.9] [--flow-steps 10] [--max-gen 128] [--text \"Hello world\"] [--voice <path.safetensors>] [--transition-steps 5] [--max-time-before 40] [--debug-dump <dir>] [--seed 42]");
                 std::process::exit(1);
             }
         }
@@ -144,6 +159,8 @@ fn parse_args() -> Args {
         voice_path,
         transition_steps,
         max_time_before,
+        debug_dump,
+        seed,
     }
 }
 
@@ -157,10 +174,10 @@ struct SimpleRng {
 }
 
 impl SimpleRng {
-    fn new() -> Self {
+    fn new(seed: u64) -> Self {
         use rand::SeedableRng;
         let distr = rand_distr::Normal::new(0f32, 1.0).unwrap();
-        let rng = rand::rngs::StdRng::seed_from_u64(42);
+        let rng = rand::rngs::StdRng::seed_from_u64(seed);
         Self { inner: rng, distr }
     }
 }
@@ -334,6 +351,50 @@ fn tokenize(
 }
 
 // ---------------------------------------------------------------------------
+// Debug dump writer
+// ---------------------------------------------------------------------------
+
+/// Write raw f32 bytes to `dir/filename`.
+fn write_f32_bin(dir: &std::path::Path, filename: &str, data: &[f32]) -> std::io::Result<()> {
+    use std::io::Write;
+    let path = dir.join(filename);
+    let mut f = std::fs::File::create(&path)?;
+    for v in data {
+        f.write_all(&v.to_le_bytes())?;
+    }
+    Ok(())
+}
+
+/// Write per-step debug info to `base_dir/step_NNN/`.
+fn write_step_debug(
+    base_dir: &std::path::Path,
+    step: usize,
+    info: &AcousticDebugInfo,
+) -> std::io::Result<()> {
+    let step_dir = base_dir.join(format!("step_{:03}", step));
+    std::fs::create_dir_all(&step_dir)?;
+
+    write_f32_bin(&step_dir, "hidden_state.bin", &info.hidden_state)?;
+    write_f32_bin(&step_dir, "flow_input.bin", &info.flow_input)?;
+    write_f32_bin(&step_dir, "flow_output.bin", &info.flow_output)?;
+    write_f32_bin(&step_dir, "acoustic.bin", &info.acoustic)?;
+    write_f32_bin(&step_dir, "time_bits.bin", &info.time_bits)?;
+
+    // Scalars as JSON
+    let json = format!(
+        "{{\n  \"token_id\": {},\n  \"time_before\": {},\n  \"time_after\": {},\n  \"time_before_input\": {},\n  \"time_after_input\": {}\n}}\n",
+        info.token_id,
+        info.time_before,
+        info.time_after,
+        info.time_before_input,
+        info.time_after_input,
+    );
+    std::fs::write(step_dir.join("scalars.json"), json)?;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -432,7 +493,8 @@ fn run() -> CResult<()> {
     };
 
     model.clear_state();
-    let mut rng = SimpleRng::new();
+    let mut rng = SimpleRng::new(args.seed);
+    eprintln!("  rng seed:    {}", args.seed);
 
     // State for generation loop
     let mut acoustics: Vec<Vec<f32>> = Vec::new();
@@ -487,7 +549,19 @@ fn run() -> CResult<()> {
         }
     }
 
+    // Prepare debug dump directory if requested
+    let debug_dump_path: Option<std::path::PathBuf> = if let Some(ref p) = args.debug_dump {
+        let pb = std::path::PathBuf::from(p);
+        std::fs::create_dir_all(&pb)
+            .map_err(|e| candle_core::Error::Msg(format!("failed to create debug dump dir: {e}")))?;
+        eprintln!("  debug dump enabled → {}", pb.display());
+        Some(pb)
+    } else {
+        None
+    };
+
     let t_gen_start = std::time::Instant::now();
+    let mut acoustic_step_idx: usize = 0; // counter for acoustic steps (step >= shift_acoustic)
     for step in 0..total_tokens {
         // Get current token
         let current_token = if step < prompt_len {
@@ -518,12 +592,28 @@ fn run() -> CResult<()> {
         // Generate acoustics after shift_acoustic steps, but NOT during EOS countdown
         // (post-EOS hidden states are conditioned on EOT tokens and decode to noise)
         if step >= shift_acoustic && eos_countdown.is_none() {
-            let (acou, tb, ta) = model.generate_acoustic(
+            let capture = debug_dump_path.is_some();
+            let (acou, tb, ta, mut dbg) = model.generate_acoustic_debug(
                 &hidden,
                 args.noise_temp,
                 &mut rng,
                 args.flow_steps,
+                capture,
             )?;
+
+            // Fill in scalar inputs that the model doesn't know about
+            if let Some(ref mut d) = dbg {
+                d.token_id = current_token;
+                d.time_before_input = time_before;
+                d.time_after_input = time_after;
+            }
+
+            // Write debug dump for this step
+            if let (Some(base), Some(d)) = (&debug_dump_path, &dbg) {
+                write_step_debug(base, acoustic_step_idx, d)
+                    .map_err(|e| candle_core::Error::Msg(format!("debug dump write error: {e}")))?;
+            }
+            acoustic_step_idx += 1;
 
             let acou_vec = acou.squeeze(0)?.to_vec1::<f32>()?;
             acoustics.push(acou_vec);
@@ -547,17 +637,23 @@ fn run() -> CResult<()> {
         //   - During prompt phase (first prompt_phase_len steps after shift_acoustic):
         //     feed zeros or voice features depending on position
         //   - After prompt phase: autoregressive (feed model's own predictions)
+        //
+        // IMPORTANT: the update prepares the INPUT for step+1, so we check
+        // whether *next* step's prompt_idx is still within the prompt phase.
+        // Using the current step's prompt_idx caused the first AR step to
+        // receive zeros/voice-features instead of the model's own prediction.
         if step >= shift_acoustic {
-            let prompt_idx = step - shift_acoustic;
+            let next_prompt_idx = (step + 1) - shift_acoustic;
 
-            if has_voice && prompt_idx < prompt_phase_len {
-                // Still in prompt phase — check if we're in the voice region
-                if prompt_idx >= prefix_len_py && prompt_idx < prefix_len_py + effective_voice_len {
-                    // Feed voice features
+            if has_voice && next_prompt_idx < prompt_phase_len {
+                // Next step is still in the prompt phase — prepare its input.
+                if next_prompt_idx >= prefix_len_py
+                    && next_prompt_idx < prefix_len_py + effective_voice_len
+                {
+                    // Next step is in the voice-feature region: look up step+1's features.
                     if let Some(vp) = voice_prompt.as_ref() {
-                        // Use get_step with offset = shift_acoustic + prefix_len_py
                         if let Some((vp_acoustic, vp_mask, vp_tb, vp_ta)) =
-                            vp.get_step(step, shift_acoustic + prefix_len_py)
+                            vp.get_step(step + 1, shift_acoustic + prefix_len_py)
                         {
                             acoustic = vp_acoustic.clone();
                             acoustic_mask = vp_mask;
@@ -566,14 +662,14 @@ fn run() -> CResult<()> {
                         }
                     }
                 } else {
-                    // Padding region: feed zeros, mask=0
+                    // Next step is in the padding region: feed zeros, mask=0.
                     acoustic = vec![0.0; acoustic_dim];
                     acoustic_mask = 0;
                     time_before = 0;
                     time_after = 0;
                 }
             } else if let Some(ac) = acoustics.last() {
-                // Autoregressive: use the model's own last prediction.
+                // Next step is autoregressive: use the model's own last prediction.
                 acoustic = ac.clone();
                 acoustic_mask = 1;
                 time_before = *times_before.last().unwrap_or(&0);
