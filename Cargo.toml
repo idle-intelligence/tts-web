@@ -1,14 +1,40 @@
 [workspace]
-members = ["crates/tts-core", "crates/tts-wasm"]
+members = ["crates/tts-core", "crates/tts-wasm", "crates/tada-core", "crates/tada-wasm"]
 resolver = "3"
+
+[workspace.dependencies]
+# Burn ML framework
+burn = { version = "0.20", default-features = false, features = ["std"] }
+cubecl = { version = "0.9", default-features = false, features = ["wgpu"] }
+
+# WASM support
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console", "Response", "Request", "RequestInit", "RequestMode"] }
+console_error_panic_hook = "0.1"
+getrandom = { version = "0.3", default-features = false }
+wgpu = { version = "26", features = ["fragile-send-sync-non-atomic-wasm"] }
+
+# Core
+anyhow = "1.0"
+tracing = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+byteorder = "1.5"
 
 [patch."https://github.com/idle-intelligence/mimi-rs.git"]
 mimi-rs = { path = "../mimi-rs" }
 
+# Patch cubecl-wgpu to cap workgroup size for WebGPU's 256 invocation limit
 [patch.crates-io]
 candle-core = { path = "../../candle/candle-core" }
 candle-nn = { path = "../../candle/candle-nn" }
+cubecl-wgpu = { path = "patches/cubecl-wgpu-0.9.0" }
 
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+[profile.release-wasm]
+inherits = "release"
+opt-level = "s"
