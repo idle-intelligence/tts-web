@@ -45,3 +45,30 @@
 - WASM build: `wasm-pack build crates/tada-wasm --target web --release`
 - Quantize model: `python scripts/quantize_tada.py [--format mixed|q4_0]`
 - Precompute voice: `python scripts/precompute_voice.py --audio <wav> --text <transcript> --output voices/<name>.safetensors`
+
+## TADA Architecture (verified findings)
+
+### Config (verified against checkpoint)
+- `num_time_classes: 256` (NOT 1024 — Python class default is 1024 but checkpoint overrides to 256)
+- `num_time_bits: 8`, `time_dim: 16`, `total_latent_dim: 528` (512 acoustic + 16 gray-code bits)
+- `head_layers: 6`, `head_ffn_ratio: 4.0` (NOT Python class defaults of 4 and 3.0)
+- All Rust config values in `TadaConfig::tada_1b()` verified exact match against HF `config.json`
+
+### Pipeline differences: Python vs Rust
+- **CFG scale**: Python default `acoustic_cfg_scale=1.6`, Rust uses 1.0 (no CFG). Rust audio sounds cleaner/less grainy — user prefers no-CFG quality.
+- **`times_before` collection**: Python collects the *input* fed to each step (from previous step's prediction). Rust collects the *prediction* from each step. Off-by-one — suspected cause of trailing "dzouib" noise.
+- **EOS handling**: Python runs flow matching on ALL steps including EOT frames. Rust skips flow matching during EOS countdown.
+- **`num_transition_steps`**: Python trims last N voice prompt acoustic frames for smooth voice→text transition. Our voice prompt only has 5 frames so transition_steps=5 removes all conditioning.
+
+### Known issues
+- **"dzouib" trailing noise**: Present in ALL model variants (Q4_0, F16, F32) — not a quantization issue. Root cause is pipeline logic, likely the times_before off-by-one.
+- **Quantization finding**: Q8_0 embeddings cause gray-code mispredictions. Q4_0 embeddings work fine. Variant E (VV F16 + Embed Q4_0, 1.75 GB) matches baseline.
+- **`smile` phrase runaway**: Q4_0 and Variant E produce 11s+ output with time values of 196. F32 produces normal 4.28s. Quantization-sensitive edge case.
+- **NO_EOS on all outputs**: Model never produces true EOS (128001), always hits token budget via repeated EOT (128009).
+
+### Gray code time prediction
+- Flow matching outputs 528-dim vector: 512 acoustic features + 16 gray-code bits (8 for time_before, 8 for time_after)
+- `time_before` drives `expand_durations()` — determines how many frames each acoustic token spans
+- `time_after` is fed back as autoregressive input for next step only
+- A single gray-code bit flip can cause large integer changes (e.g., 4→59)
+- Anomalous time_before values (59, 196) cause decoder to insert many zero frames → noise
