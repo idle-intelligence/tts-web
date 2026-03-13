@@ -39,9 +39,12 @@
     --tokenizer /Users/tc/Code/idle-intelligence/hf/Llama-3.2-1B/tokenizer.json \
     --voice voices/ljspeech.safetensors \
     --noise-temp 0.9 \
+    --transition-steps 0 \
     --text "The quick brown fox jumps over the lazy dog."
   ```
-  Note: `--noise-temp 0.9` is a critical parameter (reference default); omitting it significantly degrades output quality.
+  Notes:
+  - `--noise-temp 0.9` is a critical parameter (reference default); omitting it significantly degrades output quality.
+  - `--transition-steps 0` is recommended for the current ljspeech voice prompt (only 5 acoustic tokens). With transition_steps=5 (default), all tokens are trimmed → zero-shot mode. With 0, all 5 tokens are used for voice conditioning.
 - WASM build: `wasm-pack build crates/tada-wasm --target web --release`
 - Quantize model: `python scripts/quantize_tada.py [--format mixed|q4_0]`
 - Precompute voice: `python scripts/precompute_voice.py --audio <wav> --text <transcript> --output voices/<name>.safetensors`
@@ -55,16 +58,22 @@
 - All Rust config values in `TadaConfig::tada_1b()` verified exact match against HF `config.json`
 
 ### Pipeline differences: Python vs Rust
-- **CFG scale**: Python default `acoustic_cfg_scale=1.6`, Rust uses 1.0 (no CFG). Rust audio sounds cleaner/less grainy — user prefers no-CFG quality.
-- **`times_before` collection**: Python collects the *input* fed to each step (from previous step's prediction). Rust collects the *prediction* from each step. Off-by-one — suspected cause of trailing "dzouib" noise.
+- **CFG scale**: Python default `acoustic_cfg_scale=1.6`, Rust uses 1.0 (no CFG). Rust audio sounds cleaner/less grainy — user prefers no-CFG quality. CFG confirmed as the cause of Python reference's less-clean endings (tested: Python without CFG also has trailing noise).
+- **`times_before` collection**: Python collects the *input* fed to each step (from previous step's prediction). Rust collects the *prediction* from each step. This difference is intentional and self-consistent — investigated as a suspect for trailing noise, but the fix made things worse and was reverted. The collection difference is not the root cause.
+- **Autoregressive time feedback bug**: Fixed. Was a known source of timing errors in earlier versions.
 - **EOS handling**: Python runs flow matching on ALL steps including EOT frames. Rust skips flow matching during EOS countdown.
-- **`num_transition_steps`**: Python trims last N voice prompt acoustic frames for smooth voice→text transition. Our voice prompt only has 5 frames so transition_steps=5 removes all conditioning.
+- **`num_transition_steps`**: Python trims last N voice prompt acoustic frames for smooth voice→text transition. Our voice prompt only has 5 frames so transition_steps=5 removes all conditioning → zero-shot. Use transition_steps=0 to retain all 5 tokens.
 
 ### Known issues
-- **"dzouib" trailing noise**: Present in ALL model variants (Q4_0, F16, F32) — not a quantization issue. Root cause is pipeline logic, likely the times_before off-by-one.
-- **Quantization finding**: Q8_0 embeddings cause gray-code mispredictions. Q4_0 embeddings work fine. Variant E (VV F16 + Embed Q4_0, 1.75 GB) matches baseline.
-- **`smile` phrase runaway**: Q4_0 and Variant E produce 11s+ output with time values of 196. F32 produces normal 4.28s. Quantization-sensitive edge case.
-- **NO_EOS on all outputs**: Model never produces true EOS (128001), always hits token budget via repeated EOT (128009).
+- **"call" phrase truncated early**: "I had to call you up in the middle of the night" is consistently truncated in both Q4_0 and F32. Model produces very short durations (1,1,1) for middle words — model behavior, not a Rust bug.
+- **"tyger" phrase wrong pronunciation**: Starts with "tiiigger" and non-English sounds in both Q4_0 and F32. Model issue, not quantization.
+- **Voice changes mid-utterance on long phrases**: Voice conditioning only has 5 tokens (too short for stable voice cloning), causing voice drift on longer inputs (e.g., wutang).
+- **Voice prompt too short**: `voices/ljspeech.safetensors` has only 5 acoustic tokens. With `transition_steps=0`, all 5 are used but voice conditioning is still minimal. With `transition_steps=5` (default), all 5 are trimmed → effectively zero-shot. Need a longer voice prompt for real voice cloning.
+- **NO_EOS on all outputs**: Model never produces true EOS (128001), always hits token budget via EOT (128009).
+
+### Previously known issues (fixed or documented)
+- **"dzouib" trailing noise**: FIXED by autoregressive time feedback bug fix + trailing EOT frame trim.
+- **Quantization finding (documented)**: Q8_0 embeddings cause gray-code mispredictions. Q4_0 embeddings work fine. Variant E (VV F16 + Embed Q4_0, 1.75 GB) matches baseline. Still a valid finding for future quantization work.
 
 ### Gray code time prediction
 - Flow matching outputs 528-dim vector: 512 acoustic features + 16 gray-code bits (8 for time_before, 8 for time_after)
