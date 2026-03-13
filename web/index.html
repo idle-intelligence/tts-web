@@ -243,6 +243,31 @@
             color: var(--yellow);
         }
 
+        .model-selector {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+        .model-selector label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--text);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .model-selector input[type="radio"] {
+            cursor: pointer;
+        }
+
+        #tadaProgress {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: var(--faint);
+            margin-top: 8px;
+        }
+
         #audioSection { display: none; }
         audio {
             width: 100%;
@@ -268,14 +293,21 @@
         <p class="org"><img src="apple-touch-icon.png" alt="II">idle intelligence</p>
         <h1>tts-web</h1>
         <p class="tagline">
-            <a href="https://github.com/kyutai-labs/pocket-tts">Pocket TTS</a>
-            quantized to Q8_0 (GGUF), running in the browser via WebAssembly using
+            Text-to-speech models running in the browser via WebAssembly using
             <a href="https://github.com/huggingface/candle">Candle</a>
         </p>
         <p class="repo">
             <a href="https://github.com/idle-intelligence/tts-web">github.com/idle-intelligence/tts-web</a>
         </p>
     </header>
+
+    <section>
+        <h2>model</h2>
+        <div class="model-selector">
+            <label><input type="radio" name="model" value="pocket-tts" checked> Pocket TTS (128 MB)</label>
+            <label><input type="radio" name="model" value="tada"> TADA-1B (~1.1 GB)</label>
+        </div>
+    </section>
 
     <section>
         <h2>status</h2>
@@ -292,7 +324,7 @@
         </div>
     </section>
 
-    <section>
+    <section id="voiceSection">
         <h2>voice</h2>
         <div class="voice-grid" id="voiceGrid"></div>
     </section>
@@ -310,6 +342,7 @@
             </div>
         </div>
         <div id="stepInfo"></div>
+        <div id="tadaProgress"></div>
     </section>
 
     <section id="audioSection">
@@ -335,8 +368,10 @@
         const tempSlider = document.getElementById('tempSlider');
         const tempValue = document.getElementById('tempValue');
         const stepInfo = document.getElementById('stepInfo');
+        const tadaProgress = document.getElementById('tadaProgress');
         const audioSection = document.getElementById('audioSection');
         const audioPlayer = document.getElementById('audioPlayer');
+        const voiceSection = document.getElementById('voiceSection');
 
         const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
@@ -347,6 +382,7 @@
         let activeVoice = null;
         let loadingVoice = false;
         let isDemoGen = false;
+        let currentModel = 'pocket-tts';
 
         const BATCH_MS = 500;
         const TARGET_DURATION = 8;
@@ -400,7 +436,6 @@
             tempValue.textContent = parseFloat(tempSlider.value).toFixed(2);
         });
 
-        // Check if model is already cached
         // Detect local dev server (not deployed to GitHub Pages)
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
@@ -413,6 +448,16 @@
             try {
                 const cache = await caches.open(MODEL_CACHE);
                 return !!(await cache.match(MODEL_CHECK_URL));
+            } catch { return false; }
+        }
+
+        const TADA_CACHE = 'tada-model-v1';
+        async function isTadaCached() {
+            if (isLocal) return true;
+            try {
+                const cache = await caches.open(TADA_CACHE);
+                const url = 'https://huggingface.co/idle-intelligence/tada-gguf/resolve/main/tada-1b-q4_0.gguf';
+                return !!(await cache.match(url));
             } catch { return false; }
         }
 
@@ -445,8 +490,10 @@
             tts.loadVoice(name);
         }
 
-        function makeClient() {
+        // ---- Pocket TTS client ----
+        function makePocketClient() {
             return new TtsClient({
+                modelType: 'pocket-tts',
                 workerUrl: './worker.js',
                 ...(isLocal ? {
                     modelUrl: '/pocket-tts-q8_0.gguf',
@@ -587,6 +634,163 @@
             });
         }
 
+        // ---- TADA client ----
+        function makeTadaClient() {
+            return new TtsClient({
+                modelType: 'tada',
+                baseUrl: isLocal ? location.origin : '',
+                wasmBaseUrl: isLocal ? (location.origin + '/tada-pkg') : undefined,
+                workerUrl: './tada-worker.js',
+                onStatus: (text, ready, progress) => {
+                    if (ready) {
+                        updateStatus('ready', text);
+                        generateBtn.disabled = false;
+                        progressBar.classList.remove('visible');
+                        progressInfo.textContent = '';
+                        downloadBtn.style.display = 'none';
+                    } else {
+                        updateStatus('loading', text);
+                        if (typeof progress === 'number') {
+                            progressBar.classList.add('visible');
+                            progressFill.style.width = (progress * 100) + '%';
+                            progressInfo.textContent = text;
+                        }
+                    }
+                },
+                onError: (err) => {
+                    updateStatus('error', 'Error: ' + err.message);
+                    generating = false;
+                    generateBtn.disabled = false;
+                    stepInfo.textContent = '';
+                    tadaProgress.textContent = '';
+                    console.error(err);
+                },
+                onGenStart: (numTokens) => {
+                    allChunks = [];
+                    genStartTime = performance.now();
+                    audioSection.style.display = 'none';
+                    stepInfo.textContent = '';
+                    tadaProgress.textContent = `Generating... (${numTokens} input tokens)`;
+                    updateStatus('generating', 'Generating...');
+                },
+                onProgress: (step, totalTokens, isEos, tokenId) => {
+                    const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
+                    if (totalTokens > 0) {
+                        tadaProgress.textContent = `Generating token ${step}/${totalTokens} (${elapsed}s)`;
+                    } else {
+                        tadaProgress.textContent = `Generating token ${step}... (${elapsed}s)`;
+                    }
+                },
+                onChunk: (data, step) => {
+                    // TADA delivers full audio at once via the 'audio' message
+                    const chunk = data instanceof Float32Array ? data : new Float32Array(data);
+                    allChunks.push(chunk);
+                },
+                onDone: (totalSteps) => {
+                    const totalTime = ((performance.now() - genStartTime) / 1000).toFixed(2);
+                    generating = false;
+                    generateBtn.disabled = false;
+                    tadaProgress.textContent = '';
+                    updateStatus('ready', 'Ready');
+
+                    const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
+                    if (totalLength === 0) {
+                        stepInfo.textContent = `Done in ${totalTime}s — no audio produced`;
+                        return;
+                    }
+                    const pcm = new Float32Array(totalLength);
+                    let offset = 0;
+                    for (const chunk of allChunks) { pcm.set(chunk, offset); offset += chunk.length; }
+                    const audioDur = (totalLength / tts.sampleRate).toFixed(2);
+                    stepInfo.textContent = `${audioDur}s audio in ${totalTime}s — ${totalSteps} steps`;
+
+                    const wav = encodeWav(pcm, tts.sampleRate);
+                    const blob = new Blob([wav], { type: 'audio/wav' });
+                    audioPlayer.src = URL.createObjectURL(blob);
+                    audioSection.style.display = 'block';
+                }
+            });
+        }
+
+        // ---- Model switching ----
+        function updateUIForModel(model) {
+            if (model === 'tada') {
+                voiceSection.style.display = 'none';
+                tadaProgress.textContent = '';
+            } else {
+                voiceSection.style.display = '';
+                tadaProgress.textContent = '';
+            }
+            stepInfo.textContent = '';
+            audioSection.style.display = 'none';
+        }
+
+        async function switchModel(model) {
+            if (model === currentModel && tts) return;
+            currentModel = model;
+
+            // Destroy existing client
+            if (tts) {
+                tts.destroy();
+                tts = null;
+            }
+
+            // Reset state
+            generating = false;
+            activeVoice = null;
+            loadingVoice = false;
+            isDemoGen = false;
+            allChunks = [];
+            generateBtn.disabled = true;
+            progressBar.classList.remove('visible');
+            progressInfo.textContent = '';
+
+            // Close audio context for pocket-tts streaming
+            if (audioCtx) {
+                audioCtx.close();
+                audioCtx = null;
+                workletNode = null;
+            }
+
+            updateUIForModel(model);
+
+            if (model === 'tada') {
+                tts = makeTadaClient();
+                const cached = await isTadaCached();
+                if (cached) {
+                    updateStatus('loading', 'Loading TADA...');
+                    await initClient();
+                } else {
+                    updateStatus('', 'TADA model not downloaded (~1.1 GB)');
+                    downloadBtn.style.display = '';
+                    downloadBtn.disabled = false;
+                }
+            } else {
+                tts = makePocketClient();
+                const cached = await isModelCached();
+                if (cached) {
+                    updateStatus('loading', 'Loading from cache...');
+                    await initClient();
+                } else {
+                    updateStatus('', 'Model not downloaded');
+                    downloadBtn.style.display = '';
+                    downloadBtn.disabled = false;
+                }
+            }
+        }
+
+        document.querySelectorAll('input[name="model"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                if (generating) {
+                    // Prevent switching while generating
+                    e.target.checked = false;
+                    document.querySelector(`input[name="model"][value="${currentModel}"]`).checked = true;
+                    return;
+                }
+                switchModel(e.target.value);
+            });
+        });
+
         async function initClient() {
             try {
                 await tts.init();
@@ -599,7 +803,8 @@
         }
 
         // Init flow: auto-load if cached, otherwise show download button
-        tts = makeClient();
+        tts = makePocketClient();
+        updateUIForModel('pocket-tts');
         const cached = await isModelCached();
         if (cached) {
             updateStatus('loading', 'Loading from cache...');
@@ -615,11 +820,12 @@
 
         generateBtn.addEventListener('click', () => {
             const text = textInput.value.trim();
-            if (!text || generating || !activeVoice) return;
+            if (!text || generating) return;
+            if (currentModel === 'pocket-tts' && !activeVoice) return;
             isDemoGen = false;
             generating = true;
             generateBtn.disabled = true;
-            setVoiceBtnsEnabled(false);
+            if (currentModel === 'pocket-tts') setVoiceBtnsEnabled(false);
             tts.generate(text, parseFloat(tempSlider.value));
         });
 

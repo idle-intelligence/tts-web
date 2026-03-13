@@ -1,14 +1,18 @@
 export class TtsClient {
     constructor(options = {}) {
+        this.modelType = options.modelType || 'pocket-tts';
+
         this.onStatus = options.onStatus || (() => {});
         this.onError = options.onError || console.error;
         this.onChunk = options.onChunk || (() => {});
         this.onDone = options.onDone || (() => {});
         this.onGenStart = options.onGenStart || (() => {});
         this.onVoiceLoaded = options.onVoiceLoaded || (() => {});
+        this.onProgress = options.onProgress || (() => {});
 
         this.baseUrl = (options.baseUrl || '').replace(/\/+$/, '');
-        this.workerUrl = options.workerUrl || (this.baseUrl + '/worker.js');
+        this.wasmBaseUrl = options.wasmBaseUrl || null;
+        this.workerUrl = options.workerUrl || (this.baseUrl + (this.modelType === 'tada' ? '/tada-worker.js' : '/worker.js'));
         this.modelUrl = options.modelUrl || null;
         this.voiceUrl = options.voiceUrl || null;
         this.tokenizerUrl = options.tokenizerUrl || null;
@@ -39,11 +43,17 @@ export class TtsClient {
             this._pendingResolve = resolve;
             this._pendingReject = reject;
 
-            const config = { baseUrl: this.baseUrl };
-            if (this.modelUrl) config.modelUrl = this.modelUrl;
-            if (this.voiceUrl) config.voiceUrl = this.voiceUrl;
-            if (this.tokenizerUrl) config.tokenizerUrl = this.tokenizerUrl;
-            this.worker.postMessage({ type: 'load', config });
+            if (this.modelType === 'tada') {
+                const msg = { type: 'load', baseUrl: this.baseUrl || location.origin };
+                if (this.wasmBaseUrl) msg.wasmBaseUrl = this.wasmBaseUrl;
+                this.worker.postMessage(msg);
+            } else {
+                const config = { baseUrl: this.baseUrl };
+                if (this.modelUrl) config.modelUrl = this.modelUrl;
+                if (this.voiceUrl) config.voiceUrl = this.voiceUrl;
+                if (this.tokenizerUrl) config.tokenizerUrl = this.tokenizerUrl;
+                this.worker.postMessage({ type: 'load', config });
+            }
         });
     }
 
@@ -52,9 +62,25 @@ export class TtsClient {
         this.worker.postMessage({ type: 'load_voice', name });
     }
 
-    generate(text, temperature = 0.7) {
+    generate(text, temperature = 0.7, options = {}) {
         if (!this._ready) throw new Error('Not initialized');
-        this.worker.postMessage({ type: 'generate', text, temperature });
+        if (this.modelType === 'tada') {
+            this.worker.postMessage({
+                type: 'generate',
+                text,
+                temperature,
+                noiseTemp: options.noiseTemp,
+                numFlowSteps: options.numFlowSteps,
+            });
+        } else {
+            this.worker.postMessage({ type: 'generate', text, temperature });
+        }
+    }
+
+    cancel() {
+        if (this.worker && this.modelType === 'tada') {
+            this.worker.postMessage({ type: 'cancel' });
+        }
     }
 
     isReady() { return this._ready; }
@@ -74,7 +100,7 @@ export class TtsClient {
                 this.onStatus(data.text, data.ready || false, data.progress);
                 break;
             case 'loaded':
-                this.sampleRate = data.sampleRate;
+                if (data.sampleRate) this.sampleRate = data.sampleRate;
                 this._ready = true;
                 if (this._pendingResolve) {
                     this._pendingResolve();
@@ -91,13 +117,21 @@ export class TtsClient {
             case 'chunk':
                 this.onChunk(data.data, data.step);
                 break;
+            case 'progress':
+                this.onProgress(data.step, data.totalTokens, data.isEos, data.tokenId);
+                break;
+            case 'audio':
+                // TADA: full audio delivered at once — call onChunk with the complete buffer
+                this.sampleRate = data.sampleRate || this.sampleRate;
+                this.onChunk(data.samples, -1);
+                break;
             case 'done':
                 this.onDone(data.totalSteps);
                 break;
             case 'error':
-                this.onError(new Error(data.message));
+                this.onError(new Error(data.message || data.error));
                 if (this._pendingReject) {
-                    this._pendingReject(new Error(data.message));
+                    this._pendingReject(new Error(data.message || data.error));
                     this._pendingResolve = null;
                     this._pendingReject = null;
                 }
