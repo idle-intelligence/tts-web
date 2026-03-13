@@ -1,0 +1,12 @@
+{
+  "text": "in being comparatively modern.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/ljspeech.wav",
+  "token_values_shape": [
+    5,
+    512
+  ],
+  "token_positions_shape": [
+    5
+  ]
+}
