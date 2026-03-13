@@ -113,6 +113,7 @@ def _patched_forward_one_step(self, *args, acoustic_features=None, **kwargs):
 
 _tada_mod.TadaForCausalLM.forward_one_step = _patched_forward_one_step  # type: ignore[method-assign]
 
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
