@@ -161,9 +161,9 @@ impl HybridTadaModel {
 
         ids.push(EOT_TOKEN_ID); // <|eot_id|>
 
-        // Add shift_acoustic EOS tokens
+        // Add shift_acoustic EOT tokens (matching tada_generate.rs and Python reference)
         for _ in 0..self.cfg.shift_acoustic {
-            ids.push(EOS_TOKEN_ID);
+            ids.push(EOT_TOKEN_ID);
         }
 
         Ok(ids)
@@ -431,20 +431,34 @@ impl HybridTadaModel {
             0
         };
 
-        let acoustics: &[Vec<f32>];
-        let times_before: &[u32];
-        let stripped_acoustics;
-        let stripped_times;
+        // Build owned, mutable working copies so we can apply further trimming.
+        let mut acoustics: Vec<Vec<f32>>;
+        let mut times_before: Vec<u32>;
 
         if strip_frames > 0 && strip_frames < state.acoustics.len() {
-            stripped_acoustics = state.acoustics[strip_frames..].to_vec();
-            stripped_times = state.times_before[strip_frames..].to_vec();
-            acoustics = &stripped_acoustics;
-            times_before = &stripped_times;
+            acoustics = state.acoustics[strip_frames..].to_vec();
+            times_before = state.times_before[strip_frames..].to_vec();
         } else {
-            acoustics = &state.acoustics;
-            times_before = &state.times_before;
+            acoustics = state.acoustics.clone();
+            times_before = state.times_before.clone();
         }
+
+        // In voice-prompted mode, trim the last acoustic frame.
+        //
+        // With 1 EOT + shift_acoustic trailing EOT tokens = shift_acoustic+1 trailing
+        // token steps. Due to the shift_acoustic=5 offset, only the LAST trailing
+        // step's acoustic is truly meaningless — it encodes the EOT token itself rather
+        // than a shifted text token. Popping it prevents a junk frame from being decoded.
+        if state.voice_prompt.is_some() && !acoustics.is_empty() {
+            acoustics.pop();
+            times_before.pop();
+            eprintln!("[tada] Trimmed 1 trailing meaningless acoustic frame (voice-prompted mode)");
+        }
+
+        // Append a small sentinel trailing time so expand_durations has a boundary
+        // for the last real speech frame. Use 1 rather than duplicating the last
+        // frame's duration, to avoid adding unnecessary silence.
+        times_before.push(1);
 
         // Clamp anomalous time_before values to prevent trailing noise.
         // Values like 59 or 196 cause expand_durations to insert many zero
@@ -466,7 +480,7 @@ impl HybridTadaModel {
 
         let samples = self
             .candle_model
-            .decode_audio(acoustics, times_before)?;
+            .decode_audio(&acoustics, times_before)?;
 
         Ok(samples)
     }

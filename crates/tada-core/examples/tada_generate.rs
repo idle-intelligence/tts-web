@@ -765,11 +765,24 @@ fn run() -> CResult<()> {
         times_after.drain(..strip_frames);
     }
 
+    // In voice-prompted mode, trim the last acoustic frame.
+    //
+    // With 1 EOT + shift_acoustic trailing EOT tokens = shift_acoustic+1 trailing token
+    // steps. Due to the shift_acoustic=5 offset, only the LAST trailing step's acoustic
+    // is truly meaningless — it encodes the EOT token itself rather than a shifted text
+    // token. Popping it prevents a junk frame from being decoded into audio.
+    if has_voice && !acoustics.is_empty() {
+        acoustics.pop();
+        times_before.pop();
+        times_after.pop();
+        eprintln!("  Trimmed 1 trailing meaningless acoustic frame (voice-prompted mode)");
+    }
+
     // Python also adds one extra time_before at the end (from the last step)
     // and removes leading silence: wav[..., int(24000 * time_before[0] / 50):]
-    // For now, add trailing time entry (use first times_before or 0).
-    let trailing_time = *times_before.last().unwrap_or(&0);
-    times_before.push(trailing_time);
+    // Use a small sentinel value (1) rather than duplicating the last frame's
+    // duration, to avoid extending the audio with unnecessary silence.
+    times_before.push(1);
 
     // --- Clamp anomalous time_before values ---
     // Some frames get pathological values (e.g. 59, 196) that cause
