@@ -99,6 +99,45 @@ All runs: seed=42, temp=0.9, noise_temp=0.9, flow_steps=10, voice=ljspeech, Meta
 
 ---
 
+## Run 6 (2026-03-13) — Post-bugfix full benchmark, all variants × 4 phrases
+
+**Bugs fixed before this run:**
+- Autoregressive time feedback bug: predictions now fed back correctly instead of re-feeding the input
+- Trailing EOT frame trim: removes the final silent EOT padding frame from audio output
+- WASM EOT token fix: padding token corrected in WASM bindings
+
+**Test matrix**: 9 configs × 4 phrases = 36 runs. Phrases: fox ("The quick brown fox jumps over the lazy dog."), call ("I had to call you up in the middle of the night"), tyger ("Tyger Tyger, burning bright"), wutang ("Cash rules everything around me, dollar dollar bill y'all, you need to diversify your bonds.").
+
+**Setup**: seed=42, noise_temp=0.9, flow_steps=10, voice=ljspeech (5 tokens), transition_steps=0, Metal GPU.
+**Python reference**: BF16 CPU (MPS has dtype assertion errors), CFG acoustic_cfg_scale=1.6, transition_steps=5.
+
+### Summary (averages across 4 phrases)
+
+| Variant | GGUF Size | Avg Load | Avg Gen | Avg Decode | Avg Audio | Avg RTF | Notes |
+|---------|-----------|----------|---------|------------|-----------|---------|-------|
+| F32 GGUF | 6.5 GB | 37.9s | 33.9s | 2.0s | 2.5s | 15.8x | Unusable — 38s load, 30-40s gen |
+| F16 GGUF | 3.3 GB | 8.1s | 18.2s | 2.1s | 2.5s | 8.9x | 2× faster than F32, still 3× slower than Q4_0 |
+| Q4_0 baseline | 2.6 GB | 2.6s | 7.6s | 2.1s | 2.5s | 3.3x | LLM compute dominates gen |
+| Var-B VV-F32 E-Q8 | 2.5 GB | 2.9s | 7.6s | 2.1s | 2.6s | 3.2x | Same gen as Q4_0 — LLM Q4_0 dominates |
+| Python BF16 CPU | — | 2.0s | 5.2s | — | 5.3s | 1.1x | CFG (2× passes) + no separate decode step |
+| Var-A VV-F16 E-Q8 | 1.9 GB | 1.2s | 7.5s | 2.2s | 2.6s | 3.2x | |
+| Var-E VV-F16 E-Q4 | 1.8 GB | 1.1s | 7.2s | 2.1s | 2.5s | 3.1x | Matches Q4_0 baseline quality (Run 5 finding) |
+| Mixed VV-Q8 E-Q8 | 1.4 GB | 0.8s | 2.4s | 2.2s | 2.7s | 1.0x | ~3× faster gen than Q4_0 variants; sub-1× on fox/wutang |
+| Var-C VV-Q8 E-Q4 | 1.3 GB | 0.8s | 2.4s | 2.1s | 2.5s | 1.1x | Smallest; sub-1× on fox/wutang |
+
+### Key observations
+
+- **Performance tiers**: VV-Q8 variants (Mixed, Var-C) average 2.4s gen vs 7.2–7.6s for Q4_0/VV-F16/VV-F32 variants — approximately 3× faster generation.
+- **F32 GGUF is unusable**: 38s load + 30-40s gen per phrase. F16 GGUF is 2× faster than F32 but still 3× slower than Q4_0.
+- **Q4_0, Var-B, Var-A, Var-E all have nearly identical gen times** (~6.5–7.5s for fox): the LLM backbone (Q4_0 in all) dominates generation time, not the VibeVoice precision.
+- **Mixed and Var-C hit sub-1× RTF on fox and wutang** (realtime generation achieved).
+- **Python BF16 CPU is surprisingly competitive**: 4.7s gen (fox) vs Rust Q4_0 Metal 7.1s. Python includes CFG (2× LLM passes per step) and no separate decode step — the apparent efficiency likely reflects CFG producing shorter-duration outputs in this comparison.
+- **Audio duration asymmetry**: Python produces longer audio (fox 5.6s) vs Rust (fox 2.7–2.8s). CFG scale and transition_steps differences (Python: CFG=1.6, transition_steps=5; Rust: no CFG, transition_steps=0) are the likely cause.
+- **"call" phrase consistently truncated across ALL variants**: audio 1.1–2.7s for a phrase expected ~4s. Observed in Q4_0, F32, F16, and all mixed variants. Model behavior, not a quantization artifact.
+- **Decode time scales with audio length**: roughly 0.5–0.8s decode per second of audio across all Rust variants.
+
+---
+
 ## Earlier samples (pre-benchmark, 2026-03-12)
 
 | File | Config | Notes |

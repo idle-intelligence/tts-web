@@ -48,6 +48,70 @@ Testing which model components tolerate lower precision without gray-code mispre
 - VibeVoice Q8_0 introduces independent errors: even with correct Q4_0 embeddings (variant C), VV Q8_0 mispredicts the fox text.
 - Misprediction is always a single gray-code bit flip: gray(4)=00000110 → gray(59)=00100110 (bit 5).
 
+## Post-Bugfix Full Benchmark (2026-03-13)
+
+Post-bugfix run covering all variants × 4 phrases. Bugs fixed before this run: autoregressive time feedback bug (predictions now fed back correctly), trailing EOT frame trim (removes silent padding), WASM EOT token fix (padding token corrected).
+
+**Setup**: Apple Silicon Mac, Metal GPU, seed=42, noise_temp=0.9, flow_steps=10, voice=ljspeech (5 tokens), transition_steps=0.
+**Python reference**: BF16 on CPU (MPS has dtype assertion errors), transformers 4.57.6, CFG acoustic_cfg_scale=1.6, transition_steps=5.
+**Note**: Python uses CFG (2× LLM passes per step) and transition_steps=5 (trims all 5 voice tokens → effectively zero-shot). Rust uses no CFG and transition_steps=0 (uses all 5 tokens). Audio duration differences (Python fox=5.58s vs Rust fox=2.7s) are likely due to CFG influence on duration predictions.
+**"call" phrase note**: Consistently truncated across ALL variants (1.1–2.7s for a phrase expected ~4s) — model behavior, not a quantization or Rust artifact.
+
+### Summary (averages across 4 phrases)
+
+| Variant | GGUF Size | Avg Load | Avg Gen | Avg Decode | Avg Audio | Avg RTF | Notes |
+|---------|-----------|----------|---------|------------|-----------|---------|-------|
+| F32 GGUF | 6.5 GB | 37.9s | 33.9s | 2.0s | 2.5s | 15.8x | Unusable — 38s load, 30-40s gen |
+| F16 GGUF | 3.3 GB | 8.1s | 18.2s | 2.1s | 2.5s | 8.9x | 2× faster than F32, still 3× slower than Q4_0 |
+| Q4_0 baseline | 2.6 GB | 2.6s | 7.6s | 2.1s | 2.5s | 3.3x | LLM compute dominates gen |
+| Var-B VV-F32 E-Q8 | 2.5 GB | 2.9s | 7.6s | 2.1s | 2.6s | 3.2x | Same gen as Q4_0 — LLM Q4_0 dominates |
+| Python BF16 CPU | — | 2.0s | 5.2s | — | 5.3s | 1.1x | CFG (2× passes) + no separate decode step |
+| Var-A VV-F16 E-Q8 | 1.9 GB | 1.2s | 7.5s | 2.2s | 2.6s | 3.2x | |
+| Var-E VV-F16 E-Q4 | 1.8 GB | 1.1s | 7.2s | 2.1s | 2.5s | 3.1x | Matches Q4_0 baseline quality (Run 5 finding) |
+| Mixed VV-Q8 E-Q8 | 1.4 GB | 0.8s | 2.4s | 2.2s | 2.7s | 1.0x | ~3× faster gen than Q4_0 variants; sub-1× on fox/wutang |
+| Var-C VV-Q8 E-Q4 | 1.3 GB | 0.8s | 2.4s | 2.1s | 2.5s | 1.1x | Smallest; sub-1× on fox/wutang |
+
+### Full Results
+
+| Variant | Size | Phrase | Load | Gen | Decode | Audio | RTF |
+|---------|------|--------|------|-----|--------|-------|-----|
+| F32 GGUF | 6.5 GB | fox | 38.1s | 40.0s | 2.3s | 2.7s | 14.6x |
+| F32 GGUF | 6.5 GB | call | 38.5s | 26.7s | 0.9s | 1.1s | 24.7x |
+| F32 GGUF | 6.5 GB | tyger | 37.4s | 29.4s | 1.6s | 2.1s | 14.3x |
+| F32 GGUF | 6.5 GB | wutang | 37.5s | 39.3s | 3.3s | 4.2s | 9.4x |
+| F16 GGUF | 3.3 GB | fox | 10.6s | 19.1s | 2.2s | 2.7s | 7.0x |
+| F16 GGUF | 3.3 GB | call | 8.0s | 17.1s | 1.0s | 1.1s | 15.9x |
+| F16 GGUF | 3.3 GB | tyger | 7.2s | 16.0s | 1.6s | 2.1s | 7.8x |
+| F16 GGUF | 3.3 GB | wutang | 6.6s | 20.5s | 3.4s | 4.2s | 4.9x |
+| Q4_0 baseline | 2.6 GB | fox | 2.5s | 7.1s | 2.3s | 2.8s | 2.6x |
+| Q4_0 baseline | 2.6 GB | call | 2.7s | 7.4s | 1.3s | 1.6s | 4.8x |
+| Q4_0 baseline | 2.6 GB | tyger | 2.7s | 6.4s | 1.5s | 1.8s | 3.5x |
+| Q4_0 baseline | 2.6 GB | wutang | 2.3s | 9.4s | 3.2s | 3.9s | 2.4x |
+| Var-B VV-F32 E-Q8 | 2.5 GB | fox | 2.9s | 6.9s | 2.2s | 2.8s | 2.5x |
+| Var-B VV-F32 E-Q8 | 2.5 GB | call | 3.0s | 7.5s | 1.3s | 1.6s | 4.8x |
+| Var-B VV-F32 E-Q8 | 2.5 GB | tyger | 2.8s | 6.3s | 1.6s | 1.9s | 3.3x |
+| Var-B VV-F32 E-Q8 | 2.5 GB | wutang | 2.7s | 9.6s | 3.3s | 4.2s | 2.3x |
+| Python BF16 CPU | — | fox | 2.0s | 4.7s | — | 5.6s | 0.8x |
+| Python BF16 CPU | — | call | 2.0s | 4.8s | — | 2.7s | 1.8x |
+| Python BF16 CPU | — | tyger | 2.0s | 4.2s | — | 6.1s | 0.7x |
+| Python BF16 CPU | — | wutang | 2.0s | 7.0s | — | 6.7s | 1.0x |
+| Var-A VV-F16 E-Q8 | 1.9 GB | fox | 1.4s | 6.9s | 2.3s | 2.8s | 2.5x |
+| Var-A VV-F16 E-Q8 | 1.9 GB | call | 1.1s | 7.4s | 1.3s | 1.6s | 4.8x |
+| Var-A VV-F16 E-Q8 | 1.9 GB | tyger | 1.1s | 6.3s | 1.6s | 1.9s | 3.3x |
+| Var-A VV-F16 E-Q8 | 1.9 GB | wutang | 1.1s | 9.4s | 3.4s | 4.2s | 2.2x |
+| Var-E VV-F16 E-Q4 | 1.8 GB | fox | 1.3s | 6.6s | 2.2s | 2.8s | 2.4x |
+| Var-E VV-F16 E-Q4 | 1.8 GB | call | 1.0s | 7.1s | 1.3s | 1.6s | 4.5x |
+| Var-E VV-F16 E-Q4 | 1.8 GB | tyger | 1.0s | 5.9s | 1.5s | 1.8s | 3.3x |
+| Var-E VV-F16 E-Q4 | 1.8 GB | wutang | 1.0s | 9.3s | 3.2s | 3.9s | 2.4x |
+| Mixed VV-Q8 E-Q8 | 1.4 GB | fox | 1.0s | 2.3s | 2.3s | 2.7s | 0.8x |
+| Mixed VV-Q8 E-Q8 | 1.4 GB | call | 0.8s | 2.4s | 1.3s | 1.6s | 1.5x |
+| Mixed VV-Q8 E-Q8 | 1.4 GB | tyger | 0.8s | 2.1s | 1.6s | 1.9s | 1.1x |
+| Mixed VV-Q8 E-Q8 | 1.4 GB | wutang | 0.7s | 2.9s | 3.5s | 4.4s | 0.7x |
+| Var-C VV-Q8 E-Q4 | 1.3 GB | fox | 0.9s | 2.2s | 2.1s | 2.7s | 0.8x |
+| Var-C VV-Q8 E-Q4 | 1.3 GB | call | 0.7s | 2.4s | 1.3s | 1.6s | 1.5x |
+| Var-C VV-Q8 E-Q4 | 1.3 GB | tyger | 0.7s | 2.1s | 1.5s | 1.8s | 1.2x |
+| Var-C VV-Q8 E-Q4 | 1.3 GB | wutang | 0.7s | 2.9s | 3.3s | 3.9s | 0.8x |
+
 ### Skipped / Invalid
 
 | Run | Date | Config | Notes |
