@@ -296,3 +296,18 @@ Note: Gen time includes llm=3.1-3.4s + vibe=11.0-11.5s. LLM per-step avg 129-137
 | burn-rope-fix-q4-tyger | burn+candle | wgpu+cpu | Q4_0 baseline | 2.6G | tyger | 1.6 | 17.4 | 1.3 | 2.44 | 7.14x | burn_rope_fix/tyger.wav |
 | burn-rope-fix-q4-time | burn+candle | wgpu+cpu | Q4_0 baseline | 2.6G | time | 2.0 | 15.6 | 1.3 | 2.48 | 6.27x | burn_rope_fix/time.wav |
 | burn-rope-fix-q4-wutang | burn+candle | wgpu+cpu | Q4_0 baseline | 2.6G | wutang | 1.6 | 20.9 | 2.0 | 3.94 | 5.30x | burn_rope_fix/wutang.wav |
+
+---
+
+## burn-varC
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| burn-varC-q4-fox | burn+candle | wgpu+cpu | Var-C VV-Q8 E-Q4 | 1.3G | fox | 0.9 | 5.4 | 1.5 | 2.74 | 1.99x | burn_varC/fox.wav |
+| burn-varC-q4-call | burn+candle | wgpu+cpu | Var-C VV-Q8 E-Q4 | 1.3G | call | 0.9 | 5.8 | 0.9 | 1.54 | 3.79x | burn_varC/call.wav |
+| burn-varC-q4-tyger | burn+candle | wgpu+cpu | Var-C VV-Q8 E-Q4 | 1.3G | tyger | 0.9 | 6.3 | 1.4 | 2.62 | 2.41x | burn_varC/tyger.wav |
+| burn-varC-q4-time | burn+candle | wgpu+cpu | Var-C VV-Q8 E-Q4 | 1.3G | time | 0.9 | 5.6 | 1.4 | 2.48 | 2.27x | burn_varC/time.wav |
+| burn-varC-q4-wutang | burn+candle | wgpu+cpu | Var-C VV-Q8 E-Q4 | 1.3G | wutang | 0.9 | 7.5 | 2.4 | 4.24 | 1.77x | burn_varC/wutang.wav |
+| burn-varC-q4-smile | burn+candle | wgpu+cpu | Var-C VV-Q8 E-Q4 | 1.3G | smile | 0.9 | 6.5 | 2.6 | 4.58 | 1.42x | burn_varC/smile.wav |
+| burn-varC-q4-woods | burn+candle | wgpu+cpu | Var-C VV-Q8 E-Q4 | 1.3G | woods | 0.9 | 7.2 | 1.9 | 3.52 | 2.06x | burn_varC/woods.wav |
+| burn-varC-q4-universe | burn+candle | wgpu+cpu | Var-C VV-Q8 E-Q4 | 1.3G | universe | 0.9 | 7.5 | 2.2 | 3.92 | 1.92x | burn_varC/universe.wav |

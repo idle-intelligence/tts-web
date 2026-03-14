@@ -643,3 +643,39 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 **Notes**: LLM per-step avg 156–168ms (GPU), VibeVoice per-step avg 455–460ms (CPU). Fox times_before matches candle exactly: [6, 2, 10, 12, 17, 25, 25, 11, 6, 17, 8, 4, 1] — confirming the RoPE fix resolves the hidden-state divergence that previously caused gibberish output.
 
 **User feedback**: Not yet evaluated.
+
+---
+
+## burn-varC
+
+**Date**: 2026-03-14
+**Commit**: e248a13 (RoPE fix) + gguf.rs fix for Q8_0/Q4_K dtype parsing
+**Purpose**: Burn/wgpu GPU benchmark with Var-C model (1.3G, VV Q8_0 + Embed Q4_0). First Burn run with a small model — Q8_0 VV tensors are loaded by candle (not Burn), Q4_0 embeddings loaded by Burn. Also tested Mixed (1.4G) but it failed because Mixed has Q8_0 embeddings which Burn's EmbeddingStore can't handle (reads Q8_0 bytes as Q4_0 → garbage times_before [14,14,15,15...]).
+
+**Parameters**:
+- engine: burn+candle
+- device: wgpu+cpu (LLM on wgpu GPU, VibeVoice on candle CPU)
+- seed: 42
+- noise_temp: 0.9
+- flow_steps: 10
+- voice: ljspeech
+- transition_steps: 0
+- model: Var-C VV-Q8 E-Q4 (1.3G), file tada-1b-C-vvq8-eq4.gguf
+
+**Texts**:
+- fox: "The quick brown fox jumps over the lazy dog."
+- call: "I had to call you up in the middle of the night"
+- tyger: "Tyger Tyger, burning bright, In the forests of the night"
+- time: "Time is money, who can afford to pay attention?"
+- wutang: "Cash rules everything around me, dollar dollar bill y'all, you need to diversify your bonds."
+- smile: "Your smile is like a breath of spring, Your voice is soft like summer rain"
+- woods: "There is a pleasure in the pathless woods, There is a rapture on the lonely shore"
+- universe: "I'll tell you one thing about the universe, though. The universe is a pretty big place."
+
+**Notes**:
+- Per-step averages: LLM=134–140ms (GPU), VibeVoice=85–86ms (CPU, Q8_0)
+- Fox times_before matches candle EXACTLY: [6, 2, 10, 12, 17, 25, 25, 11, 6, 17, 7, 4, 1]
+- Key: VibeVoice Q8_0 runs at 85ms/step (vs 455ms with F32 VV) — 5x faster
+- Mixed model (1.4G, Q8_0 embeddings) failed: Burn EmbeddingStore reads Q8_0 bytes as Q4_0 → garbage times_before [14,14,15,15...]. Only Var-C (Q4_0 embeddings) works with Burn.
+
+**User feedback**: Not yet evaluated.

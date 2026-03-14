@@ -126,6 +126,8 @@ pub enum GgmlDtype {
     F32,
     F16,
     Q4_0,
+    Q8_0,
+    Q4_K,
 }
 
 impl GgmlDtype {
@@ -134,6 +136,8 @@ impl GgmlDtype {
             0 => Ok(Self::F32),
             1 => Ok(Self::F16),
             2 => Ok(Self::Q4_0),
+            8 => Ok(Self::Q8_0),
+            12 => Ok(Self::Q4_K),
             other => bail!("Unsupported GGML dtype code: {other}"),
         }
     }
@@ -145,6 +149,14 @@ impl GgmlDtype {
             Self::Q4_0 => {
                 let num_blocks = num_elements / 32;
                 num_blocks * 18
+            }
+            Self::Q8_0 => {
+                let num_blocks = num_elements / 32;
+                num_blocks * 34
+            }
+            Self::Q4_K => {
+                let num_blocks = num_elements / 256;
+                num_blocks * 144
             }
         }
     }
@@ -719,7 +731,7 @@ pub fn load_f32_tensor<R: Read + Seek>(
             .chunks_exact(2)
             .map(|b| f16_to_f32(u16::from_le_bytes([b[0], b[1]])))
             .collect(),
-        GgmlDtype::Q4_0 => bail!("Cannot load Q4_0 tensor '{name}' as f32"),
+        other => bail!("Cannot load {:?} tensor '{name}' as f32", other),
     };
     Ok(data)
 }
@@ -772,6 +784,7 @@ pub fn load_f32_weight_any<R: Read + Seek>(
             let num_elements = info.num_elements() as usize;
             dequantize_q4_to_f32(&bytes, num_elements)
         }
+        other => bail!("Cannot load {:?} tensor '{name}' as f32 weight", other),
     };
     Ok((data, [shape[0], shape[1]]))
 }
