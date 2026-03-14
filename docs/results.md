@@ -42,14 +42,26 @@ Columns: ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(
 
 ---
 
-## mixed-quant-discovery
+## bench8-noise-discovery
 
 | ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
 |----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
-| mixed-quant-q4-metal-06-fox | candle | metal | Q4_0 baseline | 2.64G | fox | 3.7 | 6.9 | 2.6 | 3.18 | 2.18x | bench8_run1_q4_metal.wav |
-| mixed-quant-q4-metal-09-fox | candle | metal | Q4_0 baseline | 2.64G | fox | 3.7 | 7.1 | 2.6 | 3.04 | 2.32x | bench8_run2_q4_metal.wav |
-| mixed-quant-mixedv1-metal-fox | candle | metal | Mixed v1 dec-Q4_0 | 1.48G | fox | 1.0 | 2.2 | 3.4 | 4.14 | 0.54x | bench8_run3_mixedv1_metal.wav |
-| mixed-quant-mixedv2-metal-fox | candle | metal | Mixed v2 dec-Q8_0 | 1.52G | fox | 1.0 | 2.3 | 3.5 | 4.14 | 0.56x | bench8_run4_mixedv2_metal.wav |
+| bench8-noise-q4-06-fox | candle | metal | Q4_0 baseline | 2.64G | fox | 3.7 | 6.9 | 2.6 | 3.18 | 2.18x | bench8_run1_rust_q4_metal.wav |
+| bench8-noise-q4-09-fox | candle | metal | Q4_0 baseline | 2.64G | fox | 3.7 | 7.1 | 2.6 | 3.04 | 2.32x | bench8_run2_rust_q4_metal.wav |
+| bench8-noise-mixv1-fox | candle | metal | Mixed v1 dec-Q4_0 | 1.48G | fox | 1.0 | 2.2 | 3.4 | 4.14 | 0.54x | bench8_run3_mixedv1_metal.wav |
+| bench8-noise-mixv2-fox | candle | metal | Mixed v2 dec-Q8_0 | 1.52G | fox | 1.0 | 2.3 | 3.5 | 4.14 | 0.56x | bench8_run4_mixedv2_metal.wav |
+
+---
+
+## bench8-phrases
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| bench8-phrases-q4-tyger | candle | metal | Q4_0 baseline | 2.64G | tyger | — | — | — | — | — | bench8_run5a_q4_tyger.wav |
+| bench8-phrases-mix-tyger | candle | metal | Mixed Q4+Q8 | 1.52G | tyger | — | — | — | — | — | bench8_run5b_mixed_tyger.wav |
+| bench8-phrases-q4-time | candle | metal | Q4_0 baseline | 2.64G | time | — | — | — | — | — | bench8_run6a_q4_.wav |
+| bench8-phrases-mix-time | candle | metal | Mixed Q4+Q8 | 1.52G | time | — | — | — | — | — | bench8_run6b_mixed_.wav |
+| bench8-phrases-q4-universe | candle | metal | Q4_0 baseline | 2.64G | universe | — | — | — | — | — | bench8_run7a_q4_time.wav |
 
 ---
 
@@ -69,6 +81,98 @@ Columns: ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(
 | variant-precision-D-time | candle | metal | Var-D VV-Q8 E-Q8 | 1.52G | time | — | — | — | 4.98 | — | — |
 | variant-precision-E-fox | candle | metal | Var-E VV-F16 E-Q4 | 1.75G | fox | — | — | — | 3.04 | — | — |
 | variant-precision-E-time | candle | metal | Var-E VV-F16 E-Q4 | 1.75G | time | — | — | — | 3.88 | — | — |
+
+---
+
+## exp2-variant-sweep
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| exp2-baseline-fox | candle | metal | Q4_0 baseline | 2.64G | fox | — | — | — | — | — | exp_baseline_fox.wav |
+| exp2-baseline-time | candle | metal | Q4_0 baseline | 2.64G | time | — | — | — | — | — | exp_baseline_time.wav |
+| exp2-varE-tyger | candle | metal | Var-E VV-F16 E-Q4 | 1.75G | tyger | — | — | — | 3.00 | — | exp2_varE_tyger.wav |
+| exp2-varE-woods | candle | metal | Var-E VV-F16 E-Q4 | 1.75G | woods | — | — | — | 4.78 | — | exp2_varE_woods.wav |
+| exp2-varE-smile | candle | metal | Var-E VV-F16 E-Q4 | 1.75G | smile | — | — | — | 7.66 | — | exp2_varE_smile.wav |
+| exp2-varE-call | candle | metal | Var-E VV-F16 E-Q4 | 1.75G | call | — | — | — | 3.10 | — | exp2_varE_call.wav |
+| exp2-varE-wutang | candle | metal | Var-E VV-F16 E-Q4 | 1.75G | wutang | — | — | — | 8.92 | — | exp2_varE_wutang.wav |
+| exp2-varE-universe | candle | metal | Var-E VV-F16 E-Q4 | 1.75G | universe | — | — | — | 3.96 | — | exp2_varE_universe.wav |
+| exp2-f16-fox | candle | cpu | F16 | 3.3G | fox | — | — | — | 3.68 | 4.88x | exp2_f16_fox.wav |
+| exp2-f16-time | candle | cpu | F16 | 3.3G | time | — | — | — | 3.14 | 6.15x | exp2_f16_time.wav |
+| exp2-f16-tyger | candle | cpu | F16 | 3.3G | tyger | — | — | — | 3.38 | 6.07x | exp2_f16_tyger.wav |
+| exp2-f16-call | candle | cpu | F16 | 3.3G | call | — | — | — | 3.06 | 6.28x | exp2_f16_call.wav |
+
+---
+
+## exp3-eos-fix
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| exp3-pyref-fox | python-bf16 | cpu | BF16 baseline | — | fox | — | — | — | 5.58 | — | exp3_pyref_fox.wav |
+| exp3-pyref-time | python-bf16 | cpu | BF16 baseline | — | time | — | — | — | 4.50 | — | exp3_pyref_time.wav |
+| exp3-pyref-tyger | python-bf16 | cpu | BF16 baseline | — | tyger | — | — | — | 6.38 | — | exp3_pyref_tyger.wav |
+| exp3-pyref-call | python-bf16 | cpu | BF16 baseline | — | call | — | — | — | 2.68 | — | exp3_pyref_call.wav |
+| exp3-q4-fox | candle | metal | Q4_0 baseline | 2.64G | fox | — | — | — | 2.80 | — | exp3_q4_fox.wav |
+| exp3-q4-time | candle | metal | Q4_0 baseline | 2.64G | time | — | — | — | 3.54 | — | exp3_q4_time.wav |
+| exp3-q4-smile | candle | metal | Q4_0 baseline | 2.64G | smile | — | — | — | 11.20 | — | exp3_q4_smile.wav |
+| exp3-varE-fox | candle | metal | Var-E VV-F16 E-Q4 | 1.75G | fox | — | — | — | 2.80 | — | exp3_varE_fox.wav |
+| exp3-varE-time | candle | metal | Var-E VV-F16 E-Q4 | 1.75G | time | — | — | — | 4.64 | — | exp3_varE_time.wav |
+| exp3-varE-call | candle | metal | Var-E VV-F16 E-Q4 | 1.75G | call | — | — | — | 2.62 | — | exp3_varE_call.wav |
+
+---
+
+## exp5-f32-baseline
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| exp5-f32-fox | candle | cpu | F32 | 6.5G | fox | — | 20.5 | — | 3.44 | 5.95x | exp5_f32_fox.wav |
+| exp5-f32-time | candle | cpu | F32 | 6.5G | time | — | 21.4 | — | 3.12 | 6.84x | exp5_f32_time.wav |
+| exp5-f32-smile | candle | cpu | F32 | 6.5G | smile | — | 24.1 | — | 4.28 | 5.63x | exp5_f32_smile.wav |
+| exp5-f32-call | candle | cpu | F32 | 6.5G | call | — | 21.5 | — | 2.40 | 8.96x | exp5_f32_call.wav |
+
+---
+
+## exp8-all-fixes
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| exp8-q4-fox | candle | metal | Q4_0 baseline | 2.64G | fox | — | — | — | — | — | exp8_q4_fox.wav |
+| exp8-q4-time | candle | metal | Q4_0 baseline | 2.64G | time | — | — | — | — | — | exp8_q4_time.wav |
+| exp8-q4-smile | candle | metal | Q4_0 baseline | 2.64G | smile | — | — | — | — | — | exp8_q4_smile.wav |
+| exp8-q4-call | candle | metal | Q4_0 baseline | 2.64G | call | — | — | — | — | — | exp8_q4_call.wav |
+
+---
+
+## exp9-eot-trim
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| exp9-q4-fox | candle | metal | Q4_0 baseline | 2.64G | fox | — | — | — | 2.74 | — | exp9_q4_fox.wav |
+| exp9-q4-time | candle | metal | Q4_0 baseline | 2.64G | time | — | — | — | 2.34 | — | exp9_q4_time.wav |
+| exp9-q4-smile | candle | metal | Q4_0 baseline | 2.64G | smile | — | — | — | 4.58 | — | exp9_q4_smile.wav |
+| exp9-q4-call | candle | metal | Q4_0 baseline | 2.64G | call | — | — | — | 1.56 | — | exp9_q4_call.wav |
+
+---
+
+## exp10-final-comparison
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| exp10-q4-fox | candle | metal | Q4_0 baseline | 2.64G | fox | — | — | — | 2.74 | — | exp10_q4_fox.wav |
+| exp10-q4-time | candle | metal | Q4_0 baseline | 2.64G | time | — | — | — | 2.34 | — | exp10_q4_time.wav |
+| exp10-q4-smile | candle | metal | Q4_0 baseline | 2.64G | smile | — | — | — | 4.58 | — | exp10_q4_smile.wav |
+| exp10-q4-call | candle | metal | Q4_0 baseline | 2.64G | call | — | — | — | 1.56 | — | exp10_q4_call.wav |
+| exp10-q4-tyger | candle | metal | Q4_0 baseline | 2.64G | tyger | — | — | — | 2.54 | — | exp10_q4_tyger.wav |
+| exp10-q4-woods | candle | metal | Q4_0 baseline | 2.64G | woods | — | — | — | 3.54 | — | exp10_q4_woods.wav |
+| exp10-q4-universe | candle | metal | Q4_0 baseline | 2.64G | universe | — | — | — | 3.92 | — | exp10_q4_universe.wav |
+| exp10-q4-wutang | candle | metal | Q4_0 baseline | 2.64G | wutang | — | — | — | 4.58 | — | exp10_q4_wutang.wav |
+| exp10-f32-fox | candle | cpu | F32 | 6.5G | fox | — | 63.2 | — | 2.74 | 23.1x | exp10_f32_fox.wav |
+| exp10-f32-time | candle | cpu | F32 | 6.5G | time | — | 58.3 | — | 2.50 | 23.3x | exp10_f32_time.wav |
+| exp10-f32-smile | candle | cpu | F32 | 6.5G | smile | — | 60.0 | — | 4.64 | 12.9x | exp10_f32_smile.wav |
+| exp10-f32-call | candle | cpu | F32 | 6.5G | call | — | 21.6 | — | 1.08 | 20.0x | exp10_f32_call.wav |
+| exp10-f32-tyger | candle | cpu | F32 | 6.5G | tyger | — | 22.3 | — | 2.50 | 8.9x | exp10_f32_tyger.wav |
+| exp10-f32-woods | candle | cpu | F32 | 6.5G | woods | — | — | — | 3.50 | — | exp10_f32_woods.wav |
+| exp10-f32-universe | candle | cpu | F32 | 6.5G | universe | — | — | — | 4.28 | — | exp10_f32_universe.wav |
+| exp10-f32-wutang | candle | cpu | F32 | 6.5G | wutang | — | — | — | 5.08 | — | exp10_f32_wutang.wav |
 
 ---
 

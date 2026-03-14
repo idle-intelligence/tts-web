@@ -109,11 +109,11 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 
 ---
 
-## mixed-quant-discovery
+## bench8-noise-discovery
 
-**Date**: 2026-03-12
-**Commit**: unknown
-**Purpose**: Test mixed Q4+Q8 quantization variants for size/speed. Also caught a noise_temp=0.6 regression bug.
+**Date**: 2026-03-13
+**Commit**: around 4d86056
+**Purpose**: Mixed Q4+Q8 quantization test. Also caught noise_temp=0.6 bug (wrong default).
 
 **Parameters**:
 - engine: candle
@@ -122,7 +122,6 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 - noise_temp: 0.6 (run 1, bug) / 0.9 (runs 2–4, correct)
 - flow_steps: 10
 - voice: ljspeech
-- transition_steps: 5
 
 **Texts**:
 - fox: "The quick brown fox jumps over the lazy dog."
@@ -135,8 +134,36 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 
 **User feedback**:
 - noise_temp=0.6: "flat/dead audio"
-- Q4_0 noise_temp=0.9: baseline reference
-- Mixed v1 and v2: "Near-identical quality"
+- Mixed v1 and v2: "almost identical voice quality, but slightly longer, and right after the voice, it introduces some noise"
+
+---
+
+## bench8-phrases
+
+**Date**: 2026-03-13
+**Commit**: around 4d86056
+**Purpose**: Multi-phrase testing with Q4_0 and Mixed models.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- seed: 42
+- noise_temp: 0.9
+- flow_steps: 10
+- voice: ljspeech
+
+**Texts**:
+- tyger: "Tyger Tyger, burning bright, In the forests of the night"
+- time: "Time is money, who can afford to pay attention?"
+- universe: (text not recorded)
+
+**Variants**:
+- Q4_0 baseline (2.64G)
+- Mixed Q4+Q8 (1.52G)
+
+**Notes**: No timing data captured for these runs.
+
+**User feedback**: "All the examples, but the silence ones, include some noise/parasite voice in the end"
 
 ---
 
@@ -175,9 +202,195 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 - D: tb=59 on both (misprediction everywhere)
 - E: tb=4 (correct) on both texts
 
-**Notes**: No audio files logged for these runs — they were part of a systematic diagnostic comparison. Variant E selected as winner: smallest model with correct gray-code predictions on all tested phrases.
+**Notes**: No audio files logged for these runs — they were part of a systematic diagnostic comparison. Variant E selected as winner: smallest model with correct gray-code predictions on all tested phrases. This experiment was run pre-bugfix (before the autoregressive time feedback fix in 7e275ba). The gray-code mispredictions found here were later largely eliminated by that fix, making the variant-sweep findings less critical.
 
 **User feedback**: Not individually evaluated. Variant E selected as winner.
+
+---
+
+## exp2-variant-sweep
+
+**Date**: 2026-03-13
+**Commit**: ec906e4
+**Purpose**: Systematic comparison of all 6 quantization variants (baseline, A–E) across 6 phrases. Also ran F16 CPU as an additional reference.
+
+**Parameters**:
+- engine: candle
+- device: metal (Var-E) / cpu (F16)
+- seed: 42
+- noise_temp: 0.9
+- flow_steps: 10
+- voice: ljspeech
+- transition_steps: 5
+
+**Texts**:
+- fox: "The quick brown fox jumps over the lazy dog."
+- time: "Time is money, who can afford to pay attention?"
+- tyger: "Tyger Tyger, burning bright, In the forests of the night"
+- woods: "There is a pleasure in the pathless woods"
+- smile: "Your smile is like a breath of spring, Your voice is soft like summer rain"
+- call: "I had to call you up in the middle of the night"
+
+**Variants**:
+- Baseline Q4_0, Var-A through Var-E (all on Metal)
+- F16 CPU (full precision reference)
+
+**Notes**: Audio durations captured for Var-E and F16 only; no timing for other variants.
+
+**User feedback**:
+- "A B E are fine for 'fox', but all variants are equally bad for the 'time is money' test. All the version of the 'time' tests finish with the words 'dzouib'."
+- "They *all* have parasite noise or voice."
+- F16 time result: "Still has 'dzouib'"
+
+---
+
+## exp3-eos-fix
+
+**Date**: 2026-03-13
+**Commit**: 9db7c77
+**Purpose**: EOS handling fix test. Also added Python reference comparison.
+
+**Parameters**:
+- engine: candle / python-bf16
+- device: metal (Rust) / cpu (Python)
+- seed: 42
+- noise_temp: 0.9
+- flow_steps: 10
+- voice: ljspeech
+
+**Texts**:
+- fox: "The quick brown fox jumps over the lazy dog."
+- time: "Time is money, who can afford to pay attention?"
+- tyger: "Tyger Tyger, burning bright, In the forests of the night"
+- woods: "There is a pleasure in the pathless woods"
+- smile: "Your smile is like a breath of spring, Your voice is soft like summer rain"
+- call: "I had to call you up in the middle of the night"
+
+**Variants**:
+- Python BF16 CPU (reference)
+- Q4_0 baseline (Metal)
+- Var-E VV-F16 E-Q4 (Metal)
+- F16 CPU
+
+**Notes**: Python ref handles "smile" fine (6.28s) but Q4_0/varE produce 11s+ runaway on "smile". Timing data not captured.
+
+**User feedback**: "smile is a bit garbled, lower quality than before. time and call both still have words (dzouig for time)"
+
+---
+
+## exp5-f32-baseline
+
+**Date**: 2026-03-13
+**Commit**: around 9db7c77
+**Purpose**: F32 GGUF (full precision, ~6.5GB) to check whether quantization is causing the "dzouib" and trailing noise issues.
+
+**Parameters**:
+- engine: candle
+- device: cpu (F32 too large for Metal GPU buffer)
+- seed: 42
+- noise_temp: 0.9
+- flow_steps: 10
+- voice: ljspeech
+
+**Texts**:
+- fox: "The quick brown fox jumps over the lazy dog."
+- time: "Time is money, who can afford to pay attention?"
+- smile: "Your smile is like a breath of spring, Your voice is soft like summer rain"
+- call: "I had to call you up in the middle of the night"
+
+**Variants**: F32 GGUF (6.5G) — nothing quantized
+
+**Notes**: Gen times only (no load/decode captured). Confirms noise and "zdouib" are not quantization artifacts.
+
+**User feedback**: "They all include noise, and time still says 'zdouib'. Is this with the real full model, nothing is quantized? That's kinda good news, once we fix this, we'll be able to use the quantized models!"
+
+---
+
+## exp8-all-fixes
+
+**Date**: 2026-03-13
+**Commit**: 7e275ba
+**Purpose**: Test combined fixes: autoregressive time feedback bug (fixed) + transition_steps=0 (retain all 5 voice prompt acoustic tokens instead of trimming them all away).
+
+**Parameters**:
+- engine: candle
+- device: metal
+- seed: 42
+- noise_temp: 0.9
+- flow_steps: 10
+- voice: ljspeech
+- transition_steps: 0
+
+**Texts**:
+- fox: "The quick brown fox jumps over the lazy dog."
+- time: "Time is money, who can afford to pay attention?"
+- smile: "Your smile is like a breath of spring, Your voice is soft like summer rain"
+- call: "I had to call you up in the middle of the night"
+
+**Variants**: Q4_0 baseline (Metal, transition_steps=0)
+
+**Notes**: No timing data captured. Significant quality improvement over pre-fix runs — "dzouib" reduced to "azoulib" phantom.
+
+**User feedback**: "exp8_q4_fox.wav sounds **great**. exp8_q4_time.wav sounds **great**, but... still has a phantom noise after attention. It's not 'zdouib' anymore, it's 'azoulib'? Let's commit!"
+
+---
+
+## exp9-eot-trim
+
+**Date**: 2026-03-13
+**Commit**: 4474519
+**Purpose**: Trim the trailing EOT acoustic frame to remove the residual phantom noise ("azoulib") found in exp8.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- seed: 42
+- noise_temp: 0.9
+- flow_steps: 10
+- voice: ljspeech
+- transition_steps: 0
+
+**Texts**:
+- fox: "The quick brown fox jumps over the lazy dog."
+- time: "Time is money, who can afford to pay attention?"
+- smile: "Your smile is like a breath of spring, Your voice is soft like summer rain"
+- call: "I had to call you up in the middle of the night"
+
+**Variants**: Q4_0 baseline (Metal, trailing EOT frame trimmed)
+
+**Notes**: Audio durations captured; gen/load/decode not recorded.
+
+**User feedback**: "fox, time, smile are... Good! Weird voice, though, a bit of an Indian accent? call sounds like 'I had to call you up whaaa'"
+
+---
+
+## exp10-final-comparison
+
+**Date**: 2026-03-13
+**Commit**: 4474519
+**Purpose**: Full comparison with all fixes applied — Q4_0 vs F32, across 8 test phrases. Establishes the post-fix quality baseline.
+
+**Parameters**:
+- Q4_0: candle, metal, seed=42, noise_temp=0.9, flow_steps=10, voice=ljspeech, transition_steps=0
+- F32: candle, cpu, seed=42, noise_temp=0.9, flow_steps=10, voice=ljspeech, transition_steps=0
+
+**Texts**:
+- fox: "The quick brown fox jumps over the lazy dog."
+- time: "Time is money, who can afford to pay attention?"
+- smile: "Your smile is like a breath of spring, Your voice is soft like summer rain"
+- call: "I had to call you up in the middle of the night"
+- tyger: "Tyger Tyger, burning bright, In the forests of the night"
+- woods: "There is a pleasure in the pathless woods, There is a rapture on the lonely shore"
+- universe: "I'll tell you one thing about the universe, though. The universe is a pretty big place."
+- wutang: "Cash rules everything around me, dollar dollar bill y'all, you need to diversify your bonds."
+
+**Variants**:
+- Q4_0 baseline (2.64G, Metal)
+- F32 (6.5G, CPU)
+
+**Notes**: Gen times captured for some F32 runs; load/decode not fully recorded. Q4_0 Metal gen times not recorded (only audio durations). F32 CPU gen time is very slow (20–63s per phrase). This run establishes which issues are model-level vs. implementation bugs.
+
+**User feedback**: "call is cut early in both. tyger tyger starts really wrong, in both cases, tiiigger with a very strong Indian accent and even words that don't sound english. Apart from this, they all sound very good, in both cases! One weird thing, the wutang one, it's changing voices in the middle! Makes me think maybe we don't handle the voice setting very well."
 
 ---
 
@@ -194,7 +407,7 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 **Texts**:
 - fox: "The quick brown fox jumps over the lazy dog."
 - call: "I had to call you up in the middle of the night"
-- tyger: "Tyger Tyger, burning bright"
+- tyger: "Tyger Tyger, burning bright" (note: shorter than the tyger text used in exp10 — "In the forests of the night" not included here)
 - wutang: "Cash rules everything around me, dollar dollar bill y'all, you need to diversify your bonds."
 
 **Variants**:
