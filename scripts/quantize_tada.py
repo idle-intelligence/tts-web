@@ -272,16 +272,17 @@ def get_quant_type(name: str, shape: list[int]) -> str:
 
 
 def get_quant_type_custom(name: str, shape: list[int],
-                          vv_type: str = 'q8_0', embed_type: str = 'q8_0') -> str:
-    """Determine quantization type for a tensor with configurable VV and embed types.
+                          vv_type: str = 'q8_0', embed_type: str = 'q8_0',
+                          llm_type: str = 'q4_0') -> str:
+    """Determine quantization type for a tensor with configurable VV, embed, and LLM types.
 
-    Works like get_quant_type but allows overriding the VibeVoice (prediction_head.*)
-    and embedding (model.embed_tokens.weight) quantization types.
+    Works like get_quant_type but allows overriding the VibeVoice (prediction_head.*),
+    embedding (model.embed_tokens.weight), and Llama backbone (model.layers.*) types.
 
-    vv_type / embed_type: 'f32', 'f16', 'q8_0', or 'q4_0'
+    vv_type / embed_type / llm_type: 'f32', 'f16', 'q8_0', or 'q4_0'
 
     Strategy:
-      - Llama backbone (model.layers.*) → Q4_0  (always, not overridable)
+      - Llama backbone (model.layers.*) → llm_type
       - Embeddings (model.embed_tokens) → embed_type
       - VibeVoice (prediction_head.*)   → vv_type
       - Decoder attention               → Q8_0  (Q4_0 destroys decoder quality)
@@ -294,11 +295,11 @@ def get_quant_type_custom(name: str, shape: list[int],
     if 'layernorm' in name or 'norm.weight' in name:
         return 'f32'
 
-    # Llama backbone layers → Q4_0 (always)
+    # Llama backbone layers → llm_type
     if name.startswith('model.layers.'):
-        if any(d % 32 != 0 for d in shape):
+        if llm_type in ('q4_0', 'q8_0') and any(d % 32 != 0 for d in shape):
             return 'f32'
-        return 'q4_0'
+        return llm_type
 
     # Embeddings → embed_type (fall back to f32 if dims not divisible by 32)
     if name == 'model.embed_tokens.weight':
@@ -418,6 +419,9 @@ def main():
                         help='Quantization type for VibeVoice (prediction_head.*) in mixed mode (default: q8_0)')
     parser.add_argument('--embed-type', type=str, default='q8_0', choices=['f32', 'f16', 'q8_0', 'q4_0'],
                         help='Quantization type for embeddings (model.embed_tokens.weight) in mixed mode (default: q8_0)')
+    parser.add_argument('--llm-type', type=str, default='q4_0',
+                        choices=['f32', 'f16', 'q8_0', 'q4_0'],
+                        help='Quantization type for Llama backbone layers (default: q4_0)')
     args = parser.parse_args()
 
     input_path = args.input
@@ -509,7 +513,7 @@ def main():
         for s in shape:
             n_elements *= s
         if output_format == 'mixed':
-            qt = get_quant_type_custom(name, shape, args.vv_type, args.embed_type)
+            qt = get_quant_type_custom(name, shape, args.vv_type, args.embed_type, args.llm_type)
         elif output_format == 'q4_0':
             # Legacy: only Llama backbone to Q4_0
             qt = 'q4_0' if should_quantize_q4_0(name, shape, n_elements) else 'f32'
