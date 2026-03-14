@@ -59,6 +59,9 @@ struct Args {
     debug_dump: Option<String>,
     /// RNG seed for reproducible generation (default 42).
     seed: u64,
+    /// Classifier-free guidance scale for acoustic features (default 1.0 = disabled).
+    /// Python reference default is 1.6.
+    cfg_scale: f32,
 }
 
 fn parse_args() -> Args {
@@ -78,6 +81,7 @@ fn parse_args() -> Args {
     let mut max_time_before = 40u32;
     let mut debug_dump: Option<String> = None;
     let mut seed = 42u64;
+    let mut cfg_scale = 1.0f32;
 
     let mut i = 1;
     while i < args.len() {
@@ -137,9 +141,13 @@ fn parse_args() -> Args {
                 i += 1;
                 seed = args[i].parse().expect("seed must be u64");
             }
+            "--cfg-scale" => {
+                i += 1;
+                cfg_scale = args[i].parse().expect("cfg-scale must be f32");
+            }
             other => {
                 eprintln!("Unknown arg: {other}");
-                eprintln!("Usage: tada_generate --model <path.gguf> --tokenizer <path.json> --output <path.wav> [--cpu] [--temperature 0.9] [--noise-temp 0.9] [--flow-steps 10] [--max-gen 128] [--text \"Hello world\"] [--voice <path.safetensors>] [--transition-steps 5] [--max-time-before 40] [--debug-dump <dir>] [--seed 42]");
+                eprintln!("Usage: tada_generate --model <path.gguf> --tokenizer <path.json> --output <path.wav> [--cpu] [--temperature 0.9] [--noise-temp 0.9] [--flow-steps 10] [--max-gen 128] [--text \"Hello world\"] [--voice <path.safetensors>] [--transition-steps 5] [--max-time-before 40] [--debug-dump <dir>] [--seed 42] [--cfg-scale 1.0]");
                 std::process::exit(1);
             }
         }
@@ -161,6 +169,7 @@ fn parse_args() -> Args {
         max_time_before,
         debug_dump,
         seed,
+        cfg_scale,
     }
 }
 
@@ -598,6 +607,7 @@ fn run() -> CResult<()> {
                 args.noise_temp,
                 &mut rng,
                 args.flow_steps,
+                args.cfg_scale,
                 capture,
             )?;
 

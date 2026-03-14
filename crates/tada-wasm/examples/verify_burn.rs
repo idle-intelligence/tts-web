@@ -482,6 +482,44 @@ fn main() -> anyhow::Result<()> {
 
         let (cos_f2, max_f2) = compare_vecs(&candle_f32_vec_2, &burn_nf32_vec_2);
         println!("Step 2 (F32 GGUF, Burn vs candle F32): cosine={cos_f2:.8}, max_diff={max_f2:.6}");
+
+        // -----------------------------------------------------------------------
+        // Step 2 attention debug: compare layer-0 intermediates side by side
+        // -----------------------------------------------------------------------
+        println!("\n--- Step 2 attention debug: layer 0 intermediates ---");
+        println!("Candle and Burn will each print their layer-0 attention intermediates.");
+        println!("Compare [CANDLE] vs [BURN] lines to find the first divergence.\n");
+
+        // Reset and re-run step 1 silently to fill KV caches
+        candle_model_f32.clear_state();
+        {
+            let tok1 = CTensor::from_vec(vec![token_id], (1, 1), &Device::Cpu)?;
+            let ac1 = CTensor::from_vec(acoustic.clone(), (1, 1, acoustic_dim), &Device::Cpu)?;
+            let m1 = CTensor::from_vec(vec![acoustic_mask], (1, 1), &Device::Cpu)?;
+            let tb1 = CTensor::from_vec(vec![time_before], (1, 1), &Device::Cpu)?;
+            let ta1 = CTensor::from_vec(vec![time_after], (1, 1), &Device::Cpu)?;
+            let e1 = candle_model_f32.build_input_embeds(&tok1, &ac1, &m1, &tb1, &ta1)?;
+            let _ = candle_model_f32.forward_step(&e1)?;
+        }
+        let mut cache_dbg = burn_llama_nf32.create_cache(4096);
+        let _ = burn_llama_nf32.forward_step(token_id, &acoustic, acoustic_mask, time_before, time_after, &mut cache_dbg);
+
+        // Step 2: run with debug
+        println!("--- Candle layer 0 debug ---");
+        {
+            let tok2 = CTensor::from_vec(vec![token_id_2], (1, 1), &Device::Cpu)?;
+            let ac2 = CTensor::from_vec(acoustic.clone(), (1, 1, acoustic_dim), &Device::Cpu)?;
+            let m2 = CTensor::from_vec(vec![acoustic_mask], (1, 1), &Device::Cpu)?;
+            let tb2 = CTensor::from_vec(vec![time_before], (1, 1), &Device::Cpu)?;
+            let ta2 = CTensor::from_vec(vec![time_after], (1, 1), &Device::Cpu)?;
+            let e2 = candle_model_f32.build_input_embeds(&tok2, &ac2, &m2, &tb2, &ta2)?;
+            let _ = candle_model_f32.forward_step_debug_layer0(&e2)?;
+        }
+
+        println!("\n--- Burn layer 0 debug ---");
+        let _ = burn_llama_nf32.forward_step_debug_layer0(
+            token_id_2, &acoustic, acoustic_mask, time_before, time_after, &mut cache_dbg,
+        );
     } else {
         println!("\n--- F32 GGUF test: SKIPPED (file not found: {F32_GGUF_PATH}) ---");
     }

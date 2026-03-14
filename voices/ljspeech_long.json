@@ -1,0 +1,12 @@
+{
+  "text": "and when the first municipal authority of our land will be no longer subjected to the reproach of fostering an institution which outrages the rights and feelings of humanity,",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/ljspeech_long.wav",
+  "token_values_shape": [
+    32,
+    512
+  ],
+  "token_positions_shape": [
+    32
+  ]
+}

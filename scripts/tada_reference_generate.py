@@ -251,7 +251,7 @@ def main():
             sample_rate=sample_rate,
         )
         # With a voice prompt, use transition + no extra steps
-        num_transition_steps = 5
+        num_transition_steps = 10
         num_extra_steps = 0
         print(
             f"[tada-ref] Voice prompt: text={voice_text!r}, "

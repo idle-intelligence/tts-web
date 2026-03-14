@@ -1,0 +1,12 @@
+{
+  "text": "well see, what it is, it seems like he wants someone more scary, I don't know, cause, he would walk up and down the aisles, there was women on the other side, too, but they'd look like, you know, you wouldn't mess with them, but if you're sitting there, you know, trying to mind your own business",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/sbcsae_rickie.wav",
+  "token_values_shape": [
+    75,
+    512
+  ],
+  "token_positions_shape": [
+    75
+  ]
+}

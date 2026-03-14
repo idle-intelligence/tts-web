@@ -1,0 +1,12 @@
+{
+  "text": "And then, oh man, when the dog started chasing its own tail in the background? I totally lost it.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/fb_ears/fb_ears_emo_amusement_freeform.wav",
+  "token_values_shape": [
+    23,
+    512
+  ],
+  "token_positions_shape": [
+    23
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "text": "I mean, how long have you been practicing? Like, your finger strength and that, uh, that vibrato you do is just insane.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/fb_ears/fb_ears_emo_amazement_freeform.wav",
+  "token_values_shape": [
+    29,
+    512
+  ],
+  "token_positions_shape": [
+    29
+  ]
+}

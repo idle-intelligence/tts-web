@@ -366,6 +366,17 @@ impl TadaModel {
         Ok(hidden)
     }
 
+    /// Run one step with layer-0 attention debug dumps.
+    ///
+    /// Same as `forward_step` but prints intermediate tensors for layer 0's attention.
+    /// Use on step 2 to compare with Burn's `forward_with_cache_debug`.
+    pub fn forward_step_debug_layer0(&mut self, input_embeds: &Tensor) -> Result<Tensor> {
+        let hidden = self.llama.forward_debug_layer0(input_embeds, self.position)?;
+        let (_b, seq_len, _h) = input_embeds.dims3()?;
+        self.position += seq_len;
+        Ok(hidden)
+    }
+
     /// Run only the first `num_layers` transformer layers for per-layer debug comparison.
     ///
     /// Does NOT increment the position counter — this is for debug comparison only.
@@ -386,6 +397,7 @@ impl TadaModel {
     /// - `noise_temp`: noise temperature for the initial sample
     /// - `rng`: WASM-compatible RNG source
     /// - `num_steps`: number of Euler ODE steps (e.g. 32)
+    /// - `acoustic_cfg_scale`: CFG scale for acoustic features (1.0 = disabled)
     ///
     /// Returns `(acoustic, time_before, time_after)` where:
     /// - `acoustic`: `[1, acoustic_dim]`
@@ -396,9 +408,10 @@ impl TadaModel {
         noise_temp: f32,
         rng: &mut dyn Rng,
         num_steps: usize,
+        acoustic_cfg_scale: f32,
     ) -> Result<(Tensor, u32, u32)> {
         let (acoustic, time_before, time_after, _debug) =
-            self.generate_acoustic_debug(hidden, noise_temp, rng, num_steps, false)?;
+            self.generate_acoustic_debug(hidden, noise_temp, rng, num_steps, acoustic_cfg_scale, false)?;
         Ok((acoustic, time_before, time_after))
     }
 
@@ -415,6 +428,7 @@ impl TadaModel {
         noise_temp: f32,
         rng: &mut dyn Rng,
         num_steps: usize,
+        acoustic_cfg_scale: f32,
         capture_debug: bool,
     ) -> Result<(Tensor, u32, u32, Option<AcousticDebugInfo>)> {
         // Squeeze hidden from [1, 1, hidden_size] → [1, hidden_size]
@@ -434,6 +448,8 @@ impl TadaModel {
             &self.prediction_head,
             num_steps,
             "logsnr",
+            acoustic_cfg_scale,
+            self.cfg.acoustic_dim,
         )?;
 
         // Split result into acoustic [1, acoustic_dim] and time gray bits [1, time_dim]

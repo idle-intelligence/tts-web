@@ -413,6 +413,7 @@ fn run() -> anyhow::Result<()> {
                 args.noise_temp,
                 &mut rng,
                 args.flow_steps,
+                1.0,
             )?;
             let vibe_ms = t_vibe.elapsed().as_secs_f64() * 1000.0;
             total_vibe_ms += vibe_ms;

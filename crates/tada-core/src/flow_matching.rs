@@ -107,6 +107,14 @@ fn sigmoid(x: f64) -> f64 {
 // Flow matching ODE solver (Euler method)
 // ---------------------------------------------------------------------------
 
+/// Compute the cosine-scheduled CFG scale at time `t`.
+///
+/// Interpolates from `base_scale` at t=0 to 1.0 at t=1, following a cosine
+/// curve: `cfg = 1.0 + (base_scale - 1.0) * 0.5 * (1.0 + cos(pi * t))`.
+fn scheduled_cfg(base_scale: f32, t: f32) -> f32 {
+    1.0 + (base_scale - 1.0) * 0.5 * (1.0 + (std::f32::consts::PI * t).cos())
+}
+
 /// Solve the flow matching ODE using the Euler method.
 ///
 /// Starting from noise `speech` (sampled from N(0,1) scaled by acoustic_std),
@@ -114,7 +122,10 @@ fn sigmoid(x: f64) -> f64 {
 ///
 /// Euler update: x_{t+1} = x_t + dt * v(x_t, t)
 ///
-/// No classifier-free guidance (acoustic_cfg_scale = 1.0 in TADA v1).
+/// When `acoustic_cfg_scale > 1.0`, classifier-free guidance is applied:
+/// the head is run twice per step (once with the real condition, once with
+/// zeros), and the velocities are combined with a cosine-scheduled scale.
+/// Duration features (last 16 dims) always use scale 1.0.
 ///
 /// # Arguments
 /// - `speech` — initial noisy acoustic latent, shape `[B, acoustic_dim]`
@@ -122,16 +133,29 @@ fn sigmoid(x: f64) -> f64 {
 /// - `head` — the VibeVoice diffusion prediction head
 /// - `num_steps` — number of Euler steps (e.g. 32)
 /// - `time_schedule` — one of "uniform", "cosine", "logsnr"
+/// - `acoustic_cfg_scale` — CFG scale for acoustic features (1.0 = disabled)
+/// - `acoustic_dim` — number of acoustic feature dimensions (e.g. 512)
 pub fn solve_flow_matching(
     speech: &Tensor,
     cond: &Tensor,
     head: &VibeVoiceDiffusionHead,
     num_steps: usize,
     time_schedule: &str,
+    acoustic_cfg_scale: f32,
+    acoustic_dim: usize,
 ) -> Result<Tensor> {
     let device = speech.device();
     let dtype = speech.dtype();
     let schedule = build_time_schedule(num_steps, time_schedule, device)?;
+
+    let use_cfg = (acoustic_cfg_scale - 1.0).abs() > 1e-6;
+
+    // Pre-build zero condition tensor for CFG negative pass (same shape as cond).
+    let cond_neg = if use_cfg {
+        Some(Tensor::zeros_like(cond)?)
+    } else {
+        None
+    };
 
     let mut x = speech.clone();
 
@@ -145,7 +169,36 @@ pub fn solve_flow_matching(
         let t_tensor = Tensor::full(t_val, (b, 1), device)?.to_dtype(dtype)?;
 
         // Predict velocity at current (x, t)
-        let velocity = head.forward(&x, &t_tensor, cond)?;
+        let velocity = if use_cfg {
+            // Positive pass: real condition
+            let vel_pos = head.forward(&x, &t_tensor, cond)?;
+            // Negative pass: zero condition
+            let vel_neg = head.forward(&x, &t_tensor, cond_neg.as_ref().unwrap())?;
+
+            // Cosine-scheduled CFG scale at this time step
+            let cfg = scheduled_cfg(acoustic_cfg_scale, t_val) as f64;
+
+            // Split into acoustic and duration parts
+            let total_dim = vel_pos.dim(1)?;
+            let duration_dim = total_dim - acoustic_dim;
+
+            let vel_pos_acoustic = vel_pos.narrow(1, 0, acoustic_dim)?;
+            let vel_neg_acoustic = vel_neg.narrow(1, 0, acoustic_dim)?;
+
+            // CFG combination for acoustic: neg + cfg * (pos - neg)
+            let vel_acoustic = (&vel_neg_acoustic
+                + &((&vel_pos_acoustic - &vel_neg_acoustic)? * cfg)?)?;
+
+            if duration_dim > 0 {
+                // Duration features: use positive velocity unchanged (scale = 1.0)
+                let vel_duration = vel_pos.narrow(1, acoustic_dim, duration_dim)?;
+                Tensor::cat(&[vel_acoustic, vel_duration], 1)?
+            } else {
+                vel_acoustic
+            }
+        } else {
+            head.forward(&x, &t_tensor, cond)?
+        };
 
         // Euler step: x = x + dt * velocity
         x = (&x + &(velocity * dt as f64)?)?;

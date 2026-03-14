@@ -325,6 +325,7 @@ fn run() -> CResult<()> {
                 noise_temp,
                 &mut rng,
                 flow_steps,
+                1.0,
             )?;
             let acou_vec = acou.squeeze(0)?.to_vec1::<f32>()?;
 

@@ -308,6 +308,7 @@ impl HybridTadaModel {
                 state.noise_temp,
                 &mut state.rng,
                 state.num_flow_steps,
+                1.0,
             )?;
 
             state

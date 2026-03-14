@@ -560,6 +560,81 @@ impl TadaLlamaF32 {
             &self.device,
         )
     }
+
+    /// Forward step with layer-0 attention debug dumps.
+    ///
+    /// Runs through all layers but prints intermediate tensors for layer 0's attention.
+    /// Use on step 2 to compare with candle's `forward_step_debug_layer0`.
+    pub fn forward_step_debug_layer0(
+        &self,
+        token_id: u32,
+        acoustic: &[f32],
+        acoustic_mask: u32,
+        time_before: u32,
+        time_after: u32,
+        cache: &mut LayerCaches,
+    ) -> Tensor<Wgpu, 3> {
+        let dim = self.hidden_size;
+
+        let token_row = self.embed_tokens_gpu.clone().slice([token_id as usize..token_id as usize + 1, 0..dim]);
+        let token_data = token_row.into_data();
+        let token_vec: Vec<f32> = token_data.to_vec().unwrap();
+        let mut sum = token_vec;
+
+        self.acoustic_mask_emb.embed_id_add_cpu(acoustic_mask, &mut sum);
+        self.time_start_embed.embed_id_add_cpu(time_before, &mut sum);
+        self.time_end_embed.embed_id_add_cpu(time_after, &mut sum);
+
+        let acoustic_tensor = Tensor::<Wgpu, 3>::from_data(
+            burn::tensor::TensorData::new(acoustic.to_vec(), [1, 1, acoustic.len()]),
+            &self.device,
+        );
+        let acoustic_proj = self.acoustic_proj.forward(acoustic_tensor);
+        let cpu_embed = Tensor::<Wgpu, 3>::from_data(
+            burn::tensor::TensorData::new(sum, [1, 1, dim]),
+            &self.device,
+        );
+        let mut x = cpu_embed + acoustic_proj;
+
+        for (i, layer) in self.layers.iter().enumerate() {
+            if let Some(c) = cache.get_mut(i) {
+                if i == 0 {
+                    // Layer 0: run with debug
+                    println!("[BURN] === Layer 0 debug ===");
+                    let residual = x.clone();
+                    let normed = layer.input_layernorm.forward(x.clone());
+                    {
+                        let dims = normed.dims();
+                        let flat: Tensor<Wgpu, 1> = normed.clone().flatten(0, 2);
+                        let data: Vec<f32> = flat.into_data().to_vec().unwrap();
+                        println!("  [BURN] after_input_layernorm: shape={dims:?} first4={:?}", &data[..data.len().min(4)]);
+                    }
+                    let attn_out = layer.attention.forward_with_cache_debug(normed, &self.rope, c);
+                    {
+                        let dims = attn_out.dims();
+                        let flat: Tensor<Wgpu, 1> = attn_out.clone().flatten(0, 2);
+                        let data: Vec<f32> = flat.into_data().to_vec().unwrap();
+                        println!("  [BURN] after_attn: shape={dims:?} first4={:?}", &data[..data.len().min(4)]);
+                    }
+                    let after_residual = attn_out + residual;
+                    {
+                        let dims = after_residual.dims();
+                        let flat: Tensor<Wgpu, 1> = after_residual.clone().flatten(0, 2);
+                        let data: Vec<f32> = flat.into_data().to_vec().unwrap();
+                        println!("[BURN] after layer 0 residual: shape={dims:?} first4={:?}", &data[..data.len().min(4)]);
+                    }
+                    // Complete rest of layer 0 (MLP)
+                    let residual2 = after_residual.clone();
+                    let normed2 = layer.post_attention_layernorm.forward(after_residual);
+                    let mlp_out = layer.ffn.forward(normed2);
+                    x = mlp_out + residual2;
+                } else {
+                    x = layer.forward_with_cache(x, &self.rope, c);
+                }
+            }
+        }
+        self.final_norm.forward(x)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -588,6 +663,113 @@ impl F32Attention {
         head_dim: usize,
     ) -> Self {
         Self { q_proj, k_proj, v_proj, o_proj, n_heads, n_kv_heads, head_dim, scale: (head_dim as f32).powf(-0.5) }
+    }
+
+    /// Debug forward: identical computation to forward_with_cache but prints
+    /// the first 4 values and shape of each intermediate tensor.
+    /// Only call for a single layer on a single step.
+    pub fn forward_with_cache_debug(
+        &self,
+        x: Tensor<Wgpu, 3>,
+        rope: &RoPE,
+        cache: &mut KVCache,
+    ) -> Tensor<Wgpu, 3> {
+        fn peek(label: &str, t: &Tensor<Wgpu, 4>) {
+            let dims = t.dims();
+            let flat: Tensor<Wgpu, 1> = t.clone().flatten(0, 3);
+            let data: Vec<f32> = flat.into_data().to_vec().unwrap();
+            let n = data.len().min(4);
+            println!("  [BURN] {label}: shape={dims:?} first4={:?}", &data[..n]);
+        }
+        fn peek3(label: &str, t: &Tensor<Wgpu, 3>) {
+            let dims = t.dims();
+            let flat: Tensor<Wgpu, 1> = t.clone().flatten(0, 2);
+            let data: Vec<f32> = flat.into_data().to_vec().unwrap();
+            let n = data.len().min(4);
+            println!("  [BURN] {label}: shape={dims:?} first4={:?}", &data[..n]);
+        }
+
+        let [batch, seq_len, _] = x.dims();
+        let offset = cache.offset();
+
+        let q = self.q_proj.forward(x.clone());
+        let k = self.k_proj.forward(x.clone());
+        let v = self.v_proj.forward(x);
+
+        let q = q.reshape([batch, seq_len, self.n_heads, self.head_dim]);
+        let k = k.reshape([batch, seq_len, self.n_kv_heads, self.head_dim]);
+        let v = v.reshape([batch, seq_len, self.n_kv_heads, self.head_dim]);
+
+        // Print Q,K,V before RoPE (reshape to 4D for peek; dims are [b,seq,heads,hd])
+        peek("q_before_rope [b,seq,nh,hd]", &q);
+        peek("k_before_rope [b,seq,nkv,hd]", &k);
+        peek("v_before_rope [b,seq,nkv,hd]", &v);
+
+        let (q, k) = rope.apply(q, k, offset);
+
+        peek("q_after_rope  [b,seq,nh,hd]", &q);
+        peek("k_after_rope  [b,seq,nkv,hd]", &k);
+
+        let q = q.swap_dims(1, 2);
+        let k = k.swap_dims(1, 2);
+        let v = v.swap_dims(1, 2);
+
+        peek("k_pre_cache   [b,nkv,seq,hd]", &k);
+        peek("v_pre_cache   [b,nkv,seq,hd]", &v);
+
+        let (k, v) = cache.update(k, v);
+
+        peek("k_from_cache  [b,nkv,total,hd]", &k);
+        peek("v_from_cache  [b,nkv,total,hd]", &v);
+
+        let (k, v) = if self.n_heads != self.n_kv_heads {
+            let repeat_factor = self.n_heads / self.n_kv_heads;
+            let [b, nkv, s, hd] = k.dims();
+            let k2 = k.unsqueeze_dim::<5>(2).repeat_dim(2, repeat_factor).reshape([b, nkv * repeat_factor, s, hd]);
+            let v2 = v.unsqueeze_dim::<5>(2).repeat_dim(2, repeat_factor).reshape([b, nkv * repeat_factor, s, hd]);
+            (k2, v2)
+        } else {
+            (k, v)
+        };
+
+        peek("k_expand_kv   [b,nh,total,hd]", &k);
+        peek("v_expand_kv   [b,nh,total,hd]", &v);
+
+        let k_t = k.swap_dims(2, 3);
+        peek("k_t           [b,nh,hd,total]", &k_t);
+
+        let scores = q.matmul(k_t) * self.scale;
+        peek("scores        [b,nh,seq,total]", &scores);
+
+        let total_seq_len = cache.seq_len();
+        let scores = if seq_len > 1 {
+            let device = scores.device();
+            let mut mask_data = vec![0.0f32; seq_len * total_seq_len];
+            for i in 0..seq_len {
+                let actual_pos = offset + i;
+                for j in 0..total_seq_len {
+                    if j > actual_pos {
+                        mask_data[i * total_seq_len + j] = f32::NEG_INFINITY;
+                    }
+                }
+            }
+            let mask: Tensor<Wgpu, 1> = Tensor::from_floats(mask_data.as_slice(), &device);
+            let mask: Tensor<Wgpu, 4> = mask.reshape([seq_len, total_seq_len]).unsqueeze_dim::<3>(0).unsqueeze_dim(0);
+            scores + mask
+        } else {
+            scores
+        };
+
+        let attn = softmax(scores, 3);
+        peek("attn_weights  [b,nh,seq,total]", &attn);
+
+        let out = attn.matmul(v);
+        peek("attn_out      [b,nh,seq,hd]", &out);
+
+        let out = out.swap_dims(1, 2).reshape([batch, seq_len, self.n_heads * self.head_dim]);
+        peek3("attn_out_flat [b,seq,hidden]", &out);
+
+        self.o_proj.forward(out)
     }
 
     pub fn forward_with_cache(
@@ -673,10 +855,10 @@ impl F32FeedForward {
 }
 
 pub struct F32TransformerBlock {
-    input_layernorm: RmsNorm<Wgpu>,
-    attention: F32Attention,
-    post_attention_layernorm: RmsNorm<Wgpu>,
-    ffn: F32FeedForward,
+    pub input_layernorm: RmsNorm<Wgpu>,
+    pub attention: F32Attention,
+    pub post_attention_layernorm: RmsNorm<Wgpu>,
+    pub ffn: F32FeedForward,
 }
 
 impl F32TransformerBlock {

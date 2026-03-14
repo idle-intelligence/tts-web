@@ -150,6 +150,13 @@ fn repeat_kv(x: &Tensor, n_rep: usize) -> Result<Tensor> {
         .reshape((b, n_kv * n_rep, seq, hd))
 }
 
+fn peek_candle(label: &str, t: &Tensor) {
+    let shape: Vec<usize> = t.dims().to_vec();
+    let flat = t.flatten_all().and_then(|f| f.to_vec1::<f32>()).unwrap_or_default();
+    let n = flat.len().min(4);
+    println!("  [CANDLE] {label}: shape={shape:?} first4={:?}", &flat[..n]);
+}
+
 impl CausalSelfAttention {
     fn load(gguf: &mut GgufTensors, prefix: &str, cfg: &LlamaConfig) -> Result<Self> {
         let q_proj = gguf.qlinear(&format!("{prefix}.q_proj"))?;
@@ -227,6 +234,86 @@ impl CausalSelfAttention {
 
         self.o_proj.forward(&attn_output)
     }
+
+    /// Debug forward: identical computation to forward but prints intermediate tensors.
+    pub fn forward_debug(
+        &self,
+        x: &Tensor,
+        cos: &Tensor,
+        sin: &Tensor,
+        kv_cache: &mut KvCache,
+    ) -> Result<Tensor> {
+        let (b, seq_len, _hidden) = x.dims3()?;
+
+        let q = self.q_proj.forward(x)?;
+        let k = self.k_proj.forward(x)?;
+        let v = self.v_proj.forward(x)?;
+
+        let q = q
+            .reshape((b, seq_len, self.num_heads, self.head_dim))?
+            .transpose(1, 2)?;
+        let k = k
+            .reshape((b, seq_len, self.num_kv_heads, self.head_dim))?
+            .transpose(1, 2)?;
+        let v = v
+            .reshape((b, seq_len, self.num_kv_heads, self.head_dim))?
+            .transpose(1, 2)?;
+
+        // Note: candle transposes first (to [b,heads,seq,hd]) then applies RoPE
+        // Burn applies RoPE before swap_dims (on [b,seq,heads,hd]) — same math, different layout
+        peek_candle("q_before_rope [b,nh,seq,hd]", &q);
+        peek_candle("k_before_rope [b,nkv,seq,hd]", &k);
+        peek_candle("v_before_rope [b,nkv,seq,hd]", &v);
+
+        let q = candle_nn::rotary_emb::rope(&q, cos, sin)?;
+        let k = candle_nn::rotary_emb::rope(&k, cos, sin)?;
+
+        peek_candle("q_after_rope  [b,nh,seq,hd]", &q);
+        peek_candle("k_after_rope  [b,nkv,seq,hd]", &k);
+
+        peek_candle("k_pre_cache   [b,nkv,seq,hd]", &k);
+        peek_candle("v_pre_cache   [b,nkv,seq,hd]", &v);
+
+        let (k, v) = kv_cache.append(&k, &v)?;
+
+        peek_candle("k_from_cache  [b,nkv,total,hd]", &k);
+        peek_candle("v_from_cache  [b,nkv,total,hd]", &v);
+
+        let n_rep = self.num_heads / self.num_kv_heads;
+        let k = repeat_kv(&k, n_rep)?;
+        let v = repeat_kv(&v, n_rep)?;
+
+        peek_candle("k_expand_kv   [b,nh,total,hd]", &k);
+        peek_candle("v_expand_kv   [b,nh,total,hd]", &v);
+
+        let k_t = k.transpose(D::Minus2, D::Minus1)?;
+        peek_candle("k_t           [b,nh,hd,total]", &k_t);
+
+        let scale = 1.0 / (self.head_dim as f64).sqrt();
+        let attn_weights = (q.matmul(&k_t)? * scale)?;
+        peek_candle("scores        [b,nh,seq,total]", &attn_weights);
+
+        let total_seq = k_t.dim(3)?;
+        let attn_weights = if seq_len > 1 {
+            let mask = create_causal_mask(seq_len, total_seq, x.device())?;
+            attn_weights.broadcast_add(&mask)?
+        } else {
+            attn_weights
+        };
+
+        let attn_weights = candle_nn::ops::softmax_last_dim(&attn_weights)?;
+        peek_candle("attn_weights  [b,nh,seq,total]", &attn_weights);
+
+        let attn_output = attn_weights.matmul(&v)?;
+        peek_candle("attn_out      [b,nh,seq,hd]", &attn_output);
+
+        let attn_output = attn_output
+            .transpose(1, 2)?
+            .reshape((b, seq_len, self.num_heads * self.head_dim))?;
+        peek_candle("attn_out_flat [b,seq,hidden]", &attn_output);
+
+        self.o_proj.forward(&attn_output)
+    }
 }
 
 /// Create a causal attention mask for prefill.
@@ -294,6 +381,27 @@ pub struct Block {
 }
 
 impl Block {
+    fn forward_debug_layer0(
+        &self,
+        x: &Tensor,
+        cos: &Tensor,
+        sin: &Tensor,
+        kv_cache: &mut KvCache,
+    ) -> Result<Tensor> {
+        let residual = x;
+        let x = self.input_layernorm.forward(x)?;
+        println!("  [CANDLE] after_input_layernorm first4={:?}", {
+            let v: Vec<f32> = x.flatten_all()?.to_vec1()?;
+            v[..v.len().min(4)].to_vec()
+        });
+        let x = self.attn.forward_debug(&x, cos, sin, kv_cache)?;
+        println!("  [CANDLE] after_attn first4={:?}", {
+            let v: Vec<f32> = x.flatten_all()?.to_vec1()?;
+            v[..v.len().min(4)].to_vec()
+        });
+        residual + x
+    }
+
     fn load(gguf: &mut GgufTensors, prefix: &str, cfg: &LlamaConfig) -> Result<Self> {
         let attn = CausalSelfAttention::load(gguf, &format!("{prefix}.self_attn"), cfg)?;
         let mlp = Mlp::load(gguf, &format!("{prefix}.mlp"))?;
@@ -414,6 +522,34 @@ impl LlamaModel {
         } else {
             Ok(x)
         }
+    }
+
+    /// Debug forward: runs layer 0 with intermediate tensor dumps, then continues normally.
+    ///
+    /// Call this on step 2 to pinpoint where Burn diverges from candle at the attention level.
+    pub fn forward_debug_layer0(&mut self, input_embeds: &Tensor, index_pos: usize) -> Result<Tensor> {
+        let (_b, seq_len, _hidden) = input_embeds.dims3()?;
+        let (cos, sin) = self.rope.get(index_pos, seq_len)?;
+
+        let mut x = input_embeds.clone();
+
+        // Layer 0: run with debug
+        println!("[CANDLE] === Layer 0 debug ===");
+        {
+            let cache = &mut self.kv_caches[0];
+            x = self.layers[0].forward_debug_layer0(&x, &cos, &sin, cache)?;
+        }
+        println!("[CANDLE] after layer 0 residual first4={:?}", {
+            let v: Vec<f32> = x.flatten_all()?.to_vec1()?;
+            v[..v.len().min(4)].to_vec()
+        });
+
+        // Remaining layers: normal forward
+        for i in 1..self.layers.len() {
+            x = self.layers[i].forward(&x, &cos, &sin, &mut self.kv_caches[i])?;
+        }
+
+        self.norm.forward(&x)
     }
 
     /// Look up token embeddings by ID.
