@@ -272,3 +272,15 @@ Columns: ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(
 | burn-voice-burn-q4-fox | burn+candle | wgpu+cpu | Q4_0 baseline | 2.6G | fox | 2.9 | 14.1 | — | 0.98 | — | bench_2026-03-14/burn_voice/fox.wav |
 
 Note: Gen time includes llm=3.1-3.4s + vibe=11.0-11.5s. LLM per-step avg 129-137ms (GPU), VibeVoice per-step avg 457-459ms (CPU).
+
+---
+
+## q4km-varc-benchmark
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| q4km-varc-candle-fox | candle | metal | Q4_K_M Var-C | 1.38G | fox | 1.1 | 2.3 | 2.2 | 2.8 | 0.84x | q4km_varc/fox.wav |
+| q4km-varc-candle-call | candle | metal | Q4_K_M Var-C | 1.38G | call | 0.7 | 2.3 | 0.8 | 0.9 | 2.50x | q4km_varc/call.wav |
+| q4km-varc-candle-tyger | candle | metal | Q4_K_M Var-C | 1.38G | tyger | 0.7 | 2.5 | 2.1 | 2.7 | 0.94x | q4km_varc/tyger.wav |
+| q4km-varc-candle-time | candle | metal | Q4_K_M Var-C | 1.38G | time | 0.7 | 2.3 | 2.0 | 2.5 | 0.92x | q4km_varc/time.wav |
+| q4km-varc-candle-wutang | candle | metal | Q4_K_M Var-C | 1.38G | wutang | 0.7 | 2.9 | 3.1 | 4.0 | 0.72x | q4km_varc/wutang.wav |

@@ -581,3 +581,34 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 **Notes**: Gen time breakdown: llm=3.1–3.4s + vibe=11.0–11.5s. LLM per-step avg 129–137ms (GPU), VibeVoice per-step avg 457–459ms (CPU). Audio duration is significantly shorter than candle equivalent (0.62s vs 2.5s for time, 0.98s vs 2.7s for fox). Suspected cause: Burn GPU float precision divergence produces shorter time_before gray-code predictions than candle Metal, leading to shorter per-frame durations.
 
 **User feedback**: Not yet evaluated.
+
+---
+
+## q4km-varc-benchmark
+
+**Date**: 2026-03-14
+**Commit**: 1d68952
+**Purpose**: First benchmark of Q4_K_M LLM + Q8_0 VV + Q4_0 Embed model (Var-C style with better LLM quant).
+
+**Parameters**:
+- engine: candle
+- device: metal
+- seed: 42
+- noise_temp: 0.9
+- flow_steps: 10
+- voice: ljspeech
+- transition_steps: 0
+- model file: tada-1b-mixed-llmq4_k-vvq8_0-eq4_0.gguf (Q4_K_M Var-C, 1.38G)
+
+**Texts**:
+- fox: "The quick brown fox jumps over the lazy dog."
+- call: "I had to call you up in the middle of the night"
+- tyger: "Tyger Tyger, burning bright, In the forests of the night"
+- time: "Time is money, who can afford to pay attention?"
+- wutang: "Cash rules everything around me, dollar dollar bill y'all, you need to diversify your bonds."
+
+**Variants**: Q4_K_M Var-C (LLM Q4_K_M + VV Q8_0 + Embed Q4_0)
+
+**Notes**: Sub-1x RTF on fox (0.84x), tyger (0.94x), time (0.92x), wutang (0.72x). Call truncated at 0.9s (known model issue). times_before for fox matches Q4_0 baseline almost exactly: [6,2,10,13,17,25,25,11,6,17,8,4,1] vs Q4_0's [6,2,10,12,17,25,25,11,6,17,8,4,1] — only one value differs (13 vs 12 at index 3).
+
+**User feedback**: Not yet evaluated.
