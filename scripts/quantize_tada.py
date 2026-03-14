@@ -41,12 +41,17 @@ GGUF_TENSOR_F32 = 0
 GGUF_TENSOR_F16 = 1
 GGUF_TENSOR_Q4_0 = 2
 GGUF_TENSOR_Q8_0 = 8
+GGUF_TENSOR_Q4_K = 12
 
 Q4_0_BLOCK_SIZE = 32  # values per block
 Q4_0_BYTES_PER_BLOCK = 18  # 2 (f16 scale) + 16 (packed nibbles)
 
 Q8_0_BLOCK_SIZE = 32  # values per block
 Q8_0_BYTES_PER_BLOCK = 34  # 2 (f16 scale) + 32 (int8 values)
+
+Q4_K_BLOCK_SIZE = 256   # values per super-block (QK_K)
+Q4_K_SCALE_SIZE = 12    # bytes for packed 6-bit scales/mins
+Q4_K_BYTES_PER_BLOCK = 4 + Q4_K_SCALE_SIZE + Q4_K_BLOCK_SIZE // 2  # 144 bytes
 
 # ---------------------------------------------------------------------------
 # BF16 → F32 conversion (numpy vectorized)
@@ -147,6 +152,134 @@ def quantize_q8_0(values: np.ndarray) -> bytes:
     out = np.empty((n_blocks, Q8_0_BYTES_PER_BLOCK), dtype=np.uint8)
     out[:, :2] = scales_f16.view(np.uint8).reshape(n_blocks, 2)
     out[:, 2:] = q.view(np.uint8)
+
+    return out.tobytes()
+
+
+# ---------------------------------------------------------------------------
+# Q4_K quantization (k-quant, super-block size 256)
+# ---------------------------------------------------------------------------
+
+def quantize_q4_k(values: np.ndarray) -> bytes:
+    """Quantize F32 numpy array to Q4_K format (candle-compatible, vectorized).
+
+    Block layout (144 bytes per 256 values):
+      [d: f16][dmin: f16][scales: 12 bytes][qs: 128 bytes]
+
+    Scale packing matches candle's BlockQ4K / get_scale_min_k4:
+      j in 0..3: scales[j]   = ls_j (6-bit), scales[j+4] = lm_j (6-bit)
+      j >= 4:   scales[j+4] = (ls_j & 0xF) | ((lm_j & 0xF) << 4)
+                 scales[j-4] |= (ls_j >> 4) << 6
+                 scales[j]   |= (lm_j >> 4) << 6
+
+    qs packing: for each 64-value chunk (4 chunks total):
+      q[chunk*32 + l] = l_lo | (l_hi << 4)
+    Uses make_qkx1_quants logic (nmax=15, ntry=5) vectorized over all blocks.
+    """
+    n = len(values)
+    assert n % Q4_K_BLOCK_SIZE == 0, \
+        f"Q4_K requires length divisible by {Q4_K_BLOCK_SIZE}, got {n}"
+    n_blocks = n // Q4_K_BLOCK_SIZE
+    xs = values.astype(np.float32)
+
+    # Reshape: [n_blocks, 8, 32] — 8 sub-blocks of 32 values each
+    subs = xs.reshape(n_blocks, 8, 32)
+
+    # --- Vectorized make_qkx1_quants (nmax=15, ntry=5) ---
+    nmax = 15.0
+
+    xmin_raw = subs.min(axis=2)        # [n_blocks, 8]
+    xmax_raw = subs.max(axis=2)        # [n_blocks, 8]
+    all_equal = (xmin_raw == xmax_raw) # sub-blocks with zero range → scale=0
+
+    xmin_iter = np.minimum(xmin_raw, 0.0)   # ensure min <= 0
+    range_v = xmax_raw - xmin_iter
+
+    safe_range = np.where(range_v > 0.0, range_v, 1.0)
+    iscale = nmax / safe_range
+    scale = 1.0 / iscale
+    l = np.zeros((n_blocks, 8, 32), dtype=np.int32)
+
+    for _ in range(5):  # ntry=5
+        new_l = np.clip(
+            np.round(iscale[:, :, np.newaxis] * (subs - xmin_iter[:, :, np.newaxis])),
+            0, nmax
+        ).astype(np.int32)
+        did_change = not np.array_equal(new_l, l)
+        l = new_l
+
+        sumlx = np.sum((subs - xmin_iter[:, :, np.newaxis]) * l, axis=2)
+        suml2 = np.sum(l * l, axis=2).astype(np.float32)
+
+        safe_suml2 = np.where(suml2 > 0.0, suml2, 1.0)
+        scale = sumlx / safe_suml2
+
+        residual = subs - scale[:, :, np.newaxis] * l
+        xmin_iter = np.minimum(residual.mean(axis=2), 0.0)
+
+        safe_scale = np.where(scale != 0.0, scale, 1.0)
+        iscale = 1.0 / safe_scale
+
+        if not did_change:
+            break
+
+    scales_f = np.where(all_equal, 0.0, scale)    # [n_blocks, 8]
+    mins_f = np.where(all_equal, 0.0, -xmin_iter)  # [n_blocks, 8], >= 0
+
+    # Super-block scale/min
+    max_scale = scales_f.max(axis=1, keepdims=True)  # [n_blocks, 1]
+    max_min = mins_f.max(axis=1, keepdims=True)
+
+    inv_scale = np.where(max_scale > 0.0, 63.0 / max_scale, 0.0)
+    inv_min = np.where(max_min > 0.0, 63.0 / max_min, 0.0)
+
+    d = (max_scale / 63.0).squeeze(1).astype(np.float32)     # [n_blocks]
+    dmin = (max_min / 63.0).squeeze(1).astype(np.float32)    # [n_blocks]
+
+    ls = np.minimum(np.round(scales_f * inv_scale), 63).astype(np.int32)  # [n_blocks, 8]
+    lm = np.minimum(np.round(mins_f * inv_min), 63).astype(np.int32)      # [n_blocks, 8]
+
+    # Pack scale bytes (12 per block) matching candle's from_float scale packing.
+    # get_scale_min_k4 decodes:
+    #   j < 4:  sc = q[j] & 63,          min = q[j+4] & 63
+    #   j >= 4: sc = (q[j+4] & 0xF) | ((q[j-4] >> 6) << 4)
+    #           min = (q[j+4] >> 4)  | ((q[j] >> 6) << 4)
+    sc_bytes = np.zeros((n_blocks, Q4_K_SCALE_SIZE), dtype=np.uint8)
+    sc_bytes[:, 0:4] = ls[:, 0:4].astype(np.uint8) & 0x3F
+    sc_bytes[:, 4:8] = lm[:, 0:4].astype(np.uint8) & 0x3F
+    for j in range(4, 8):
+        ls_j = ls[:, j].astype(np.uint8)
+        lm_j = lm[:, j].astype(np.uint8)
+        sc_bytes[:, j + 4] = (ls_j & 0xF) | ((lm_j & 0xF) << 4)
+        sc_bytes[:, j - 4] |= (ls_j >> 4) << 6
+        sc_bytes[:, j] |= (lm_j >> 4) << 6
+
+    # Quantize values: q = clip(round((x + dmin*lm) / (d*ls)), 0, 15)
+    sc_val = d[:, np.newaxis] * ls.astype(np.float32)    # [n_blocks, 8]
+    mn_val = dmin[:, np.newaxis] * lm.astype(np.float32) # [n_blocks, 8]
+
+    safe_sc = np.where(sc_val > 0.0, sc_val, 1.0)
+    q_float = (subs + mn_val[:, :, np.newaxis]) / safe_sc[:, :, np.newaxis]
+    q_vals = np.where(
+        sc_val[:, :, np.newaxis] > 0.0,
+        np.clip(np.round(q_float), 0, 15),
+        0.0
+    ).astype(np.uint8)  # [n_blocks, 8, 32]
+
+    # Pack nibbles. Candle layout: 4 chunks of 64, each chunk = sub-blocks 2c and 2c+1.
+    # q[chunk*32 + l] = q_vals[2c][l] | (q_vals[2c+1][l] << 4)
+    qs = np.zeros((n_blocks, Q4_K_BLOCK_SIZE // 2), dtype=np.uint8)
+    for c in range(4):
+        lo = q_vals[:, 2 * c, :]      # [n_blocks, 32]
+        hi = q_vals[:, 2 * c + 1, :]  # [n_blocks, 32]
+        qs[:, c * 32:(c + 1) * 32] = lo | (hi << 4)
+
+    # Build output: d_f16 (2) + dmin_f16 (2) + sc_bytes (12) + qs (128) = 144 per block
+    out = np.empty((n_blocks, Q4_K_BYTES_PER_BLOCK), dtype=np.uint8)
+    out[:, 0:2] = d.astype(np.float16).view(np.uint8).reshape(n_blocks, 2)
+    out[:, 2:4] = dmin.astype(np.float16).view(np.uint8).reshape(n_blocks, 2)
+    out[:, 4:16] = sc_bytes
+    out[:, 16:] = qs
 
     return out.tobytes()
 
@@ -279,7 +412,7 @@ def get_quant_type_custom(name: str, shape: list[int],
     Works like get_quant_type but allows overriding the VibeVoice (prediction_head.*),
     embedding (model.embed_tokens.weight), and Llama backbone (model.layers.*) types.
 
-    vv_type / embed_type / llm_type: 'f32', 'f16', 'q8_0', or 'q4_0'
+    vv_type / embed_type / llm_type: 'f32', 'f16', 'q8_0', 'q4_0', or 'q4_k'
 
     Strategy:
       - Llama backbone (model.layers.*) → llm_type
@@ -295,21 +428,24 @@ def get_quant_type_custom(name: str, shape: list[int],
     if 'layernorm' in name or 'norm.weight' in name:
         return 'f32'
 
+    def _block_size(qt):
+        return Q4_K_BLOCK_SIZE if qt == 'q4_k' else 32
+
     # Llama backbone layers → llm_type
     if name.startswith('model.layers.'):
-        if llm_type in ('q4_0', 'q8_0') and any(d % 32 != 0 for d in shape):
+        if llm_type in ('q4_0', 'q8_0', 'q4_k') and any(d % _block_size(llm_type) != 0 for d in shape):
             return 'f32'
         return llm_type
 
-    # Embeddings → embed_type (fall back to f32 if dims not divisible by 32)
+    # Embeddings → embed_type (fall back to f32 if dims not divisible by block size)
     if name == 'model.embed_tokens.weight':
-        if embed_type in ('q4_0', 'q8_0') and any(d % 32 != 0 for d in shape):
+        if embed_type in ('q4_0', 'q8_0', 'q4_k') and any(d % _block_size(embed_type) != 0 for d in shape):
             return 'f32'
         return embed_type
 
-    # VibeVoice prediction head → vv_type (fall back to f32 if dims not divisible by 32)
+    # VibeVoice prediction head → vv_type (fall back to f32 if dims not divisible by block size)
     if name.startswith('prediction_head.'):
-        if vv_type in ('q4_0', 'q8_0') and any(d % 32 != 0 for d in shape):
+        if vv_type in ('q4_0', 'q8_0', 'q4_k') and any(d % _block_size(vv_type) != 0 for d in shape):
             return 'f32'
         return vv_type
 
@@ -420,7 +556,7 @@ def main():
     parser.add_argument('--embed-type', type=str, default='q8_0', choices=['f32', 'f16', 'q8_0', 'q4_0'],
                         help='Quantization type for embeddings (model.embed_tokens.weight) in mixed mode (default: q8_0)')
     parser.add_argument('--llm-type', type=str, default='q4_0',
-                        choices=['f32', 'f16', 'q8_0', 'q4_0'],
+                        choices=['f32', 'f16', 'q8_0', 'q4_0', 'q4_k'],
                         help='Quantization type for Llama backbone layers (default: q4_0)')
     args = parser.parse_args()
 
@@ -431,7 +567,7 @@ def main():
     elif output_format == 'mixed':
         output_path = os.path.join(
             os.path.dirname(input_path),
-            f'tada-1b-mixed-vv{args.vv_type}-e{args.embed_type}.gguf'
+            f'tada-1b-mixed-llm{args.llm_type}-vv{args.vv_type}-e{args.embed_type}.gguf'
         )
     else:
         output_path = os.path.join(os.path.dirname(input_path), f'tada-1b-{output_format}.gguf')
@@ -537,11 +673,12 @@ def main():
     output_plan.sort(key=lambda x: x[0])
 
     n_q4 = sum(1 for _, _, qt in output_plan if qt == 'q4_0')
+    n_q4k = sum(1 for _, _, qt in output_plan if qt == 'q4_k')
     n_q8 = sum(1 for _, _, qt in output_plan if qt == 'q8_0')
     n_f16 = sum(1 for _, _, qt in output_plan if qt == 'f16')
     n_f32 = sum(1 for _, _, qt in output_plan if qt == 'f32')
     print(f"Skipping {skipped} tensors (precomputed masks, rope_freqs)")
-    print(f"Output tensors: {len(output_plan)} ({n_q4} Q4_0, {n_q8} Q8_0, {n_f16} F16, {n_f32} F32)")
+    print(f"Output tensors: {len(output_plan)} ({n_q4} Q4_0, {n_q4k} Q4_K, {n_q8} Q8_0, {n_f16} F16, {n_f32} F32)")
     print(flush=True)
 
     # -----------------------------------------------------------------------
@@ -551,6 +688,7 @@ def main():
     total_f32_params = 0
     total_f16_params = 0
     total_q4_params = 0
+    total_q4k_params = 0
     total_q8_params = 0
 
     t0 = time.time()
@@ -587,6 +725,13 @@ def main():
             gguf_type = GGUF_TENSOR_Q4_0
             total_q4_params += n_elements
             label = "Q4_0"
+        elif quant_type == 'q4_k':
+            assert n_elements % Q4_K_BLOCK_SIZE == 0, \
+                f"{name}: {n_elements} elements not divisible by {Q4_K_BLOCK_SIZE}"
+            raw = quantize_q4_k(values)
+            gguf_type = GGUF_TENSOR_Q4_K
+            total_q4k_params += n_elements
+            label = "Q4_K"
         elif quant_type == 'q8_0':
             assert n_elements % Q8_0_BLOCK_SIZE == 0, \
                 f"{name}: {n_elements} elements not divisible by {Q8_0_BLOCK_SIZE}"
@@ -618,6 +763,7 @@ def main():
     print()
     print(f"Processed {len(tensor_data)} tensors in {time.time() - t0:.1f}s")
     print(f"  Q4_0 params: {total_q4_params:,}")
+    print(f"  Q4_K params: {total_q4k_params:,}")
     print(f"  Q8_0 params: {total_q8_params:,}")
     print(f"  F16 params:  {total_f16_params:,}")
     print(f"  F32 params:  {total_f32_params:,}")
@@ -631,7 +777,7 @@ def main():
     # Metadata KVs we'll write
     if output_format == 'mixed':
         quant_str = (
-            f"Q4_0+vv{args.vv_type.upper()}+e{args.embed_type.upper()}+Q8_0+F32"
+            f"llm{args.llm_type.upper()}+vv{args.vv_type.upper()}+e{args.embed_type.upper()}+Q8_0+F32"
         )
     else:
         quant_str = output_format.upper()
