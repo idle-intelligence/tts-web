@@ -135,6 +135,7 @@ All runs: seed=42, temp=0.9, noise_temp=0.9, flow_steps=10, voice=ljspeech, Meta
 - **Audio duration asymmetry**: Python produces longer audio (fox 5.6s) vs Rust (fox 2.7–2.8s). CFG scale and transition_steps differences (Python: CFG=1.6, transition_steps=5; Rust: no CFG, transition_steps=0) are the likely cause.
 - **"call" phrase consistently truncated across ALL variants**: audio 1.1–2.7s for a phrase expected ~4s. Observed in Q4_0, F32, F16, and all mixed variants. Model behavior, not a quantization artifact.
 - **Decode time scales with audio length**: roughly 0.5–0.8s decode per second of audio across all Rust variants.
+- **Phrase quality (user listening notes)**: fox — OK; call — sounds good, just cut early (missing "the middle of the night"); tyger — universally bad across all variants, wrong phonemes; wutang — sounds very good, voice switch mid-phrase (weak voice conditioning from 5-token prompt).
 
 ---
 
@@ -230,7 +231,7 @@ Per-step averages: LLM=80–130ms (GPU), VibeVoice=455–463ms (CPU).
 - No audible difference between F32 (6.5G) and Var-C (1.3G) for this phrase.
 - Mixed and Var-C achieve sub-1× RTF (realtime) at 1.3–1.4 GB.
 - Post-bugfix, quantization variant does not affect audio quality for phrases the model handles well.
-- Problematic phrases (tyger, call, wutang) are model-level weaknesses, not quantization or pipeline issues.
+- Phrase quality from Run 6 benchmark audio (user listening notes): fox — OK; call — sounds good, just cut early (missing "the middle of the night"); tyger — universally bad, wrong phonemes; wutang — sounds very good, voice switch mid-phrase (weak voice conditioning from 5-token prompt).
 
 ---
 
