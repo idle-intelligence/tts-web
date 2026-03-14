@@ -159,6 +159,44 @@ Per-step averages: LLM=80–130ms (GPU), VibeVoice=455–463ms (CPU).
 
 **Caveat**: These are zero-shot runs (no voice conditioning). Audio quality and step counts are not comparable to voice-prompted runs. Step counts inflated by `num_extra_steps=50` in zero-shot mode.
 
+## Run 9: Parameter investigation — tyger debug (2026-03-14)
+
+**Setup**: Commit 83c08ab. Q4_0 baseline (2.6 GB) except where noted. seed=42, noise_temp=0.9, Metal GPU unless noted.
+**Text**: "Tyger Tyger, burning bright" with voice=ljspeech.
+
+| File | Model | transition_steps | GPU | Audio | Quality |
+|------|-------|-----------------|-----|-------|---------|
+| `tyger_ts0.wav` | Q4_0 (2.6G) | 0 | Metal | 1.8s | Bad — wrong phonemes |
+| `tyger_ts5.wav` | Q4_0 (2.6G) | 5 (all trimmed) | Metal | 1.2s | Matches Python but cut early |
+| `tyger_novoice.wav` | Q4_0 (2.6G) | 0 (no voice) | Metal | 3.3s | Nonsense sounds |
+| `tyger_cpu.wav` | Q4_0 (2.6G) | 0 | CPU | 1.8s | Identical to tyger_ts0 |
+
+**Key findings**:
+- Metal and CPU produce identical audio (same duration, same content).
+- transition_steps=5 with 5-token voice prompt = effectively zero-shot = matches Python but truncated.
+- No voice = nonsense output.
+- "Tyger" is a model-level issue — no parameter combination produces correct pronunciation.
+
+## Run 10: Cross-variant quality test — "time" phrase (2026-03-14)
+
+**Setup**: Commit 83c08ab. voice=ljspeech, noise_temp=0.9, transition_steps=0, seed=42, Metal GPU.
+**Text**: "Time is money, who can afford to pay attention?"
+
+| File | Model | GGUF Size | Gen | Audio | RTF | Quality |
+|------|-------|-----------|-----|-------|-----|---------|
+| `time_f32.wav` | F32 | 6.5G | 30.9s | 2.5s | 12.4x | Good |
+| `time_q4.wav` | Q4_0 baseline | 2.6G | 7.1s | 2.5s | 2.9x | Good |
+| `time_varE.wav` | Var-E (VV-F16 E-Q4) | 1.8G | 6.7s | 2.5s | 2.7x | Good |
+| `time_mixed.wav` | Mixed (VV-Q8 E-Q8) | 1.4G | 2.3s | 2.5s | 0.9x | Good |
+| `time_varC.wav` | Var-C (VV-Q8 E-Q4) | 1.3G | 2.3s | 2.5s | 0.9x | Good |
+
+**Key findings**:
+- All 5 model sizes produce identical audio duration (2.5s); user confirmed good quality on all.
+- No audible difference between F32 (6.5G) and Var-C (1.3G) for this phrase.
+- Mixed and Var-C achieve sub-1× RTF (realtime) at 1.3–1.4 GB.
+- Post-bugfix, quantization variant does not affect audio quality for phrases the model handles well.
+- Problematic phrases (tyger, call, wutang) are model-level weaknesses, not quantization or pipeline issues.
+
 ### Skipped / Invalid
 
 | Run | Date | Config | Notes |
