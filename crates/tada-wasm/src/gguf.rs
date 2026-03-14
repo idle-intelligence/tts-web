@@ -724,6 +724,58 @@ pub fn load_f32_tensor<R: Read + Seek>(
     Ok(data)
 }
 
+/// Dequantize a Q4_0 byte buffer to f32.
+///
+/// Input: raw Q4_0 blocks (18 bytes each: 2-byte f16 scale + 16 bytes of 32 nibbles).
+/// Output: `num_elements` f32 values.
+pub fn dequantize_q4_to_f32(bytes: &[u8], num_elements: usize) -> Vec<f32> {
+    let num_blocks = num_elements / 32;
+    assert_eq!(bytes.len(), num_blocks * 18, "Q4_0 byte count mismatch");
+    let mut out = vec![0.0f32; num_elements];
+    for block in 0..num_blocks {
+        let bo = block * 18;
+        let d = f16_to_f32(u16::from_le_bytes([bytes[bo], bytes[bo + 1]]));
+        let base = block * 32;
+        for j in 0..16 {
+            let byte = bytes[bo + 2 + j];
+            out[base + j] = ((byte & 0x0F) as f32 - 8.0) * d;
+            out[base + j + 16] = (((byte >> 4) & 0x0F) as f32 - 8.0) * d;
+        }
+    }
+    out
+}
+
+/// Load an F32 linear weight from GGUF, handling both F32 and Q4_0 tensors.
+///
+/// Q4_0 tensors are dequantized to F32. F32/F16 tensors are read directly.
+/// Returns (f32_data, [out_features, in_features]).
+pub fn load_f32_weight_any<R: Read + Seek>(
+    reader: &mut GgufReader<R>,
+    name: &str,
+) -> Result<(Vec<f32>, [usize; 2])> {
+    let info = reader
+        .tensor_info(name)
+        .with_context(|| format!("Tensor '{name}' not found"))?
+        .clone();
+    let shape = reverse_gguf_dims(info.shape());
+    let bytes = reader.tensor_data(name)?;
+    let data = match info.dtype() {
+        GgmlDtype::F32 => bytes
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect(),
+        GgmlDtype::F16 => bytes
+            .chunks_exact(2)
+            .map(|b| f16_to_f32(u16::from_le_bytes([b[0], b[1]])))
+            .collect(),
+        GgmlDtype::Q4_0 => {
+            let num_elements = info.num_elements() as usize;
+            dequantize_q4_to_f32(&bytes, num_elements)
+        }
+    };
+    Ok((data, [shape[0], shape[1]]))
+}
+
 /// Load a Q4_0 linear layer from GGUF (no bias).
 pub fn load_q4_linear<R: Read + Seek>(
     reader: &mut GgufReader<R>,
