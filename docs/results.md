@@ -284,3 +284,15 @@ Note: Gen time includes llm=3.1-3.4s + vibe=11.0-11.5s. LLM per-step avg 129-137
 | q4km-varc-candle-tyger | candle | metal | Q4_K_M Var-C | 1.38G | tyger | 0.7 | 2.5 | 2.1 | 2.7 | 0.94x | q4km_varc/tyger.wav |
 | q4km-varc-candle-time | candle | metal | Q4_K_M Var-C | 1.38G | time | 0.7 | 2.3 | 2.0 | 2.5 | 0.92x | q4km_varc/time.wav |
 | q4km-varc-candle-wutang | candle | metal | Q4_K_M Var-C | 1.38G | wutang | 0.7 | 2.9 | 3.1 | 4.0 | 0.72x | q4km_varc/wutang.wav |
+
+---
+
+## burn-rope-fix
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| burn-rope-fix-q4-fox | burn+candle | wgpu+cpu | Q4_0 baseline | 2.6G | fox | 2.7 | 15.0 | 1.5 | 2.76 | 5.43x | burn_rope_fix/fox.wav |
+| burn-rope-fix-q4-call | burn+candle | wgpu+cpu | Q4_0 baseline | 2.6G | call | 2.0 | 16.1 | 0.9 | 1.56 | 10.35x | burn_rope_fix/call.wav |
+| burn-rope-fix-q4-tyger | burn+candle | wgpu+cpu | Q4_0 baseline | 2.6G | tyger | 1.6 | 17.4 | 1.3 | 2.44 | 7.14x | burn_rope_fix/tyger.wav |
+| burn-rope-fix-q4-time | burn+candle | wgpu+cpu | Q4_0 baseline | 2.6G | time | 2.0 | 15.6 | 1.3 | 2.48 | 6.27x | burn_rope_fix/time.wav |
+| burn-rope-fix-q4-wutang | burn+candle | wgpu+cpu | Q4_0 baseline | 2.6G | wutang | 1.6 | 20.9 | 2.0 | 3.94 | 5.30x | burn_rope_fix/wutang.wav |

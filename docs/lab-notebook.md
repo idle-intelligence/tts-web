@@ -612,3 +612,34 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 **Notes**: Sub-1x RTF on fox (0.84x), tyger (0.94x), time (0.92x), wutang (0.72x). Call truncated at 0.9s (known model issue). times_before for fox matches Q4_0 baseline almost exactly: [6,2,10,13,17,25,25,11,6,17,8,4,1] vs Q4_0's [6,2,10,12,17,25,25,11,6,17,8,4,1] — only one value differs (13 vs 12 at index 3).
 
 **User feedback**: Not yet evaluated.
+
+---
+
+## burn-rope-fix
+
+**Date**: 2026-03-14
+**Commit**: e248a13
+**Purpose**: First Burn/wgpu GPU voice-prompted benchmark after RoPE fix (split-half convention). The RoPE bug (interleaved vs split-half pairing) was the root cause of all Burn audio gibberish — step 2 hidden states diverged catastrophically (cosine similarity 0.005) because position embeddings paired wrong elements. Fix: change `apply_rotation` to split x into [x[0..d/2], x[d/2..d]] instead of interleaved pairs [(x[0],x[1]), (x[2],x[3])...].
+
+**Parameters**:
+- engine: burn+candle
+- device: wgpu+cpu (LLM on wgpu GPU, VibeVoice on candle CPU)
+- seed: 42
+- noise_temp: 0.9
+- flow_steps: 10
+- voice: ljspeech
+- transition_steps: 0
+- model: Q4_0 baseline (2.6G), file tada-1b-q4_0.gguf
+
+**Texts**:
+- fox: "The quick brown fox jumps over the lazy dog."
+- call: "I had to call you up in the middle of the night"
+- tyger: "Tyger Tyger, burning bright, In the forests of the night"
+- time: "Time is money, who can afford to pay attention?"
+- wutang: "Cash rules everything around me, dollar dollar bill y'all, you need to diversify your bonds."
+
+**Variants**: Burn+candle wgpu+cpu Q4_0 baseline, voice-prompted, RoPE split-half fix applied
+
+**Notes**: LLM per-step avg 156–168ms (GPU), VibeVoice per-step avg 455–460ms (CPU). Fox times_before matches candle exactly: [6, 2, 10, 12, 17, 25, 25, 11, 6, 17, 8, 4, 1] — confirming the RoPE fix resolves the hidden-state divergence that previously caused gibberish output.
+
+**User feedback**: Not yet evaluated.
