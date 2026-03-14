@@ -91,6 +91,10 @@ impl RoPE {
         (q_rot, k_rot)
     }
 
+    /// Apply rotary embeddings using split-half convention (Llama style).
+    ///
+    /// Pairs element i with element i + d/2 (NOT interleaved pairs).
+    /// This matches candle's `rotary_emb::rope()` (RotaryEmb).
     fn apply_rotation(
         &self,
         x: Tensor<Wgpu, 4>,
@@ -98,28 +102,21 @@ impl RoPE {
         sin: Tensor<Wgpu, 2>,
     ) -> Tensor<Wgpu, 4> {
         let [batch, seq, heads, head_dim] = x.dims();
-        let half_dim = head_dim / 2;
+        let half = head_dim / 2;
 
-        let x_pairs = x.reshape([batch, seq, heads, half_dim, 2]);
-
-        let x_r: Tensor<Wgpu, 4> = x_pairs
-            .clone()
-            .slice([0..batch, 0..seq, 0..heads, 0..half_dim, 0..1])
-            .reshape([batch, seq, heads, half_dim]);
-        let x_i: Tensor<Wgpu, 4> = x_pairs
-            .slice([0..batch, 0..seq, 0..heads, 0..half_dim, 1..2])
-            .reshape([batch, seq, heads, half_dim]);
+        // Split into first half and second half along head_dim
+        let x1 = x.clone().slice([0..batch, 0..seq, 0..heads, 0..half]);
+        let x2 = x.slice([0..batch, 0..seq, 0..heads, half..head_dim]);
 
         // Broadcast cos/sin: [seq, half_dim] -> [1, seq, 1, half_dim]
         let cos: Tensor<Wgpu, 4> = cos.unsqueeze_dim::<3>(0).unsqueeze_dim(2);
         let sin: Tensor<Wgpu, 4> = sin.unsqueeze_dim::<3>(0).unsqueeze_dim(2);
 
-        let out_r = x_r.clone() * cos.clone() - x_i.clone() * sin.clone();
-        let out_i = x_r * sin + x_i * cos;
+        // Rotate: y1 = x1*cos - x2*sin, y2 = x1*sin + x2*cos
+        let y1 = x1.clone() * cos.clone() - x2.clone() * sin.clone();
+        let y2 = x1 * sin + x2 * cos;
 
-        let out_r: Tensor<Wgpu, 5> = out_r.unsqueeze_dim(4);
-        let out_i: Tensor<Wgpu, 5> = out_i.unsqueeze_dim(4);
-        let out = Tensor::cat(vec![out_r, out_i], 4);
-        out.reshape([batch, seq, heads, head_dim])
+        // Concatenate halves back
+        Tensor::cat(vec![y1, y2], 3)
     }
 }
