@@ -553,3 +553,31 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 **Notes**: No load/decode timing captured for these runs.
 
 **User feedback**: "They all sound good"
+
+---
+
+## burn-voice-prompted
+
+**Date**: 2026-03-14
+**Commit**: f27c1d7
+**Purpose**: First voice-prompted Burn/wgpu GPU test (newly added --voice support).
+
+**Parameters**:
+- engine: burn+candle
+- device: wgpu+cpu (LLM on wgpu GPU, VibeVoice on candle CPU)
+- seed: 42
+- noise_temp: 0.9
+- flow_steps: 10
+- voice: ljspeech
+- transition_steps: 0
+- model: Q4_0 baseline (2.6G), file tada-1b-q4_0.gguf
+
+**Texts**:
+- time: "Time is money, who can afford to pay attention?"
+- fox: "The quick brown fox jumps over the lazy dog."
+
+**Variants**: Burn+candle wgpu+cpu Q4_0 baseline, voice-prompted
+
+**Notes**: Gen time breakdown: llm=3.1–3.4s + vibe=11.0–11.5s. LLM per-step avg 129–137ms (GPU), VibeVoice per-step avg 457–459ms (CPU). Audio duration is significantly shorter than candle equivalent (0.62s vs 2.5s for time, 0.98s vs 2.7s for fox). Suspected cause: Burn GPU float precision divergence produces shorter time_before gray-code predictions than candle Metal, leading to shorter per-frame durations.
+
+**User feedback**: Not yet evaluated.

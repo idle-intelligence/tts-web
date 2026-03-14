@@ -261,3 +261,14 @@ Columns: ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(
 | cross-variant-varE-time | candle | metal | Var-E VV-F16 E-Q4 | 1.8G | time | — | 6.7 | — | 2.5 | 2.7x | time_varE.wav |
 | cross-variant-mixed-time | candle | metal | Mixed VV-Q8 E-Q8 | 1.4G | time | — | 2.3 | — | 2.5 | 0.9x | time_mixed.wav |
 | cross-variant-varC-time | candle | metal | Var-C VV-Q8 E-Q4 | 1.3G | time | — | 2.3 | — | 2.5 | 0.9x | time_varC.wav |
+
+---
+
+## burn-voice-prompted
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| burn-voice-burn-q4-time | burn+candle | wgpu+cpu | Q4_0 baseline | 2.6G | time | 2.9 | 14.9 | 0.4 | 0.62 | 24.11x | bench_2026-03-14/burn_voice/time.wav |
+| burn-voice-burn-q4-fox | burn+candle | wgpu+cpu | Q4_0 baseline | 2.6G | fox | 2.9 | 14.1 | — | 0.98 | — | bench_2026-03-14/burn_voice/fox.wav |
+
+Note: Gen time includes llm=3.1-3.4s + vibe=11.0-11.5s. LLM per-step avg 129-137ms (GPU), VibeVoice per-step avg 457-459ms (CPU).
