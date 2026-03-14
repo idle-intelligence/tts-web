@@ -392,6 +392,30 @@ impl LlamaModel {
         self.norm.forward(&x)
     }
 
+    /// Run the transformer on pre-computed input embeddings for only `num_layers` layers.
+    ///
+    /// Same as `forward` but stops after `num_layers` transformer layers and skips
+    /// the final RMSNorm when `num_layers < total layers`. Useful for per-layer
+    /// debugging comparisons.
+    pub fn forward_n_layers(&mut self, input_embeds: &Tensor, index_pos: usize, num_layers: usize) -> Result<Tensor> {
+        let (_b, seq_len, _hidden) = input_embeds.dims3()?;
+        let (cos, sin) = self.rope.get(index_pos, seq_len)?;
+
+        let total_layers = self.layers.len();
+        let run_layers = num_layers.min(total_layers);
+
+        let mut x = input_embeds.clone();
+        for i in 0..run_layers {
+            x = self.layers[i].forward(&x, &cos, &sin, &mut self.kv_caches[i])?;
+        }
+
+        if run_layers >= total_layers {
+            self.norm.forward(&x)
+        } else {
+            Ok(x)
+        }
+    }
+
     /// Look up token embeddings by ID.
     pub fn embed_tokens(&self, ids: &Tensor) -> Result<Tensor> {
         self.embed_tokens.forward(ids)

@@ -204,6 +204,61 @@ impl TadaLlama {
         self.final_norm.forward(x)
     }
 
+    /// Single-step forward pass running only the first `num_layers` transformer layers.
+    ///
+    /// Identical to `forward_step` but stops after `num_layers` layers and skips
+    /// the final RMSNorm when `num_layers < total layers`. Useful for per-layer
+    /// hidden state comparison during debugging.
+    ///
+    /// Returns hidden state `[1, 1, hidden_size]`.
+    pub fn forward_step_layers(
+        &self,
+        token_id: u32,
+        acoustic: &[f32],
+        acoustic_mask: u32,
+        time_before: u32,
+        time_after: u32,
+        cache: &mut LayerCaches,
+        num_layers: usize,
+    ) -> Tensor<Wgpu, 3> {
+        let dim = self.hidden_size;
+
+        let mut sum = vec![0.0f32; dim];
+        self.embed_tokens.embed_id_add_cpu(token_id, &mut sum);
+        self.acoustic_mask_emb.embed_id_add_cpu(acoustic_mask, &mut sum);
+        self.time_start_embed.embed_id_add_cpu(time_before, &mut sum);
+        self.time_end_embed.embed_id_add_cpu(time_after, &mut sum);
+
+        let acoustic_tensor = Tensor::<Wgpu, 3>::from_data(
+            burn::tensor::TensorData::new(acoustic.to_vec(), [1, 1, acoustic.len()]),
+            &self.device,
+        );
+        let acoustic_proj = self.acoustic_proj.forward(acoustic_tensor);
+
+        let cpu_embed = Tensor::<Wgpu, 3>::from_data(
+            burn::tensor::TensorData::new(sum, [1, 1, dim]),
+            &self.device,
+        );
+        let input = cpu_embed + acoustic_proj;
+
+        let total_layers = self.layers.len();
+        let run_layers = num_layers.min(total_layers);
+
+        let mut x = input;
+        for i in 0..run_layers {
+            let layer = &self.layers[i];
+            if let Some(c) = cache.get_mut(i) {
+                x = layer.forward_with_cache(x, &self.rope, c);
+            }
+        }
+
+        if run_layers >= total_layers {
+            self.final_norm.forward(x)
+        } else {
+            x
+        }
+    }
+
     /// Compute tied lm_head logits: hidden @ embed_tokens^T.
     ///
     /// For TADA, the lm_head shares weights with embed_tokens (tied).

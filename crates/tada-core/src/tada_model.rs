@@ -366,6 +366,14 @@ impl TadaModel {
         Ok(hidden)
     }
 
+    /// Run only the first `num_layers` transformer layers for per-layer debug comparison.
+    ///
+    /// Does NOT increment the position counter — this is for debug comparison only.
+    /// Call `clear_state()` between runs to reset caches.
+    pub fn forward_step_n_layers(&mut self, input_embeds: &Tensor, num_layers: usize) -> Result<Tensor> {
+        self.llama.forward_n_layers(input_embeds, self.position, num_layers)
+    }
+
     /// Compute logits from hidden states (for debugging).
     pub fn lm_head_logits(&self, hidden: &Tensor) -> Result<Tensor> {
         self.llama.lm_head(hidden)
