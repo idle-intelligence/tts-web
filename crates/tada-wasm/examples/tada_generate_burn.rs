@@ -545,9 +545,10 @@ fn run() -> anyhow::Result<()> {
         eprintln!("  Trimmed 1 trailing meaningless acoustic frame (voice-prompted mode)");
     }
 
-    // Trailing time entry
-    let trailing_time = *times_before.first().unwrap_or(&0);
-    times_before.push(trailing_time);
+    // Trailing time entry (must be 1, not the first frame's duration)
+    times_before.push(1);
+
+    eprintln!("  times_before ({} entries): {:?}", times_before.len(), &times_before);
 
     // --- Decode audio ---
     eprintln!("\n[6] Decoding audio...");
