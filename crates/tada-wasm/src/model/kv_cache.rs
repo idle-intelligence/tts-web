@@ -37,48 +37,31 @@ impl KVCache {
     /// Update cache with new K, V and return all valid entries.
     ///
     /// K, V shape: [batch, n_kv_heads, 1, head_dim]
+    ///
+    /// Uses simple concatenation (like candle) instead of ring buffer to avoid
+    /// potential GPU tensor aliasing issues with slice_assign.
     pub fn update(
         &mut self,
         k: Tensor<Wgpu, 4>,
         v: Tensor<Wgpu, 4>,
     ) -> (Tensor<Wgpu, 4>, Tensor<Wgpu, 4>) {
-        let [b, _h, _seq, _d] = k.dims();
-
-        if self.k.is_none() {
-            self.k = Some(Tensor::zeros(
-                [b, self.n_kv_heads, self.max_len, self.head_dim],
-                &self.device,
-            ));
-            self.v = Some(Tensor::zeros(
-                [b, self.n_kv_heads, self.max_len, self.head_dim],
-                &self.device,
-            ));
-        }
-
-        let k_buf = self.k.take().unwrap();
-        let v_buf = self.v.take().unwrap();
-        let [b, h, _, hd] = k_buf.dims();
-        let pos = self.write_pos;
-
-        let k_buf = k_buf.slice_assign([0..b, 0..h, pos..pos + 1, 0..hd], k);
-        let v_buf = v_buf.slice_assign([0..b, 0..h, pos..pos + 1, 0..hd], v);
-
-        self.write_pos = (self.write_pos + 1) % self.max_len;
-        self.offset += 1;
-        self.len = (self.len + 1).min(self.max_len);
-
-        let result = if self.len < self.max_len {
-            let k_view = k_buf.clone().slice([0..b, 0..h, 0..self.len, 0..hd]);
-            let v_view = v_buf.clone().slice([0..b, 0..h, 0..self.len, 0..hd]);
-            (k_view, v_view)
-        } else {
-            (k_buf.clone(), v_buf.clone())
+        let (k_full, v_full) = match (self.k.take(), self.v.take()) {
+            (Some(prev_k), Some(prev_v)) => {
+                // Concatenate along sequence dimension (dim 2)
+                let k_full = Tensor::cat(vec![prev_k, k], 2);
+                let v_full = Tensor::cat(vec![prev_v, v], 2);
+                (k_full, v_full)
+            }
+            _ => (k, v),
         };
 
-        self.k = Some(k_buf);
-        self.v = Some(v_buf);
+        self.offset += 1;
+        self.len += 1;
 
-        result
+        self.k = Some(k_full.clone());
+        self.v = Some(v_full.clone());
+
+        (k_full, v_full)
     }
 
     pub fn offset(&self) -> usize {

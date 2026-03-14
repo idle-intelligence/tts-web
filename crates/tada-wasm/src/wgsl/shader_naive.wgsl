@@ -77,7 +77,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 input[k_off + base_i + 2u],
                 input[k_off + base_i + 3u]
             );
-            acc += dot(w_lo, in_lo);
+            // Sequential accumulation (avoid dot() which may use FMA/reorder)
+            acc = acc + (w_lo[0] * in_lo[0]);
+            acc = acc + (w_lo[1] * in_lo[1]);
+            acc = acc + (w_lo[2] * in_lo[2]);
+            acc = acc + (w_lo[3] * in_lo[3]);
 
             // Upper nibbles -> elements [16+base_i..16+base_i+3]
             let w_hi = (vec4<f32>(
@@ -90,7 +94,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 input[k_off + 16u + base_i + 2u],
                 input[k_off + 16u + base_i + 3u]
             );
-            acc += dot(w_hi, in_hi);
+            acc = acc + (w_hi[0] * in_hi[0]);
+            acc = acc + (w_hi[1] * in_hi[1]);
+            acc = acc + (w_hi[2] * in_hi[2]);
+            acc = acc + (w_hi[3] * in_hi[3]);
         }
     }
 
