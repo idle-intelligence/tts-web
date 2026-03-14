@@ -138,6 +138,60 @@ All runs: seed=42, temp=0.9, noise_temp=0.9, flow_steps=10, voice=ljspeech, Meta
 
 ---
 
+## Run 7 (2026-03-14) — Q8_0-LLM alignment test
+
+**Setup**: candle Metal, seed=42, noise_temp=0.9, flow_steps=10, voice=ljspeech, transition_steps=0.
+**Model**: Q8_0 LLM + F16 VV + Q4_0 Embed = 2.24 GB (`tada-1b-llmq8-vvf16-eq4.gguf`)
+**Purpose**: Determine whether Q8_0 LLM backbone reproduces F16-precision output (Q4_0 showed up to 480ms duration gaps vs F16 reference).
+
+| Phrase | Load | Gen | Decode | Audio | RTF |
+|--------|------|-----|--------|-------|-----|
+| fox | 2.4s | 7.1s | 2.2s | 2.7s | 2.57x |
+| call | 2.0s | 7.4s | 0.9s | 1.1s | 6.89x |
+| tyger | 1.9s | 6.2s | 1.4s | 1.7s | 3.65x |
+| wutang | 1.9s | 9.5s | 3.1s | 4.0s | 2.35x |
+
+**Alignment comparison (sample counts)**:
+
+| Phrase | F32/F16 | Q4_0 | Q8_0-LLM | Q8 vs F16 |
+|--------|---------|------|-----------|-----------|
+| fox | 65754 | 66234 (+480) | 65754 | exact match, corr=0.999 |
+| call | 25914 | 37434 (+11520) | 25914 | exact match, corr=0.995 |
+| tyger | 49434 | 43674 (-5760) | 40794 | closer but different length |
+| wutang | 100794 | 94554 (-6240) | 96474 | closer but different length |
+
+**Key findings:**
+- Q8_0 LLM matches F16 exactly (sample-for-sample, corr>0.995) on fox and call.
+- The "call" truncation gap (480ms / 11520 samples) present in Q4_0 is completely eliminated.
+- On tyger and wutang the token sequences diverge at some point, but output duration is closer to F16 than Q4_0 was.
+
+---
+
+## Run 8 (2026-03-14) — Burn/wgpu GPU benchmark (zero-shot)
+
+**Setup**: Burn/wgpu LLM on GPU + candle VibeVoice/decoder on CPU. Q4_0 baseline GGUF (2.6 GB). Zero-shot — Burn example does not support `--voice` yet.
+**Purpose**: Baseline benchmark of the GPU path for future web/WebGPU deployment.
+
+| Phrase | Load | Gen | LLM | VibeVoice | Decode | Audio | RTF |
+|--------|------|-----|-----|-----------|--------|-------|-----|
+| fox | 2.5s | 20.7s | 4.3s | 15.7s | 1.6s | 2.86s | 7.23x |
+| call | 2.4s | 80.6s | 11.6s | 65.2s | — | 6.06s | 13.30x |
+| tyger | 2.3s | 77.5s | 11.0s | 62.8s | — | 4.04s | 19.19x |
+| wutang | 2.3s | 16.7s | 3.6s | 12.8s | — | 2.48s | 6.72x |
+
+Per-step averages: LLM=80–130ms (GPU), VibeVoice=455–463ms (CPU).
+
+**Key findings:**
+- LLM per-step 80–130ms on GPU — approximately 11x faster than candle CPU per step.
+- VibeVoice 455–463ms/step on CPU — unchanged from Run 3; 76–81% of total gen time — remains the bottleneck.
+- Zero-shot generates far more steps than voice-prompted (143 frames for "call" vs ~25 with voice), inflating RTF. Not directly comparable to voice-prompted candle runs.
+- Burn WGSL shader only supports Q4_0 — loading Var-E or Q8_0-LLM GGUFs fails (dtype code 8 error).
+- Burn example needs enhancement (voice prompt, seed, transition_steps) before a fair comparison to Run 6 is possible.
+
+**Caveat**: All four phrases are zero-shot (no voice conditioning). Audio quality and step counts are not comparable to voice-prompted runs.
+
+---
+
 ## Earlier samples (pre-benchmark, 2026-03-12)
 
 | File | Config | Notes |
