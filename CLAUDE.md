@@ -3,7 +3,7 @@
 ## Workflow
 - **Use sub-agents and teams**: The lead (opus) keeps context and orchestrates. All research, code reading, and code writing is delegated to sub-agents (sonnet). For multiple independent tasks, use teams of sonnet agents in parallel. Never do sequential manual edits from the lead.
 - **Commit early and often**: Don't let large amounts of work pile up untracked. Commit atomically — small, focused commits, one logical change per commit.
-- **Log EVERY inference run**: Every time audio is generated, log it in TWO places: (1) `docs/run_log.md` — scientific-style entry with full parameters (commit, model file, seed, noise_temp, transition_steps, voice, text, output file) and observations, (2) `docs/benchmarks.md` — results row (timing, audio duration, RTF, quality). No exceptions. Unlogged runs are useless.
+- **Log EVERY inference run**: Every time audio is generated, log it in TWO places: (1) `docs/lab-notebook.md` — scientific-style entry with experiment name, commit, full parameters, texts, and user's verbatim quality feedback, (2) `docs/results.md` — data row with consistent columns (ID, Engine, Device, Model, Size, Text, Load, Gen, Decode, Audio, RTF, File). No exceptions. Unlogged runs are useless.
 - **Don't add Co-Authored-By for trivial commits** (e.g. README updates, config changes)
 
 ## Development
