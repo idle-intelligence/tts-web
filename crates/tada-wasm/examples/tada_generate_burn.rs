@@ -42,6 +42,7 @@ struct Args {
     voice_path: Option<String>,
     seed: u64,
     transition_steps: usize,
+    cfg_scale: f32,
 }
 
 fn parse_args() -> Args {
@@ -57,6 +58,7 @@ fn parse_args() -> Args {
     let mut voice_path: Option<String> = None;
     let mut seed = 42u64;
     let mut transition_steps = 5usize;
+    let mut cfg_scale = 1.0f32;
 
     let mut i = 1;
     while i < args.len() {
@@ -72,6 +74,7 @@ fn parse_args() -> Args {
             "--voice" => { i += 1; voice_path = Some(args[i].clone()); }
             "--seed" => { i += 1; seed = args[i].parse().expect("seed must be u64"); }
             "--transition-steps" => { i += 1; transition_steps = args[i].parse().expect("transition-steps must be usize"); }
+            "--cfg-scale" => { i += 1; cfg_scale = args[i].parse().expect("cfg-scale must be f32"); }
             other => {
                 eprintln!("Unknown arg: {other}");
                 std::process::exit(1);
@@ -92,6 +95,7 @@ fn parse_args() -> Args {
         voice_path,
         seed,
         transition_steps,
+        cfg_scale,
     }
 }
 
@@ -413,7 +417,7 @@ fn run() -> anyhow::Result<()> {
                 args.noise_temp,
                 &mut rng,
                 args.flow_steps,
-                1.0,
+                args.cfg_scale,
             )?;
             let vibe_ms = t_vibe.elapsed().as_secs_f64() * 1000.0;
             total_vibe_ms += vibe_ms;
