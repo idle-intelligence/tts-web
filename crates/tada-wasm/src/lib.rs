@@ -322,22 +322,26 @@ impl HybridTadaModel {
             &mut state.cache,
         );
 
-        // Read hidden state back to CPU for candle (async for WebGPU mapAsync compat)
-        let hidden_data = hidden_burn.clone().into_data_async().await
-            .map_err(|e| anyhow::anyhow!("GPU readback failed: {e:?}"))?;
-        let hidden_vec: Vec<f32> = hidden_data.to_vec().unwrap();
-        let hidden_size = self.cfg.llama.hidden_size;
+        // Determine if we need VibeVoice this step
+        let need_vibevoice = step >= state.shift_acoustic
+            && state.eos_countdown.is_none()
+            && !(state.voice_prompt.is_some()
+                && (step - state.shift_acoustic) < state.prompt_phase_len);
 
-        let hidden_candle = candle_core::Tensor::from_vec(
-            hidden_vec,
-            (1, 1, hidden_size),
-            &candle_core::Device::Cpu,
-        )?;
+        // Only read hidden state back to CPU when VibeVoice needs it.
+        // Skipping readback during prompt phase saves ~50ms × N prompt steps.
+        if need_vibevoice {
+            let hidden_data = hidden_burn.clone().into_data_async().await
+                .map_err(|e| anyhow::anyhow!("GPU readback failed: {e:?}"))?;
+            let hidden_vec: Vec<f32> = hidden_data.to_vec().unwrap();
+            let hidden_size = self.cfg.llama.hidden_size;
 
-        // If past the acoustic shift, run flow matching (candle/CPU).
-        // Skip during EOS countdown — post-EOS hidden states are conditioned on
-        // EOT tokens and decode to noise/parasite voice.
-        if step >= state.shift_acoustic && state.eos_countdown.is_none() {
+            let hidden_candle = candle_core::Tensor::from_vec(
+                hidden_vec,
+                (1, 1, hidden_size),
+                &candle_core::Device::Cpu,
+            )?;
+
             let (acoustic, time_before, time_after) = self.candle_model.generate_acoustic(
                 &hidden_candle,
                 state.noise_temp,
@@ -351,6 +355,11 @@ impl HybridTadaModel {
                 .push(acoustic.squeeze(0)?.to_vec1::<f32>()?);
             state.times_before.push(time_before);
             state.times_after.push(time_after);
+        } else if step >= state.shift_acoustic {
+            // Prompt phase or EOS: push dummy values (will be stripped)
+            state.acoustics.push(vec![0.0; self.cfg.acoustic_dim]);
+            state.times_before.push(0);
+            state.times_after.push(0);
         }
 
         // Sample next token after prompt
