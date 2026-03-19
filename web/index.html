@@ -382,11 +382,21 @@
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
 
         const TADA_VOICES = [
-            { name: 'ljspeech', label: 'LJSpeech', file: 'ljspeech_long', demo: 'Time is money, who can afford to pay attention?' },
-            { name: 'amazement', label: 'Amazement \u{1F632}', file: 'amazement', demo: 'Your smile is like a breath of spring, Your voice is soft like summer rain.' },
-            { name: 'amusement', label: 'Amusement \u{1F604}', file: 'amusement', demo: 'There is a pleasure in the pathless woods, There is a rapture on the lonely shore.' },
-            { name: 'rickie', label: 'Rickie \u{1F4AC}', file: 'rickie', demo: "Do you think your Wu-Tang sword can defeat me? En garde, I'll let you try my Wu-Tang style." },
+            { name: 'ljspeech', label: 'LJSpeech', file: 'ljspeech_long' },
+            { name: 'amazement', label: 'Amazement \u{1F632}', file: 'amazement' },
+            { name: 'amusement', label: 'Amusement \u{1F604}', file: 'amusement' },
+            { name: 'rickie', label: 'Rickie \u{1F4AC}', file: 'rickie' },
         ];
+        const TADA_PHRASES = [
+            'Tyger Tyger, burning bright, In the forests of the night.',
+            'Time is money, who can afford to pay attention?',
+            'There is a pleasure in the pathless woods, There is a rapture on the lonely shore.',
+            'Your smile is like a breath of spring, Your voice is soft like summer rain.',
+            "Do you think your Wu-Tang sword can defeat me? En garde, I'll let you try my Wu-Tang style.",
+            "There's no one around and your phone is dead. Out of the corner of your eye, you spot him...",
+            "I'll tell you one thing about the universe, though. The universe is a pretty big place.",
+        ];
+        let tadaPhraseIndex = 0;
         let activeTadaVoice = null;
         let loadingTadaVoice = false;
 
@@ -526,6 +536,21 @@
         function selectTadaVoice(name) {
             if (loadingTadaVoice || generating) return;
             const voiceDef = TADA_VOICES.find(v => v.name === name);
+            if (name === activeTadaVoice) {
+                // Same voice — just generate next demo phrase
+                const userText = textInput.value.trim();
+                const demoText = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];
+                tadaPhraseIndex++;
+                isDemoGen = !userText;
+                if (isDemoGen) textInput.value = '';
+                generating = true;
+                generateBtn.disabled = true;
+                setTadaVoiceBtnsEnabled(false);
+                tts.generate(userText || demoText, parseFloat(tempSlider.value), {
+                    noiseTemp: 0.9, numFlowSteps: 10, cfgScale: 1.0,
+                });
+                return;
+            }
             loadingTadaVoice = true;
             setTadaVoiceBtnsEnabled(false);
             tadaVoiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
@@ -694,10 +719,10 @@
                         if (btn.dataset.voice === name) btn.classList.add('active');
                     });
                     setTadaVoiceBtnsEnabled(true);
-                    // Auto-generate demo phrase for this voice
-                    const voiceDef = TADA_VOICES.find(v => v.name === name);
+                    // Auto-generate: cycle through demo phrases
                     const userText = textInput.value.trim();
-                    const demoText = voiceDef ? voiceDef.demo : userText;
+                    const demoText = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];
+                    tadaPhraseIndex++;
                     isDemoGen = !userText;
                     if (isDemoGen) textInput.value = '';
                     generating = true;
