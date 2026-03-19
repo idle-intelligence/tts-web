@@ -204,11 +204,12 @@ impl AdaIn {
             instance_norm(x)?
         };
 
-        // AdaIN modulation
+        // AdaIN modulation: gamma = fc[:C] + 1, beta = fc[C:]
         let proj = self.fc.forward(style)?; // [batch, 2*C]
         let c = x.dim(1)?;
-        let gamma = proj.i((.., ..c))?.unsqueeze(2)?; // [batch, C, 1]
+        let gamma_raw = proj.i((.., ..c))?.unsqueeze(2)?; // [batch, C, 1]
         let beta = proj.i((.., c..))?.unsqueeze(2)?;
+        let gamma = (gamma_raw + 1.0_f64)?;
         Ok(normed.broadcast_mul(&gamma)?.broadcast_add(&beta)?)
     }
 }
@@ -467,16 +468,6 @@ impl Predictor {
         // --- F0 and N ---
         let f0 = self.f0_branch.forward(&shared_t, &style_half)?; // [batch, 1, T]
         let n_amp = self.n_branch.forward(&shared_t, &style_half)?; // [batch, 1, T]
-
-        // DEBUG: print duration values and shapes
-        let dur_vals = durations.to_vec2::<i64>()?;
-        eprintln!("[DEBUG predictor] durations: {:?}", dur_vals);
-        let dur_sum: i64 = dur_vals.iter().flat_map(|row| row.iter().copied()).sum();
-        eprintln!("[DEBUG predictor] sum of durations: {}", dur_sum);
-        eprintln!("[DEBUG predictor] expanded_features (transposed) shape: {:?}", expanded_t.shape());
-        eprintln!("[DEBUG predictor] shared_t shape: {:?}", shared_t.shape());
-        eprintln!("[DEBUG predictor] f0 shape: {:?}", f0.shape());
-        eprintln!("[DEBUG predictor] n_amp shape: {:?}", n_amp.shape());
 
         Ok((durations, expanded_t, shared_t, f0, n_amp))
     }

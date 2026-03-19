@@ -192,21 +192,22 @@ impl AdaIn {
     fn forward(&self, x: &Tensor, style: &Tensor) -> Result<Tensor> {
         let (seq, batch, feat) = x.dims3()?;
 
-        // InstanceNorm over the seq dimension for each (batch, feat)
-        // Treat x as [batch, feat, seq] for norm
-        let xt = x.transpose(0, 1)?.transpose(1, 2)?.contiguous()?; // [batch, feat, seq]
-        let mean = xt.mean_keepdim(2)?; // [batch, feat, 1]
-        let diff = xt.broadcast_sub(&mean)?;
+        // ONNX uses LayerNorm over the feature dimension (axis=-1, i.e. last dim = feat)
+        // Input to LN is treated as [batch, seq, feat], so x: [seq, batch, feat] → [batch, seq, feat]
+        let x_bsf = x.transpose(0, 1)?.contiguous()?; // [batch, seq, feat]
+        let mean = x_bsf.mean_keepdim(2)?;             // [batch, seq, 1]
+        let diff = x_bsf.broadcast_sub(&mean)?;
         let var = diff.sqr()?.mean_keepdim(2)?;
         let std = (var + 1e-5_f64)?.sqrt()?;
-        let normed = diff.broadcast_div(&std)?; // [batch, feat, seq]
+        let normed_bsf = diff.broadcast_div(&std)?;    // [batch, seq, feat]
         // back to [seq, batch, feat]
-        let normed = normed.transpose(1, 2)?.transpose(0, 1)?.contiguous()?;
+        let normed = normed_bsf.transpose(0, 1)?.contiguous()?;
 
-        // Project style
+        // Project style; ONNX AdaIN: scale = fc[:C] + 1, bias = fc[C:]
         let proj = self.fc.forward(style)?; // [batch, 2*feat]
-        let scale = proj.i((.., ..self.feat_dim))?.contiguous()?; // [batch, feat]
-        let bias = proj.i((.., self.feat_dim..))?.contiguous()?;  // [batch, feat]
+        let scale_raw = proj.i((.., ..self.feat_dim))?.contiguous()?; // [batch, feat]
+        let bias = proj.i((.., self.feat_dim..))?.contiguous()?;      // [batch, feat]
+        let scale = (scale_raw + 1.0_f64)?;
 
         // Broadcast to [seq, batch, feat]
         let scale = scale.unsqueeze(0)?.broadcast_as((seq, batch, feat))?;
