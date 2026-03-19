@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/tts-core", "crates/tts-wasm", "crates/tada-core", "crates/tada-wasm"]
+members = ["crates/tts-core", "crates/tts-wasm", "crates/tada-core", "crates/tada-wasm", "crates/kitten-core"]
 resolver = "3"
 
 [workspace.dependencies]
