@@ -24,6 +24,30 @@ fn depthwise_conv1d(x: &Tensor, weight: &Tensor, bias: Option<&Tensor>, padding:
     }
 }
 
+fn depthwise_conv_transpose1d(
+    x: &Tensor,
+    weight: &Tensor,
+    bias: Option<&Tensor>,
+    padding: usize,
+    stride: usize,
+    output_padding: usize,
+) -> Result<Tensor> {
+    let channels = x.dim(1)?;
+    let mut outputs = Vec::with_capacity(channels);
+    for c in 0..channels {
+        let xc = x.i((.., c..c + 1, ..))?.contiguous()?;
+        let wc = weight.i(c..c + 1)?.contiguous()?; // [1, 1, k]
+        let out_c = xc.conv_transpose1d(&wc, padding, output_padding, stride, 1, 1)?;
+        outputs.push(out_c);
+    }
+    let out = Tensor::cat(&outputs, 1)?;
+    if let Some(b) = bias {
+        Ok(out.broadcast_add(&b.reshape((1, channels, 1))?)?)
+    } else {
+        Ok(out)
+    }
+}
+
 use crate::config::KittenConfig;
 
 // ---------------------------------------------------------------------------
@@ -259,23 +283,31 @@ impl Block1 {
         })
     }
 
-    // x: [batch, in_ch, T] → [batch, out_ch, T]
+    // x: [batch, in_ch, T] → [batch, out_ch, 2T]
+    // The pool is a depthwise ConvTranspose1d (stride=2) that upsamples T→2T
     fn forward(&self, x: &Tensor, style: &Tensor) -> Result<Tensor> {
+        // Main path with channel reduction
         let skip = self.conv1x1.forward(x)?; // [batch, out_ch, T]
         let h = self.norm1.forward(x, style)?;
         let h = leaky_relu_02(&h)?;
-        let h = self.conv1.forward(&h)?;
+        let h = self.conv1.forward(&h)?;     // in_ch→out_ch
         let h = self.norm2.forward(&h, style)?;
         let h = leaky_relu_02(&h)?;
-        let h = self.conv2.forward(&h)?;
-        let out = (skip + h)?;
-        // pool weight is [in_ch, 1, 3] — depthwise on in_ch=128ch.
-        // After residual we have out_ch=64ch. Concat [out, out] → 128ch → depthwise pool → 128ch
-        // → take first 64ch.
-        let doubled = Tensor::cat(&[&out, &out], 1)?; // [batch, 128, T]
-        let pooled = depthwise_conv1d(&doubled, &self.pool_weight, Some(&self.pool_bias), 1)?;
+        let h = self.conv2.forward(&h)?;     // out_ch→out_ch
+        let out = (skip + h)?;               // [batch, out_ch, T]
+
+        // Pool: depthwise ConvTranspose1d (stride=2, pad=1, output_pad=1) upsamples T→2T
+        // Weight: [in_ch, 1, 3]. Applied to the original in_ch input, then take first out_ch.
+        let pooled = depthwise_conv_transpose1d(x, &self.pool_weight, Some(&self.pool_bias), 1, 2, 1)?;
+        // pooled: [batch, in_ch, 2T]
         let out_ch = out.dim(1)?;
-        Ok(pooled.i((.., ..out_ch, ..))?.contiguous()?)
+        let pooled = pooled.i((.., ..out_ch, ..))?.contiguous()?; // [batch, out_ch, 2T]
+
+        // Upsample `out` to 2T via nearest neighbor to match pooled
+        let t2 = pooled.dim(2)?;
+        let out_up = out.upsample_nearest1d(t2)?; // [batch, out_ch, 2T]
+
+        Ok(((out_up + pooled)? / 2.0)?)
     }
 }
 
@@ -435,6 +467,16 @@ impl Predictor {
         // --- F0 and N ---
         let f0 = self.f0_branch.forward(&shared_t, &style_half)?; // [batch, 1, T]
         let n_amp = self.n_branch.forward(&shared_t, &style_half)?; // [batch, 1, T]
+
+        // DEBUG: print duration values and shapes
+        let dur_vals = durations.to_vec2::<i64>()?;
+        eprintln!("[DEBUG predictor] durations: {:?}", dur_vals);
+        let dur_sum: i64 = dur_vals.iter().flat_map(|row| row.iter().copied()).sum();
+        eprintln!("[DEBUG predictor] sum of durations: {}", dur_sum);
+        eprintln!("[DEBUG predictor] expanded_features (transposed) shape: {:?}", expanded_t.shape());
+        eprintln!("[DEBUG predictor] shared_t shape: {:?}", shared_t.shape());
+        eprintln!("[DEBUG predictor] f0 shape: {:?}", f0.shape());
+        eprintln!("[DEBUG predictor] n_amp shape: {:?}", n_amp.shape());
 
         Ok((durations, expanded_t, shared_t, f0, n_amp))
     }
