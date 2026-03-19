@@ -55,27 +55,34 @@ impl F32Linear {
 // F32Embedding — f32 embedding table on GPU
 // ---------------------------------------------------------------------------
 
-/// An f32 embedding table on GPU, for small embedding tables.
+/// An f32 embedding table on CPU, for small adapter embeddings.
 ///
-/// For adapter embeddings (acoustic_mask, time_start, time_end) that
-/// aren't Q4-quantized.
+/// Stores data as a flat Vec<f32> on CPU to avoid GPU readback issues on WASM
+/// (into_data() is sync but WebGPU mapAsync is async).
 pub struct F32Embedding {
-    weight: Tensor<Wgpu, 2>, // [vocab_size, dim]
+    data: Vec<f32>, // [vocab_size * dim] flattened
     dim: usize,
 }
 
 impl F32Embedding {
     pub fn new(weight: Tensor<Wgpu, 2>, dim: usize) -> Self {
-        Self { weight, dim }
+        // Read from GPU to CPU once at load time.
+        // This works during model loading (sync context) but not during
+        // generation on WASM. Pre-extracting avoids the async issue.
+        let data: Vec<f32> = weight.into_data().to_vec().unwrap();
+        Self { data, dim }
+    }
+
+    /// Create from CPU f32 data directly (avoids GPU readback).
+    pub fn from_cpu(data: Vec<f32>, dim: usize) -> Self {
+        Self { data, dim }
     }
 
     /// Look up embedding for id. Adds the result to `out_buf` on CPU.
     pub fn embed_id_add_cpu(&self, id: u32, out_buf: &mut [f32]) {
-        let selected = self.weight.clone().slice([id as usize..id as usize + 1, 0..self.dim]);
-        let data = selected.into_data();
-        let vec: Vec<f32> = data.to_vec().unwrap();
-        for (i, &v) in vec.iter().enumerate() {
-            out_buf[i] += v;
+        let offset = id as usize * self.dim;
+        for i in 0..self.dim {
+            out_buf[i] += self.data[offset + i];
         }
     }
 }
@@ -466,6 +473,8 @@ pub fn load_tada_llama_gguf_f32<R: Read + Seek>(
     let embed_shape = gguf::reverse_gguf_dims(embed_info.shape());
     let vocab_size = embed_shape[0];
 
+    let embed_bytes = reader.tensor_data("model.embed_tokens.weight")?;
+    let embed_tokens = EmbeddingStore::new(embed_bytes.clone(), vocab_size, hidden_size);
     let (embed_data, _) = gguf::load_f32_weight_any(reader, "model.embed_tokens.weight")?;
     let embed_tokens_gpu = burn::tensor::Tensor::<burn::backend::wgpu::Wgpu, 2>::from_data(
         TensorData::new(embed_data, [vocab_size, hidden_size]),
@@ -481,6 +490,7 @@ pub fn load_tada_llama_gguf_f32<R: Read + Seek>(
     let time_end_embed = load_f32_embedding(reader, "time_end_embed.weight", device)?;
 
     Ok(TadaLlamaF32 {
+        embed_tokens,
         embed_tokens_gpu,
         acoustic_proj,
         acoustic_mask_emb,
@@ -496,6 +506,7 @@ pub fn load_tada_llama_gguf_f32<R: Read + Seek>(
 
 /// TadaLlama with all transformer weights as F32. For debugging only.
 pub struct TadaLlamaF32 {
+    embed_tokens: EmbeddingStore,
     embed_tokens_gpu: burn::tensor::Tensor<burn::backend::wgpu::Wgpu, 2>,
     acoustic_proj: F32Linear,
     acoustic_mask_emb: F32Embedding,
@@ -520,13 +531,9 @@ impl TadaLlamaF32 {
     ) -> burn::tensor::Tensor<burn::backend::wgpu::Wgpu, 3> {
         let dim = self.hidden_size;
 
-        // Token embedding: look up row from GPU table
-        let token_row = self.embed_tokens_gpu.clone().slice([token_id as usize..token_id as usize + 1, 0..dim]);
-        let token_data = token_row.into_data();
-        let token_vec: Vec<f32> = token_data.to_vec().unwrap();
-
-        let mut sum = token_vec;
-
+        // Build combined embedding on CPU (no GPU readback needed)
+        let mut sum = vec![0.0f32; dim];
+        self.embed_tokens.embed_id_add_cpu(token_id, &mut sum);
         self.acoustic_mask_emb.embed_id_add_cpu(acoustic_mask, &mut sum);
         self.time_start_embed.embed_id_add_cpu(time_before, &mut sum);
         self.time_end_embed.embed_id_add_cpu(time_after, &mut sum);
@@ -576,11 +583,8 @@ impl TadaLlamaF32 {
     ) -> Tensor<Wgpu, 3> {
         let dim = self.hidden_size;
 
-        let token_row = self.embed_tokens_gpu.clone().slice([token_id as usize..token_id as usize + 1, 0..dim]);
-        let token_data = token_row.into_data();
-        let token_vec: Vec<f32> = token_data.to_vec().unwrap();
-        let mut sum = token_vec;
-
+        let mut sum = vec![0.0f32; dim];
+        self.embed_tokens.embed_id_add_cpu(token_id, &mut sum);
         self.acoustic_mask_emb.embed_id_add_cpu(acoustic_mask, &mut sum);
         self.time_start_embed.embed_id_add_cpu(time_before, &mut sum);
         self.time_end_embed.embed_id_add_cpu(time_after, &mut sum);
@@ -921,11 +925,11 @@ fn load_f32_linear<R: Read + Seek>(
     Ok(F32Linear::new(weight, bias))
 }
 
-/// Load an F32 embedding table from GGUF.
+/// Load an F32 embedding table from GGUF (stays on CPU, no GPU upload).
 fn load_f32_embedding<R: Read + Seek>(
     reader: &mut gguf::GgufReader<R>,
     name: &str,
-    device: &WgpuDevice,
+    _device: &WgpuDevice,
 ) -> anyhow::Result<F32Embedding> {
     let data = gguf::load_f32_tensor(reader, name)?;
     let info = reader.tensor_info(name)
@@ -933,9 +937,5 @@ fn load_f32_embedding<R: Read + Seek>(
         .clone();
     let shape = gguf::reverse_gguf_dims(info.shape());
     let dim = shape[1];
-    let weight = Tensor::<Wgpu, 2>::from_data(
-        burn::tensor::TensorData::new(data, [shape[0], shape[1]]),
-        device,
-    );
-    Ok(F32Embedding::new(weight, dim))
+    Ok(F32Embedding::from_cpu(data, dim))
 }

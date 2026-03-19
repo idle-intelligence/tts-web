@@ -826,7 +826,12 @@
             generating = true;
             generateBtn.disabled = true;
             if (currentModel === 'pocket-tts') setVoiceBtnsEnabled(false);
-            tts.generate(text, parseFloat(tempSlider.value));
+            const opts = currentModel === 'tada' ? {
+                noiseTemp: 0.9,
+                numFlowSteps: 10,
+                cfgScale: 1.0,
+            } : {};
+            tts.generate(text, parseFloat(tempSlider.value), opts);
         });
 
         function encodeWav(samples, sampleRate) {

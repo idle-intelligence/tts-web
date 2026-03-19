@@ -482,6 +482,25 @@ impl LlamaModel {
         })
     }
 
+    /// Create a minimal placeholder LLM (no weights loaded).
+    /// Used in hybrid mode where Burn handles the entire LLM on GPU.
+    /// Only safe to call generate_acoustic/decode_audio on the parent TadaModel.
+    pub fn load_gguf_adapters_only(gguf: &mut GgufTensors, cfg: &LlamaConfig) -> Result<Self> {
+        // Create tiny dummy tensors — these methods will never be called in hybrid mode
+        let dummy = Tensor::zeros((1, cfg.hidden_size), DType::F32, &gguf.device)?;
+        let embed_tokens = Embedding::new(dummy.clone(), cfg.hidden_size);
+        let norm = RmsNorm::new(dummy.squeeze(0)?, cfg.rms_norm_eps);
+        let rope = RopeCache::new(cfg, &gguf.device)?;
+
+        Ok(Self {
+            embed_tokens,
+            layers: Vec::new(),
+            norm,
+            rope,
+            kv_caches: Vec::new(),
+        })
+    }
+
     /// Run the transformer on pre-computed input embeddings.
     ///
     /// - `input_embeds`: [batch, seq_len, hidden_size] — combined token + acoustic + time embeddings

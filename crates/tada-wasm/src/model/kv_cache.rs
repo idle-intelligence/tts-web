@@ -48,12 +48,8 @@ impl KVCache {
         let (k_full, v_full) = match (self.k.take(), self.v.take()) {
             (Some(prev_k), Some(prev_v)) => {
                 // Concatenate along sequence dimension (dim 2)
-                let k_cat = Tensor::cat(vec![prev_k, k], 2);
-                let v_cat = Tensor::cat(vec![prev_v, v], 2);
-                // Force contiguous materialization to avoid potential stride issues
-                // after cat → unsqueeze → repeat → reshape → swap_dims → matmul
-                let k_full = Self::materialize(k_cat, &self.device);
-                let v_full = Self::materialize(v_cat, &self.device);
+                let k_full = Tensor::cat(vec![prev_k, k], 2);
+                let v_full = Tensor::cat(vec![prev_v, v], 2);
                 (k_full, v_full)
             }
             _ => (k, v),
@@ -66,13 +62,6 @@ impl KVCache {
         self.v = Some(v_full.clone());
 
         (k_full, v_full)
-    }
-
-    /// Force a tensor to contiguous memory by round-tripping through CPU data.
-    fn materialize(t: Tensor<Wgpu, 4>, device: &WgpuDevice) -> Tensor<Wgpu, 4> {
-        let dims = t.dims();
-        let data = t.into_data();
-        Tensor::<Wgpu, 4>::from_data(data, device).reshape(dims)
     }
 
     pub fn offset(&self) -> usize {

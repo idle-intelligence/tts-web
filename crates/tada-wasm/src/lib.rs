@@ -80,6 +80,8 @@ struct GenState {
     effective_voice_len: usize,
     /// prompt_phase_len = prefix_len_py + effective_voice_len
     prompt_phase_len: usize,
+    /// CFG scale for acoustic features (1.0 = off, 1.6 = Python default)
+    cfg_scale: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -112,21 +114,31 @@ impl HybridTadaModel {
     ) -> anyhow::Result<Self> {
         let cfg = TadaConfig::tada_1b();
 
-        // Load Llama backbone into Burn/GPU
-        let cursor = gguf::ShardedCursor::new(gguf_bytes.clone());
+        // Single buffer: move the first shard if only one, else flatten.
+        // Both Burn and candle borrow from this — zero extra copies.
+        let buf = if gguf_bytes.len() == 1 {
+            gguf_bytes.into_iter().next().unwrap() // move, no copy
+        } else {
+            let total_len: usize = gguf_bytes.iter().map(|s| s.len()).sum();
+            let mut flat = Vec::with_capacity(total_len);
+            for shard in gguf_bytes {
+                flat.extend_from_slice(&shard);
+            }
+            flat
+        };
+
+        // Load Llama backbone into Burn/GPU (borrows buf)
+        let cursor = std::io::Cursor::new(&buf);
         let mut reader = gguf::GgufReader::open(cursor)?;
         let llama = model::load_tada_llama_gguf(&mut reader, device)?;
         drop(reader);
 
-        // Load VibeVoice + decoder into candle/CPU
-        // Flatten shards for candle's GGUF loader
-        let total_len: usize = gguf_bytes.iter().map(|s| s.len()).sum();
-        let mut flat = Vec::with_capacity(total_len);
-        for shard in &gguf_bytes {
-            flat.extend_from_slice(shard);
-        }
+        // Load VibeVoice + decoder into candle/CPU (borrows same buf, skips LLM)
         let candle_model =
-            tada_core::tada_model::TadaModel::load_gguf(&flat, &cfg, &candle_core::Device::Cpu)?;
+            tada_core::tada_model::TadaModel::load_gguf_no_llm(&buf, &cfg, &candle_core::Device::Cpu)?;
+
+        // Free the raw GGUF bytes — all tensors are now in GPU/CPU memory
+        drop(buf);
 
         let tokenizer = tokenizers::Tokenizer::from_bytes(tokenizer_bytes)
             .map_err(|e| anyhow::anyhow!("tokenizer: {e}"))?;
@@ -188,6 +200,7 @@ impl HybridTadaModel {
         voice_prompt: Option<VoicePrompt>,
         prefix_len: usize,
         transition_steps: usize,
+        cfg_scale: f32,
     ) {
         let acoustic_dim = self.cfg.acoustic_dim;
         let shift_acoustic = self.cfg.shift_acoustic;
@@ -252,13 +265,14 @@ impl HybridTadaModel {
             prefix_len_py,
             effective_voice_len,
             prompt_phase_len,
+            cfg_scale,
         });
     }
 
     /// Run one generation step.
     ///
     /// Returns JSON progress string, or None if generation is complete.
-    pub fn generation_step(&mut self) -> anyhow::Result<Option<String>> {
+    pub async fn generation_step(&mut self) -> anyhow::Result<Option<String>> {
         let state = match self.gen_state.as_mut() {
             Some(s) => s,
             None => return Ok(None),
@@ -288,8 +302,9 @@ impl HybridTadaModel {
             &mut state.cache,
         );
 
-        // Read hidden state back to CPU for candle
-        let hidden_data = hidden_burn.clone().into_data();
+        // Read hidden state back to CPU for candle (async for WebGPU mapAsync compat)
+        let hidden_data = hidden_burn.clone().into_data_async().await
+            .map_err(|e| anyhow::anyhow!("GPU readback failed: {e:?}"))?;
         let hidden_vec: Vec<f32> = hidden_data.to_vec().unwrap();
         let hidden_size = self.cfg.llama.hidden_size;
 
@@ -308,7 +323,7 @@ impl HybridTadaModel {
                 state.noise_temp,
                 &mut state.rng,
                 state.num_flow_steps,
-                1.0,
+                state.cfg_scale,
             )?;
 
             state
@@ -324,7 +339,8 @@ impl HybridTadaModel {
         if step >= prompt_len - 1 {
             // Use Burn LLM's lm_head on GPU for logits
             let logits_burn = self.llama.lm_head(hidden_burn);
-            let logits_data = logits_burn.into_data();
+            let logits_data = logits_burn.into_data_async().await
+                .map_err(|e| anyhow::anyhow!("GPU readback failed: {e:?}"))?;
             let logits_vec: Vec<f32> = logits_data.to_vec().unwrap();
 
             // Sample with temperature + Gumbel-max
@@ -707,6 +723,7 @@ pub mod web {
             temperature: f32,
             noise_temp: f32,
             num_flow_steps: u32,
+            cfg_scale: f32,
             voice_prompt_bytes: Option<Vec<u8>>,
             prefix_len: u32,
             transition_steps: u32,
@@ -736,6 +753,7 @@ pub mod web {
                 voice_prompt,
                 prefix_len as usize,
                 transition_steps as usize,
+                cfg_scale,
             );
             Ok(())
         }
@@ -744,11 +762,14 @@ pub mod web {
         ///
         /// Returns JSON progress string or null if done:
         /// `{ "step": N, "total_tokens": M, "is_eos": bool, "token_id": N }`
+        ///
+        /// Returns a Promise (async for WebGPU mapAsync compatibility).
         #[wasm_bindgen(js_name = generationStep)]
-        pub fn generation_step(&mut self) -> Result<JsValue, JsError> {
+        pub async fn generation_step(&mut self) -> Result<JsValue, JsError> {
             match self
                 .model_mut()?
                 .generation_step()
+                .await
                 .map_err(|e| JsError::new(&e.to_string()))?
             {
                 Some(json) => Ok(JsValue::from_str(&json)),

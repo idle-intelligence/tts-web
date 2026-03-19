@@ -296,6 +296,47 @@ impl TadaModel {
         })
     }
 
+    /// Load only VibeVoice + decoder + adapters from GGUF (skip LLM).
+    /// Used in hybrid mode where Burn handles the LLM on GPU.
+    pub fn load_gguf_no_llm(data: &[u8], cfg: &TadaConfig, device: &Device) -> Result<Self> {
+        let mut gguf = GgufTensors::from_bytes(data, device)?;
+
+        // Skip LlamaModel — Burn handles it
+        let prediction_head = VibeVoiceDiffusionHead::load_gguf(&mut gguf, cfg)?;
+        let decoder = Decoder::load_gguf(&mut gguf, "_decoder", &cfg.decoder)?;
+
+        let acoustic_proj = gguf.qlinear("acoustic_proj")?;
+        let acoustic_mask_w = gguf.tensor("acoustic_mask_emb.weight")?;
+        let acoustic_mask_emb = Embedding::new(acoustic_mask_w, cfg.llama.hidden_size);
+        let time_start_w = gguf.tensor("time_start_embed.weight")?;
+        let time_start_embed = Embedding::new(time_start_w, cfg.llama.hidden_size);
+        let time_end_w = gguf.tensor("time_end_embed.weight")?;
+        let time_end_embed = Embedding::new(time_end_w, cfg.llama.hidden_size);
+
+        // Skip LlamaModel — create a minimal placeholder.
+        // In hybrid mode, Burn handles the LLM. The llama field is only used
+        // for embed_tokens/lm_head/forward_step which are handled by Burn.
+        // We still need the struct to satisfy the type, but we skip the expensive
+        // loading of 16 transformer layers + KV caches.
+        //
+        // NOTE: Calling forward_step/embed_tokens on this dummy will panic.
+        // Only generate_acoustic/decode_audio are safe to call.
+        let llama = LlamaModel::load_gguf_adapters_only(&mut gguf, &cfg.llama)?;
+
+        Ok(Self {
+            llama,
+            prediction_head,
+            decoder,
+            acoustic_proj,
+            acoustic_mask_emb,
+            time_start_embed,
+            time_end_embed,
+            cfg: cfg.clone(),
+            device: device.clone(),
+            position: 0,
+        })
+    }
+
     /// Output sample rate in Hz.
     pub fn sample_rate() -> usize {
         24000

@@ -71,6 +71,7 @@ export class TtsClient {
                 temperature,
                 noiseTemp: options.noiseTemp,
                 numFlowSteps: options.numFlowSteps,
+                cfgScale: options.cfgScale,
             });
         } else {
             this.worker.postMessage({ type: 'generate', text, temperature });
