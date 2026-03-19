@@ -189,7 +189,7 @@ fn load_style(
 
     let tensor_view = st.tensor(voice_name)
         .map_err(|_| {
-            let names: Vec<&str> = st.names();
+            let names = st.names();
             anyhow::anyhow!("voice {:?} not found. Available: {:?}", voice_name, names)
         })?;
 

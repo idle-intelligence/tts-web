@@ -1,6 +1,28 @@
 use anyhow::Result;
 use candle_core::{DType, IndexOp, Tensor};
-use candle_nn::{conv1d, layer_norm, linear, Conv1d, Conv1dConfig, LayerNorm, LayerNormConfig, Linear, Module, VarBuilder};
+use candle_nn::{conv1d, linear, Conv1d, Conv1dConfig, Linear, Module, VarBuilder};
+
+// ---------------------------------------------------------------------------
+// Depthwise Conv1d: loops over channels since candle's Conv1d doesn't support groups.
+// x: [batch, channels, T], weight: [channels, 1, k]
+// ---------------------------------------------------------------------------
+fn depthwise_conv1d(x: &Tensor, weight: &Tensor, bias: Option<&Tensor>, padding: usize) -> Result<Tensor> {
+    let channels = x.dim(1)?;
+    let mut outputs = Vec::with_capacity(channels);
+    for c in 0..channels {
+        let xc = x.i((.., c..c + 1, ..))?.contiguous()?;
+        let wc = weight.i(c..c + 1)?.contiguous()?;
+        let cfg = Conv1dConfig { padding, ..Default::default() };
+        let conv = Conv1d::new(wc, None, cfg);
+        outputs.push(conv.forward(&xc)?);
+    }
+    let out = Tensor::cat(&outputs, 1)?;
+    if let Some(b) = bias {
+        Ok(out.broadcast_add(&b.reshape((1, channels, 1))?)?)
+    } else {
+        Ok(out)
+    }
+}
 
 use crate::config::KittenConfig;
 
@@ -121,168 +143,202 @@ fn instance_norm(x: &Tensor) -> Result<Tensor> {
     Ok(x.broadcast_sub(&mean)?.broadcast_div(&(var + eps)?.sqrt()?)?)
 }
 
-// ---------------------------------------------------------------------------
-// AdaIN block (128 channels)
-// ---------------------------------------------------------------------------
-struct AdaInBlock {
-    norm1_fc: Linear, // 128 → 256 (gamma+beta for norm1)
-    norm2_fc: Linear, // 128 → 256 (gamma+beta for norm2)
-    conv1: Conv1d,    // 128 → 128, k=3, pad=1
-    conv2: Conv1d,    // 128 → 128, k=3, pad=1
-}
-
-impl AdaInBlock {
-    fn load(vb: VarBuilder, style_half: usize, channels: usize) -> Result<Self> {
-        let norm1_fc = linear(style_half, channels * 2, vb.pp("norm1").pp("fc"))?;
-        let norm2_fc = linear(style_half, channels * 2, vb.pp("norm2").pp("fc"))?;
-        let cfg = Conv1dConfig { padding: 1, ..Default::default() };
-        let conv1 = conv1d(channels, channels, 3, cfg, vb.pp("conv1"))?;
-        let conv2 = conv1d(channels, channels, 3, cfg, vb.pp("conv2"))?;
-        Ok(Self { norm1_fc, norm2_fc, conv1, conv2 })
-    }
-
-    // x: [batch, channels, T], style_half: [batch, style_half]
-    fn forward(&self, x: &Tensor, style_half: &Tensor) -> Result<Tensor> {
-        // First sub-block
-        let x = adain_apply(&self.norm1_fc, x, style_half)?;
-        let x = leaky_relu_02(&x)?;
-        let x = self.conv1.forward(&x)?;
-        // Second sub-block
-        let x2 = adain_apply(&self.norm2_fc, &x, style_half)?;
-        let x2 = leaky_relu_02(&x2)?;
-        let x2 = self.conv2.forward(&x2)?;
-        // Residual + divide by 2
-        Ok(((x + x2)? / 2.0)?)
-    }
-}
-
-fn adain_apply(fc: &Linear, x: &Tensor, style_half: &Tensor) -> Result<Tensor> {
-    let proj = fc.forward(style_half)?; // [batch, 2*C]
-    let c = x.dim(1)?;
-    // gamma: [batch, C], beta: [batch, C]
-    let gamma = proj.i((.., ..c))?;
-    let beta = proj.i((.., c..))?;
-    // reshape for broadcast: [batch, C, 1]
-    let gamma = gamma.unsqueeze(2)?;
-    let beta = beta.unsqueeze(2)?;
-    let normed = instance_norm(x)?;
-    Ok(normed.broadcast_mul(&gamma)?.broadcast_add(&beta)?)
-}
-
 fn leaky_relu_02(x: &Tensor) -> Result<Tensor> {
-    // LeakyReLU(0.2): max(0.2*x, x)
     let neg = (x * 0.2_f64)?;
     Ok(x.maximum(&neg)?)
 }
 
 // ---------------------------------------------------------------------------
-// DownsampleConvBlock  (F0.1, F0.2, N.1, N.2)
-//
-// F0.1: downsample 128→64, then residual conv block
-// F0.2: no downsample (64→64), just residual conv block
+// AdaIN: instance_norm → gamma*x + beta, where [gamma, beta] = fc(style).split()
+// norm_weight/norm_bias are Optional (affine=True/False instance norm).
 // ---------------------------------------------------------------------------
-struct ConvResBlock {
-    downsample: Option<Conv1d>, // Some for F0.1 (128→64), None for F0.2
-    conv0: Conv1d,              // (in_ch→mid_ch, k=3)
-    norm0: LayerNorm,
-    conv3: Conv1d,              // (mid_ch→out_ch, k=3)
-    norm3: LayerNorm,
-    #[allow(dead_code)]
-    out_ch: usize,
+struct AdaIn {
+    fc: Linear,
+    norm_weight: Option<Tensor>,
+    norm_bias: Option<Tensor>,
 }
 
-impl ConvResBlock {
-    // has_downsample: true for block 1 (128→64), false for block 2 (64→64)
-    fn load(vb: VarBuilder, has_downsample: bool, in_ch: usize, mid_ch: usize, out_ch: usize) -> Result<Self> {
-        let downsample = if has_downsample {
-            let cfg = Conv1dConfig { ..Default::default() };
-            Some(conv1d(in_ch, out_ch, 1, cfg, vb.pp("downsample"))?)
+impl AdaIn {
+    // Auto-detect affine: try loading norm.weight + norm.bias, skip if missing.
+    fn load(vb: VarBuilder, style_in: usize, channels: usize) -> Result<Self> {
+        let fc = linear(style_in, channels * 2, vb.pp("fc"))?;
+        let norm_weight = vb.pp("norm").get(channels, "weight").ok();
+        let norm_bias = vb.pp("norm").get(channels, "bias").ok();
+        Ok(Self { fc, norm_weight, norm_bias })
+    }
+
+    // x: [batch, channels, T], style: [batch, style_in] → [batch, channels, T]
+    fn forward(&self, x: &Tensor, style: &Tensor) -> Result<Tensor> {
+        // instance norm (per-channel, over time)
+        let normed = if let (Some(w), Some(b)) = (&self.norm_weight, &self.norm_bias) {
+            let n = instance_norm(x)?;
+            // w, b: [C] → reshape to [1, C, 1] for broadcast
+            let w = w.reshape((1, x.dim(1)?, 1))?;
+            let b = b.reshape((1, x.dim(1)?, 1))?;
+            n.broadcast_mul(&w)?.broadcast_add(&b)?
         } else {
-            None
+            instance_norm(x)?
         };
+
+        // AdaIN modulation
+        let proj = self.fc.forward(style)?; // [batch, 2*C]
+        let c = x.dim(1)?;
+        let gamma = proj.i((.., ..c))?.unsqueeze(2)?; // [batch, C, 1]
+        let beta = proj.i((.., c..))?.unsqueeze(2)?;
+        Ok(normed.broadcast_mul(&gamma)?.broadcast_add(&beta)?)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Block 0: 128ch → 128ch (identity residual)
+// norm1 has affine, norm2 does NOT have affine
+// ---------------------------------------------------------------------------
+struct Block0 {
+    norm1: AdaIn,
+    conv1: Conv1d,
+    norm2: AdaIn,
+    conv2: Conv1d,
+}
+
+impl Block0 {
+    fn load(vb: VarBuilder, style_half: usize, ch: usize) -> Result<Self> {
+        let cfg = Conv1dConfig { padding: 1, ..Default::default() };
+        Ok(Self {
+            norm1: AdaIn::load(vb.pp("norm1"), style_half, ch)?,
+            conv1: conv1d(ch, ch, 3, cfg, vb.pp("conv1"))?,
+            norm2: AdaIn::load(vb.pp("norm2"), style_half, ch)?,
+            conv2: conv1d(ch, ch, 3, cfg, vb.pp("conv2"))?,
+        })
+    }
+
+    // x: [batch, ch, T] → [batch, ch, T]
+    fn forward(&self, x: &Tensor, style: &Tensor) -> Result<Tensor> {
+        let h = self.norm1.forward(x, style)?;
+        let h = leaky_relu_02(&h)?;
+        let h = self.conv1.forward(&h)?;
+        let h = self.norm2.forward(&h, style)?;
+        let h = leaky_relu_02(&h)?;
+        let h = self.conv2.forward(&h)?;
+        // residual + /2
+        Ok(((x + h)? / 2.0)?)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Block 1: 128ch → 64ch (conv1x1 residual skip, has pool conv)
+// norm1 has NO affine (norm1.norm.* absent), norm2 HAS affine
+// ---------------------------------------------------------------------------
+struct Block1 {
+    conv1x1: Conv1d,
+    norm1: AdaIn,
+    conv1: Conv1d,
+    norm2: AdaIn,
+    conv2: Conv1d,
+    pool_weight: Tensor,
+    pool_bias: Tensor,
+}
+
+impl Block1 {
+    fn load(vb: VarBuilder, style_half: usize, in_ch: usize, out_ch: usize) -> Result<Self> {
         let cfg3 = Conv1dConfig { padding: 1, ..Default::default() };
-        let conv0 = conv1d(in_ch, mid_ch, 3, cfg3, vb.pp("conv_block").pp("0"))?;
-        let norm0 = layer_norm(mid_ch, LayerNormConfig::default(), vb.pp("conv_block").pp("1"))?;
-        let conv3 = conv1d(mid_ch, out_ch, 3, cfg3, vb.pp("conv_block").pp("3"))?;
-        let norm3 = layer_norm(out_ch, LayerNormConfig::default(), vb.pp("conv_block").pp("4"))?;
-        Ok(Self { downsample, conv0, norm0, conv3, norm3, out_ch })
+        let cfg1 = Conv1dConfig { ..Default::default() };
+        // conv1x1: residual skip (no bias — load weight manually)
+        let conv1x1_w = vb.get((out_ch, in_ch, 1), "conv1x1.weight")?;
+        let conv1x1 = Conv1d::new(conv1x1_w, None, cfg1);
+        // pool: depthwise conv, weight [in_ch, 1, 3] — stored as tensors, applied via depthwise_conv1d
+        let pool_weight = vb.get((in_ch, 1, 3), "pool.weight")?;
+        let pool_bias = vb.get(in_ch, "pool.bias")?;
+        Ok(Self {
+            conv1x1,
+            norm1: AdaIn::load(vb.pp("norm1"), style_half, in_ch)?,
+            conv1: conv1d(in_ch, out_ch, 3, cfg3, vb.pp("conv1"))?,
+            norm2: AdaIn::load(vb.pp("norm2"), style_half, out_ch)?,
+            conv2: conv1d(out_ch, out_ch, 3, cfg3, vb.pp("conv2"))?,
+            pool_weight,
+            pool_bias,
+        })
     }
 
     // x: [batch, in_ch, T] → [batch, out_ch, T]
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let residual = if let Some(ds) = &self.downsample {
-            ds.forward(x)?
-        } else {
-            x.clone()
-        };
-
-        // conv_block input is the downsampled or original
-        let x_in = residual.clone();
-
-        // Conv(in/out_ch → mid_ch) → LayerNorm → LeakyReLU
-        let h = self.conv0.forward(&x_in)?;
-        // LayerNorm expects [..., C] — transpose to [batch, T, mid_ch], norm, transpose back
-        let h = layer_norm_on_channels(h, &self.norm0)?;
+    fn forward(&self, x: &Tensor, style: &Tensor) -> Result<Tensor> {
+        let skip = self.conv1x1.forward(x)?; // [batch, out_ch, T]
+        let h = self.norm1.forward(x, style)?;
         let h = leaky_relu_02(&h)?;
-
-        // Conv(mid_ch → out_ch) → LayerNorm → LeakyReLU
-        let h = self.conv3.forward(&h)?;
-        let h = layer_norm_on_channels(h, &self.norm3)?;
+        let h = self.conv1.forward(&h)?;
+        let h = self.norm2.forward(&h, style)?;
         let h = leaky_relu_02(&h)?;
-
-        Ok((residual + h)?)
+        let h = self.conv2.forward(&h)?;
+        let out = (skip + h)?;
+        // pool weight is [in_ch, 1, 3] — depthwise on in_ch=128ch.
+        // After residual we have out_ch=64ch. Concat [out, out] → 128ch → depthwise pool → 128ch
+        // → take first 64ch.
+        let doubled = Tensor::cat(&[&out, &out], 1)?; // [batch, 128, T]
+        let pooled = depthwise_conv1d(&doubled, &self.pool_weight, Some(&self.pool_bias), 1)?;
+        let out_ch = out.dim(1)?;
+        Ok(pooled.i((.., ..out_ch, ..))?.contiguous()?)
     }
 }
 
-// LayerNorm is applied over the last dimension.
-// Our tensors are [batch, channels, T] — we need to norm over channels for each position.
-// Transpose to [batch, T, channels], norm, transpose back.
-fn layer_norm_on_channels(x: Tensor, ln: &LayerNorm) -> Result<Tensor> {
-    let x_t = x.transpose(1, 2)?.contiguous()?; // [batch, T, C]
-    let normed = ln.forward(&x_t)?;
-    Ok(normed.transpose(1, 2)?.contiguous()?)
+// ---------------------------------------------------------------------------
+// Block 2: 64ch → 64ch (identity residual)
+// NEITHER norm1 nor norm2 has affine params
+// ---------------------------------------------------------------------------
+struct Block2 {
+    norm1: AdaIn,
+    conv1: Conv1d,
+    norm2: AdaIn,
+    conv2: Conv1d,
+}
+
+impl Block2 {
+    fn load(vb: VarBuilder, style_half: usize, ch: usize) -> Result<Self> {
+        let cfg = Conv1dConfig { padding: 1, ..Default::default() };
+        Ok(Self {
+            norm1: AdaIn::load(vb.pp("norm1"), style_half, ch)?,
+            conv1: conv1d(ch, ch, 3, cfg, vb.pp("conv1"))?,
+            norm2: AdaIn::load(vb.pp("norm2"), style_half, ch)?,
+            conv2: conv1d(ch, ch, 3, cfg, vb.pp("conv2"))?,
+        })
+    }
+
+    // x: [batch, ch, T] → [batch, ch, T]
+    fn forward(&self, x: &Tensor, style: &Tensor) -> Result<Tensor> {
+        let h = self.norm1.forward(x, style)?;
+        let h = leaky_relu_02(&h)?;
+        let h = self.conv1.forward(&h)?;
+        let h = self.norm2.forward(&h, style)?;
+        let h = leaky_relu_02(&h)?;
+        let h = self.conv2.forward(&h)?;
+        Ok((x + h)?)
+    }
 }
 
 // ---------------------------------------------------------------------------
-// F0 or N predictor branch (shared LSTM → AdaIN block → 2x ConvResBlock → proj)
+// F0 or N predictor branch
 // ---------------------------------------------------------------------------
 struct PredictorBranch {
-    adain: AdaInBlock,
-    block1: ConvResBlock,
-    block2: ConvResBlock,
+    block0: Block0,
+    block1: Block1,
+    block2: Block2,
     proj: Conv1d,
 }
 
 impl PredictorBranch {
     fn load(vb: VarBuilder, name: &str, style_half: usize, lstm_out: usize) -> Result<Self> {
-        // Block 0: AdaIN at lstm_out channels (128)
-        let adain = AdaInBlock::load(vb.pp(name).pp("0"), style_half, lstm_out)?;
-        // Block 1: downsample 128→64
-        let block1 = ConvResBlock::load(
-            vb.pp(name).pp("1"),
-            true,
-            lstm_out,
-            lstm_out,
-            lstm_out / 2,
-        )?;
-        // Block 2: 64→64
-        let block2 = ConvResBlock::load(
-            vb.pp(name).pp("2"),
-            false,
-            lstm_out / 2,
-            lstm_out / 2,
-            lstm_out / 2,
-        )?;
+        let half = lstm_out / 2;
+        let block0 = Block0::load(vb.pp(name).pp("0"), style_half, lstm_out)?;
+        let block1 = Block1::load(vb.pp(name).pp("1"), style_half, lstm_out, half)?;
+        let block2 = Block2::load(vb.pp(name).pp("2"), style_half, half)?;
         let proj_cfg = Conv1dConfig { ..Default::default() };
-        let proj = conv1d(lstm_out / 2, 1, 1, proj_cfg, vb.pp(format!("{}_proj", name)))?;
-        Ok(Self { adain, block1, block2, proj })
+        let proj = conv1d(half, 1, 1, proj_cfg, vb.pp(format!("{}_proj", name)))?;
+        Ok(Self { block0, block1, block2, proj })
     }
 
-    // x: [batch, lstm_out, T], style_half: [batch, style_half]
-    fn forward(&self, x: &Tensor, style_half: &Tensor) -> Result<Tensor> {
-        let x = self.adain.forward(x, style_half)?;
-        let x = self.block1.forward(&x)?;
-        let x = self.block2.forward(&x)?;
+    // x: [batch, lstm_out, T], style: [batch, style_half] → [batch, 1, T]
+    fn forward(&self, x: &Tensor, style: &Tensor) -> Result<Tensor> {
+        let x = self.block0.forward(x, style)?;
+        let x = self.block1.forward(&x, style)?;
+        let x = self.block2.forward(&x, style)?;
         Ok(self.proj.forward(&x)?)
     }
 }
@@ -310,8 +366,8 @@ pub struct Predictor {
 
 impl Predictor {
     pub fn load(vb: VarBuilder, cfg: &KittenConfig) -> Result<Self> {
-        // hidden_dim = 256 (text encoder output), lstm_hidden = 64 → BiLSTM out = 128
-        let input_size = cfg.hidden_dim; // 256
+        // text encoder output is 256 (lstm_out 128 + style_half 128), lstm_hidden = 64 → BiLSTM out = 128
+        let input_size = cfg.lstm_hidden * 2 + cfg.style_dim / 2; // 128 + 128 = 256
         let hidden_size = cfg.lstm_hidden; // 64
         let lstm_out = hidden_size * 2; // 128
         let style_half = cfg.style_dim / 2; // 128
@@ -337,9 +393,10 @@ impl Predictor {
 
     /// text_features: [batch, seq, hidden_dim]
     /// style: [batch, style_dim] — uses style[:, 128:] for AdaIN
-    /// Returns (durations, expanded_features, f0, n_amp)
+    /// Returns (durations, expanded_features, shared_lstm_out, f0, n_amp)
     ///   durations: [batch, seq] i64
     ///   expanded_features: [batch, hidden_dim, T]
+    ///   shared_lstm_out: [batch, 128, T] — shared LSTM output (needed by decoder)
     ///   f0: [batch, 1, T]
     ///   n_amp: [batch, 1, T]
     pub fn forward(
@@ -347,7 +404,7 @@ impl Predictor {
         text_features: &Tensor,
         style: &Tensor,
         speed: f32,
-    ) -> Result<(Tensor, Tensor, Tensor, Tensor)> {
+    ) -> Result<(Tensor, Tensor, Tensor, Tensor, Tensor)> {
         let style_half = style.i((.., self.style_half..))?; // [batch, 128]
 
         // --- Duration predictor ---
@@ -379,7 +436,7 @@ impl Predictor {
         let f0 = self.f0_branch.forward(&shared_t, &style_half)?; // [batch, 1, T]
         let n_amp = self.n_branch.forward(&shared_t, &style_half)?; // [batch, 1, T]
 
-        Ok((durations, expanded_t, f0, n_amp))
+        Ok((durations, expanded_t, shared_t, f0, n_amp))
     }
 }
 

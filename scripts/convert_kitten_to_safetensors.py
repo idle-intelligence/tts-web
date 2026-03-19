@@ -42,10 +42,10 @@ LSTM_TENSOR_MAP = {
     "onnx::LSTM_5921": "predictor.text_encoder.lstms.2.B",
     "onnx::LSTM_5922": "predictor.text_encoder.lstms.2.W",
     "onnx::LSTM_5923": "predictor.text_encoder.lstms.2.R",
-    # /lstm/LSTM  (decoder lstm)
-    "onnx::LSTM_5970": "decoder.lstm.B",
-    "onnx::LSTM_5971": "decoder.lstm.W",
-    "onnx::LSTM_5972": "decoder.lstm.R",
+    # /lstm/LSTM  (predictor duration lstm)
+    "onnx::LSTM_5970": "predictor.lstm.B",
+    "onnx::LSTM_5971": "predictor.lstm.W",
+    "onnx::LSTM_5972": "predictor.lstm.R",
     # /shared/LSTM  (shared lstm)
     "onnx::LSTM_6019": "shared.lstm.B",
     "onnx::LSTM_6020": "shared.lstm.W",
@@ -120,8 +120,13 @@ def convert_model(onnx_sha256: str) -> dict[str, np.ndarray]:
             continue
 
         # 2. MatMul anonymous weights
+        # ONNX MatMul stores weights as [in_features, out_features].
+        # Candle Linear expects [out_features, in_features] (computes x @ W^T).
+        # Transpose 2D weight matrices so they match candle's convention.
         if name in MATMUL_TENSOR_MAP:
             key = MATMUL_TENSOR_MAP[name]
+            if arr.ndim == 2:
+                arr = arr.T
             tensors[key] = arr
             continue
 

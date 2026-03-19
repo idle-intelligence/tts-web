@@ -49,8 +49,8 @@ impl KittenModel {
         // 3. Text encoder → (lstm_features [1, seq, 256], cnn_features [1, 128, seq])
         let (lstm_features, cnn_features) = self.text_encoder.forward(&bert_out, style)?;
 
-        // 4. Predictor → (durations [1, seq] i64, expanded_features [1, 256, T], f0 [1, 1, T], n_amp [1, 1, T])
-        let (durations, expanded_features, f0, n_amp) =
+        // 4. Predictor → (durations, expanded_features, shared_lstm_out, f0, n_amp)
+        let (durations, _expanded_features, shared_lstm_out, f0, n_amp) =
             self.predictor.forward(&lstm_features, style, speed)?;
 
         // 5. Duration-expand cnn_features [1, 128, seq] → [1, 128, T]
@@ -58,7 +58,10 @@ impl KittenModel {
         let asr_features = expand_cnn_features(&cnn_features, &durations)?;
 
         // 6. Decoder → waveform [1, 1, num_samples]
-        let waveform = self.decoder.forward(&expanded_features, &asr_features, &f0, &n_amp, style)?;
+        // shared_lstm_out [1, 128, T] → encode block input
+        // asr_features    [1, 128, T] → asr_res projection
+        // f0/n_amp        [1, 1, T]   — from predictor F0/N branches
+        let waveform = self.decoder.forward(&shared_lstm_out, &asr_features, &f0, &n_amp, style)?;
 
         // 7. Trim last 5000 samples and return as Vec<f32>
         let samples = waveform.i((0, 0, ..))?; // [num_samples]
