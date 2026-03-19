@@ -54,7 +54,7 @@ impl AdaIn {
 
         let proj = self.fc.forward(style)?; // [batch, 2*C]
         let c = x.dim(1)?;
-        let gamma = proj.i((.., ..c))?.unsqueeze(2)?; // [batch, C, 1]
+        let gamma = (proj.i((.., ..c))?.unsqueeze(2)? + 1.0_f64)?; // [batch, C, 1], +1 residual
         let beta = proj.i((.., c..))?.unsqueeze(2)?;
         Ok(normed.broadcast_mul(&gamma)?.broadcast_add(&beta)?)
     }
@@ -560,7 +560,6 @@ impl Generator {
             let kernel = self.upsample_kernels[i];
             let padding = (kernel - stride) / 2;
             h = h.conv_transpose1d(&self.ups_w[i], padding, 0, stride, 1, 1)?;
-            eprintln!("[DEBUG generator] after ups.{} shape: {:?}", i, h.shape());
             // add bias
             let b = self.ups_b[i].reshape((1, self.ups_b[i].dim(0)?, 1))?;
             h = h.broadcast_add(&b)?;
@@ -666,9 +665,6 @@ impl Decoder {
         // Downsample F0/N: [batch, 1, 2T] → [batch, 1, T]
         let f0_down = self.f0_conv.forward(f0)?;
         let n_down = self.n_conv.forward(n_amp)?;
-        eprintln!("[DEBUG decoder] after F0_conv shape: {:?}", f0_down.shape());
-        eprintln!("[DEBUG decoder] after N_conv shape: {:?}", n_down.shape());
-
         // Align asr to the downsampled T (in case they differ by ±1 sample)
         let t = f0_down.dim(2)?;
         let asr = match_time(&asr, t)?;
@@ -677,12 +673,10 @@ impl Decoder {
         // shared_lstm_out may be at T (matching after downsample) or at the original T.
         let lstm_aligned = match_time(shared_lstm_out, t)?;
         let enc_in = Tensor::cat(&[&lstm_aligned, &f0_down, &n_down], 1)?; // [batch, 130, T]
-        eprintln!("[DEBUG decoder] encode input shape: {:?}", enc_in.shape());
         let mut h = self.encode.forward(&enc_in, &style_half)?; // [batch, 256, T]
-        eprintln!("[DEBUG decoder] after encode shape: {:?}", h.shape());
 
         // Four DecodeBlocks
-        for (i, block) in self.decode.iter().enumerate() {
+        for block in self.decode.iter() {
             // Align asr, f0, n to current h time dim (needed for block 3 which doubles T)
             let ht = h.dim(2)?;
             let asr_t = match_time(&asr, ht)?;
@@ -690,19 +684,15 @@ impl Decoder {
             let n_t = match_time(&n_down, ht)?;
             let dec_in = Tensor::cat(&[&h, &asr_t, &f0_t, &n_t], 1)?; // [batch, 322, ht]
             h = block.forward(&dec_in, &style_half)?;
-            eprintln!("[DEBUG decoder] after decode.{} shape: {:?}", i, h.shape());
         }
         // After block 3: h is [batch, 256, 2T]
 
         // F0 upsampled to 2T for the generator
         let t2 = h.dim(2)?;
         let f0_gen = f0.upsample_nearest1d(t2)?; // [batch, 1, 2T]
-        eprintln!("[DEBUG decoder] generator input h shape: {:?}", h.shape());
-        eprintln!("[DEBUG decoder] generator f0_gen shape: {:?}", f0_gen.shape());
 
         // Generator → waveform [batch, 1, num_samples]
         let waveform = self.generator.forward(&h, &f0_gen, &style_half)?;
-        eprintln!("[DEBUG decoder] generator output (waveform) shape: {:?}", waveform.shape());
         Ok(waveform)
     }
 }

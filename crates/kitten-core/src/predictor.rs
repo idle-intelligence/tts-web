@@ -2,28 +2,6 @@ use anyhow::Result;
 use candle_core::{DType, IndexOp, Tensor};
 use candle_nn::{conv1d, linear, Conv1d, Conv1dConfig, Linear, Module, VarBuilder};
 
-// ---------------------------------------------------------------------------
-// Depthwise Conv1d: loops over channels since candle's Conv1d doesn't support groups.
-// x: [batch, channels, T], weight: [channels, 1, k]
-// ---------------------------------------------------------------------------
-fn depthwise_conv1d(x: &Tensor, weight: &Tensor, bias: Option<&Tensor>, padding: usize) -> Result<Tensor> {
-    let channels = x.dim(1)?;
-    let mut outputs = Vec::with_capacity(channels);
-    for c in 0..channels {
-        let xc = x.i((.., c..c + 1, ..))?.contiguous()?;
-        let wc = weight.i(c..c + 1)?.contiguous()?;
-        let cfg = Conv1dConfig { padding, ..Default::default() };
-        let conv = Conv1d::new(wc, None, cfg);
-        outputs.push(conv.forward(&xc)?);
-    }
-    let out = Tensor::cat(&outputs, 1)?;
-    if let Some(b) = bias {
-        Ok(out.broadcast_add(&b.reshape((1, channels, 1))?)?)
-    } else {
-        Ok(out)
-    }
-}
-
 fn depthwise_conv_transpose1d(
     x: &Tensor,
     weight: &Tensor,
