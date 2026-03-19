@@ -329,6 +329,11 @@
         <div class="voice-grid" id="voiceGrid"></div>
     </section>
 
+    <section id="tadaVoiceSection" style="display:none">
+        <h2>voice</h2>
+        <div class="voice-grid" id="tadaVoiceGrid"></div>
+    </section>
+
     <section>
         <h2>input <span class="sub">· text</span></h2>
         <p class="info">Text stays on this device.</p>
@@ -375,6 +380,15 @@
 
         const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
+
+        const TADA_VOICES = [
+            { name: 'ljspeech', label: 'LJSpeech', file: 'ljspeech_long', demo: 'The quick brown fox jumps over the lazy dog.' },
+            { name: 'amazement', label: 'Amazement \u{1F632}', file: 'amazement', demo: "I can't believe how incredible this is!" },
+            { name: 'amusement', label: 'Amusement \u{1F604}', file: 'amusement', demo: 'And then the dog started chasing its own tail!' },
+            { name: 'rickie', label: 'Rickie \u{1F4AC}', file: 'rickie', demo: 'Do you think your Wu-Tang sword can defeat me?' },
+        ];
+        let activeTadaVoice = null;
+        let loadingTadaVoice = false;
 
         let allChunks = [];
         let generating = false;
@@ -461,7 +475,7 @@
             } catch { return false; }
         }
 
-        // ---- Voice grid ----
+        // ---- Voice grid (Pocket TTS) ----
         const voiceGrid = document.getElementById('voiceGrid');
         for (const name of VOICES) {
             const btn = document.createElement('button');
@@ -488,6 +502,37 @@
                 if (btn.dataset.voice === name) btn.classList.add('loading');
             });
             tts.loadVoice(name);
+        }
+
+        // ---- Voice grid (TADA) ----
+        const tadaVoiceGrid = document.getElementById('tadaVoiceGrid');
+        const tadaVoiceSection = document.getElementById('tadaVoiceSection');
+        for (const v of TADA_VOICES) {
+            const btn = document.createElement('button');
+            btn.className = 'voice-btn';
+            btn.textContent = v.label;
+            btn.disabled = true;
+            btn.dataset.voice = v.name;
+            btn.addEventListener('click', () => selectTadaVoice(v.name));
+            tadaVoiceGrid.appendChild(btn);
+        }
+
+        function setTadaVoiceBtnsEnabled(enabled) {
+            tadaVoiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
+                btn.disabled = !enabled;
+            });
+        }
+
+        function selectTadaVoice(name) {
+            if (loadingTadaVoice || generating) return;
+            const voiceDef = TADA_VOICES.find(v => v.name === name);
+            loadingTadaVoice = true;
+            setTadaVoiceBtnsEnabled(false);
+            tadaVoiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.dataset.voice === name) btn.classList.add('loading');
+            });
+            tts.setVoice(name, voiceDef ? voiceDef.file : name);
         }
 
         // ---- Pocket TTS client ----
@@ -641,10 +686,41 @@
                 baseUrl: isLocal ? location.origin : '',
                 wasmBaseUrl: isLocal ? (location.origin + '/tada-pkg') : undefined,
                 workerUrl: './tada-worker.js',
+                onVoiceLoaded: (name) => {
+                    loadingTadaVoice = false;
+                    activeTadaVoice = name;
+                    tadaVoiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
+                        btn.classList.remove('loading', 'active');
+                        if (btn.dataset.voice === name) btn.classList.add('active');
+                    });
+                    setTadaVoiceBtnsEnabled(true);
+                    // Auto-generate demo phrase for this voice
+                    const voiceDef = TADA_VOICES.find(v => v.name === name);
+                    const userText = textInput.value.trim();
+                    const demoText = voiceDef ? voiceDef.demo : userText;
+                    isDemoGen = !userText;
+                    if (isDemoGen) textInput.value = '';
+                    generating = true;
+                    generateBtn.disabled = true;
+                    setTadaVoiceBtnsEnabled(false);
+                    tts.generate(userText || demoText, parseFloat(tempSlider.value), {
+                        noiseTemp: 0.9,
+                        numFlowSteps: 10,
+                        cfgScale: 1.0,
+                    });
+                },
                 onStatus: (text, ready, progress) => {
                     if (ready) {
                         updateStatus('ready', text);
                         generateBtn.disabled = false;
+                        setTadaVoiceBtnsEnabled(true);
+                        // Mark the default voice as active on first ready
+                        if (!activeTadaVoice) {
+                            activeTadaVoice = 'ljspeech';
+                            tadaVoiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
+                                if (btn.dataset.voice === 'ljspeech') btn.classList.add('active');
+                            });
+                        }
                         progressBar.classList.remove('visible');
                         progressInfo.textContent = '';
                         downloadBtn.style.display = 'none';
@@ -660,7 +736,9 @@
                 onError: (err) => {
                     updateStatus('error', 'Error: ' + err.message);
                     generating = false;
+                    loadingTadaVoice = false;
                     generateBtn.disabled = false;
+                    setTadaVoiceBtnsEnabled(true);
                     stepInfo.textContent = '';
                     tadaProgress.textContent = '';
                     console.error(err);
@@ -690,6 +768,7 @@
                     const totalTime = ((performance.now() - genStartTime) / 1000).toFixed(2);
                     generating = false;
                     generateBtn.disabled = false;
+                    setTadaVoiceBtnsEnabled(true);
                     tadaProgress.textContent = '';
                     updateStatus('ready', 'Ready');
 
@@ -716,9 +795,11 @@
         function updateUIForModel(model) {
             if (model === 'tada') {
                 voiceSection.style.display = 'none';
+                tadaVoiceSection.style.display = '';
                 tadaProgress.textContent = '';
             } else {
                 voiceSection.style.display = '';
+                tadaVoiceSection.style.display = 'none';
                 tadaProgress.textContent = '';
             }
             stepInfo.textContent = '';
@@ -739,7 +820,14 @@
             generating = false;
             activeVoice = null;
             loadingVoice = false;
+            activeTadaVoice = null;
+            loadingTadaVoice = false;
             isDemoGen = false;
+            // Reset TADA voice button states
+            tadaVoiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
+                btn.classList.remove('active', 'loading');
+                btn.disabled = true;
+            });
             allChunks = [];
             generateBtn.disabled = true;
             progressBar.classList.remove('visible');
@@ -826,6 +914,7 @@
             generating = true;
             generateBtn.disabled = true;
             if (currentModel === 'pocket-tts') setVoiceBtnsEnabled(false);
+            if (currentModel === 'tada') setTadaVoiceBtnsEnabled(false);
             const opts = currentModel === 'tada' ? {
                 noiseTemp: 0.9,
                 numFlowSteps: 10,

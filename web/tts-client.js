@@ -62,6 +62,11 @@ export class TtsClient {
         this.worker.postMessage({ type: 'load_voice', name });
     }
 
+    setVoice(name, file) {
+        if (!this._ready) throw new Error('Not initialized');
+        this.worker.postMessage({ type: 'setVoice', name, file: file || name, baseUrl: this.baseUrl || location.origin });
+    }
+
     generate(text, temperature = 0.7, options = {}) {
         if (!this._ready) throw new Error('Not initialized');
         if (this.modelType === 'tada') {
@@ -111,6 +116,9 @@ export class TtsClient {
                 break;
             case 'voice_loaded':
                 this.onVoiceLoaded(data.name, data.voiceIndex);
+                break;
+            case 'voiceLoaded':
+                this.onVoiceLoaded(data.name);
                 break;
             case 'gen_start':
                 this.onGenStart(data.numTokens);

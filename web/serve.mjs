@@ -47,6 +47,9 @@ const server = createServer((req, res) => {
     } else if (pathname.startsWith("/pkg/")) {
         // WASM build output from crates/tts-wasm/pkg/
         filePath = join(ROOT, "crates/tts-wasm", pathname);
+    } else if (pathname.startsWith("/voices/")) {
+        // Voice prompts from repo root voices/
+        filePath = join(ROOT, pathname);
     } else if (pathname.endsWith(".gguf") || pathname === "/tokenizer.model" || pathname === "/tokenizer.json") {
         // Model files served from repo root
         filePath = join(ROOT, pathname);

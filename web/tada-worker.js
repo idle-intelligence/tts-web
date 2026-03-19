@@ -5,6 +5,8 @@ const CACHE_NAME = 'tada-model-v2';
 
 let wasm = null;
 let engine = null;
+let voiceBytes = null;
+let voiceText = null;
 
 // Cached fetch with progress reporting
 async function cachedFetch(url, label) {
@@ -78,6 +80,21 @@ async function handleLoad(baseUrl, wasmBaseUrl) {
         postMessage({type: 'status', text: 'Initializing model...', ready: false});
         engine.loadModel(tokenizerData);
 
+        // Load default voice prompt (ljspeech_long: 32 acoustic tokens)
+        postMessage({type: 'status', text: 'Loading voice prompt...', ready: false});
+        try {
+            const [voiceStBytes, voiceJsonResp] = await Promise.all([
+                fetch(baseUrl + '/voices/ljspeech_long.safetensors').then(r => r.arrayBuffer()),
+                fetch(baseUrl + '/voices/ljspeech_long.json').then(r => r.json()),
+            ]);
+            voiceBytes = new Uint8Array(voiceStBytes);
+            voiceText = voiceJsonResp.text;
+        } catch (voiceErr) {
+            console.warn('[tada-worker] voice prompt load failed (zero-shot fallback):', voiceErr);
+            voiceBytes = null;
+            voiceText = null;
+        }
+
         postMessage({type: 'status', text: 'Ready', ready: true});
         postMessage({type: 'loaded'});
     } catch (e) {
@@ -93,21 +110,34 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
     }
 
     try {
-        // Tokenize
-        const tokenIds = engine.tokenize(text);
+        // Tokenize — use voice text if available for correct alignment
+        let tokenIds, prefixLen, transitionSteps;
+        if (voiceBytes && voiceText) {
+            const result = engine.tokenizeWithVoice(text, voiceText);
+            tokenIds = result.tokenIds;
+            prefixLen = result.prefixLen;
+            transitionSteps = 5; // ljspeech_long has 32 tokens, trim 5, keep 27
+        } else {
+            tokenIds = engine.tokenize(text);
+            prefixLen = 0;
+            transitionSteps = 0;
+        }
+
         const numTokens = tokenIds.length;
+        console.log(`[tada-worker] tokens=${numTokens}, prefixLen=${prefixLen}, transitionSteps=${transitionSteps}, voiceLoaded=${!!voiceBytes}`);
+        console.log(`[tada-worker] first 15 token IDs:`, Array.from(tokenIds.slice(0, 15)));
         postMessage({type: 'gen_start', numTokens});
 
-        // Start generation (no voice prompt for now — null, 0, 0)
+        // Start generation with voice prompt (or zero-shot if not loaded)
         engine.startGeneration(
             tokenIds,
             temperature,
             noiseTemp || 0.9,
             numFlowSteps || 10,
             cfgScale || 1.0,
-            null,  // voice_prompt_bytes
-            0,     // prefix_len
-            0,     // transition_steps
+            voiceBytes || null,
+            prefixLen,
+            transitionSteps,
         );
 
         // Generation loop
@@ -144,6 +174,25 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
     }
 }
 
+async function handleSetVoice(name, file, baseUrl) {
+    try {
+        postMessage({type: 'status', text: `Loading voice: ${name}...`, ready: false});
+        const voiceUrl = baseUrl + '/voices/' + file + '.safetensors';
+        const jsonUrl = baseUrl + '/voices/' + file + '.json';
+        const [voiceStBytes, voiceJsonResp] = await Promise.all([
+            fetch(voiceUrl).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); }),
+            fetch(jsonUrl).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+        ]);
+        voiceBytes = new Uint8Array(voiceStBytes);
+        voiceText = voiceJsonResp.text;
+        postMessage({type: 'status', text: 'Ready', ready: true});
+        postMessage({type: 'voiceLoaded', name});
+    } catch (e) {
+        console.error('[tada-worker] setVoice error:', e);
+        postMessage({type: 'error', error: e.message || String(e)});
+    }
+}
+
 self.onmessage = async (e) => {
     const msg = e.data;
     switch (msg.type) {
@@ -152,6 +201,9 @@ self.onmessage = async (e) => {
             break;
         case 'generate':
             await handleGenerate(msg.text, msg.temperature, msg.noiseTemp, msg.numFlowSteps, msg.cfgScale);
+            break;
+        case 'setVoice':
+            await handleSetVoice(msg.name, msg.file || msg.name, msg.baseUrl);
             break;
         case 'cancel':
             if (engine) engine.cancelGeneration();

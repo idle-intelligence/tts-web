@@ -154,31 +154,51 @@ impl HybridTadaModel {
 
     /// Tokenize text with Llama 3 chat template.
     pub fn tokenize(&self, text: &str) -> anyhow::Result<Vec<u32>> {
+        let (ids, _) = self.tokenize_with_voice(text, None)?;
+        Ok(ids)
+    }
+
+    /// Tokenize text with optional voice prompt text prepended.
+    ///
+    /// Returns `(token_ids, prefix_len)` where `prefix_len` is the number of
+    /// tokens before the voice/target text region starts (BOS + header tokens).
+    /// In zero-shot mode (`voice_text = None`) `prefix_len` is unused.
+    pub fn tokenize_with_voice(
+        &self,
+        text: &str,
+        voice_text: Option<&str>,
+    ) -> anyhow::Result<(Vec<u32>, usize)> {
+        let enc = |s: &str| -> anyhow::Result<Vec<u32>> {
+            self.tokenizer
+                .encode(s, false)
+                .map(|e| e.get_ids().to_vec())
+                .map_err(|e| anyhow::anyhow!("{e}"))
+        };
+
         let mut ids = vec![BOS_TOKEN_ID]; // <|begin_of_text|>
         ids.push(128006); // <|start_header_id|>
-
-        let assistant_enc = self
-            .tokenizer
-            .encode("assistant", false)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        ids.extend(assistant_enc.get_ids());
-
+        ids.extend(enc("system")?);
+        ids.push(128007); // <|end_header_id|>
+        ids.push(EOT_TOKEN_ID); // <|eot_id|>
+        ids.push(128006); // <|start_header_id|>
+        ids.extend(enc("assistant")?);
         ids.push(128007); // <|end_header_id|>
 
-        let text_enc = self
-            .tokenizer
-            .encode(format!("\n\n{text}"), false)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        ids.extend(text_enc.get_ids());
+        // prefix_len = everything up to (but not including) voice/text content
+        let prefix_len = ids.len();
 
-        ids.push(EOT_TOKEN_ID); // <|eot_id|>
+        if let Some(vt) = voice_text {
+            ids.extend(enc(vt)?);
+        }
 
-        // Add shift_acoustic EOT tokens (matching tada_generate.rs and Python reference)
+        ids.extend(enc(text)?);
+        ids.push(EOT_TOKEN_ID);
+
         for _ in 0..self.cfg.shift_acoustic {
             ids.push(EOT_TOKEN_ID);
         }
 
-        Ok(ids)
+        Ok((ids, prefix_len))
     }
 
     /// Start a new generation run.
@@ -706,6 +726,33 @@ pub mod web {
             let ids = self.model()?.tokenize(text)
                 .map_err(|e| JsError::new(&e.to_string()))?;
             Ok(js_sys::Uint32Array::from(ids.as_slice()))
+        }
+
+        /// Tokenize text with an optional voice prompt text prepended.
+        ///
+        /// Returns a JS object `{ tokenIds: Uint32Array, prefixLen: number }`.
+        /// `voiceText` should be the transcript of the voice prompt audio.
+        /// Pass `null` or `undefined` for zero-shot mode (equivalent to `tokenize`).
+        #[wasm_bindgen(js_name = tokenizeWithVoice)]
+        pub fn tokenize_with_voice(
+            &self,
+            text: &str,
+            voice_text: Option<String>,
+        ) -> Result<JsValue, JsError> {
+            let (ids, prefix_len) = self
+                .model()?
+                .tokenize_with_voice(text, voice_text.as_deref())
+                .map_err(|e| JsError::new(&e.to_string()))?;
+
+            let obj = js_sys::Object::new();
+            js_sys::Reflect::set(
+                &obj,
+                &"tokenIds".into(),
+                &js_sys::Uint32Array::from(ids.as_slice()),
+            )
+            .unwrap();
+            js_sys::Reflect::set(&obj, &"prefixLen".into(), &(prefix_len as u32).into()).unwrap();
+            Ok(obj.into())
         }
 
         /// Start generation from token IDs.
