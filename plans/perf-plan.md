@@ -1,53 +1,60 @@
 # TADA WASM Performance Plan
 
-## Measured Performance (2026-03-20)
+## Latest Trace (2026-03-20, Q8_0 VV on GPU + tasks_max=512)
 
-### Trace 1: VV skip + warmup, VV on CPU (31.6s)
-- 25 steps, 31.6s total
-- Warmup: 3.3s, Decode: 9.7s
-- Steady state: 554ms/step (LLM GPU + VV CPU parallel)
+**Total: 50.6s** (29 steps, Steps=10, CFG=1.0, long voice)
 
-### Trace 2: VV on GPU via Burn F32 (98.7s — WORSE)
-- 61 steps, 98.7s total (3x slower!)
-- VV steps: ~5000ms each (F32 matmul on WebGPU is 20x slower than Q8_0 on CPU)
-- GPU contention: even LLM-only steps slowed from 480ms to 657ms
-- **Conclusion: F32 GPU VV is not viable. Need Q4_0/Q8_0 WGSL shaders for VV.**
+| Phase | Time | % | Status |
+|-------|------|---|--------|
+| Warmup (LLM + VV shaders) | 10.6s | 21% | Fix: add VV warmup pass |
+| First VV compile (step 4 gap) | 5.5s | 11% | Fix: VV warmup covers this |
+| Prompt steps (1-3) | 0.5s | 1% | ✓ VV skip working |
+| Content steps (5-27, 23 steps × 551ms) | 12.7s | 25% | Acceptable |
+| **Decode** | **17.8s** | **35%** | **NEW BOTTLENECK** |
+| Gaps/overhead | 3.3s | 7% | |
 
-### Current best: VV skip + warmup + VV on CPU
-Expected: ~25-30s for voice-prompted generation
+### Second generation (shaders cached): ~32s
+- Content: 13.8s
+- Decode: 17.8s
 
-## Where Time Goes (best config)
+## Per-step comparison across all configs
 
-Per content step (~554ms):
-- LLM forward (WebGPU Q4_0): ~200ms dispatch + ~300ms GPU execution
-- VV flow matching (WASM CPU Q8_0): ~250ms (parallel with GPU)
-- Async readback: ~50ms
-- Net: max(GPU, CPU) + readback ≈ 350-550ms
+| Config | Content step | Total gen | Decode |
+|--------|------------|-----------|--------|
+| Original (no opts) | 486ms | 40.1s | 6.2s |
+| VV skip, CPU VV | 554ms | 31.6s | 9.7s |
+| tasks_max=512, CPU VV | 540ms | 53.1s* | 8.2s |
+| **Q8_0 VV on GPU** | **551ms** | **50.6s** | **17.8s** |
+| CPU VV, CFG=1.6, Steps=20 | 4253ms | 74.2s | 3.6s |
 
-The GPU and CPU work overlap — the bottleneck alternates.
+*53.1s had longer voice prompt (45 steps vs 29)
 
-## Remaining Optimizations
+## The decode problem
 
-### Quick wins
-1. ✅ Skip VV during prompt phase — done, saves ~10s
-2. ✅ GPU warmup — done, saves ~3s on first gen
-3. ❌ VV on GPU (F32) — tried, 3x WORSE. Need Q4_0/Q8_0 shader
-4. **flow_steps=5** — halves VV CPU time from 250ms to ~125ms, saves ~2.5s
-5. **Reduce readback gaps** — pipeline GPU dispatch with async readback
+DAC decoder: 50+ conv1d layers on WASM CPU. Native: 1.5s. WASM: 8-18s.
+Decode is now 35% of total time. Getting worse with GPU VV (memory pressure?).
+
+Options:
+1. **Move decoder to GPU** — same dispatch overhead concern, but conv1d is fewer ops than VV
+2. **WebCodecs API** — browser-native audio decoding (not applicable, custom codec)
+3. **WASM SIMD** — verify candle uses simd128 for conv1d
+4. **Streaming decode** — decode chunks as generated, overlap with next step
+
+## Remaining optimizations
+
+### Immediate
+1. ✅ VV skip during prompt phase
+2. ✅ GPU warmup (LLM)
+3. ✅ tasks_max=512 (command batching)
+4. ✅ Q8_0 VV on GPU
+5. **VV warmup** — building now, saves 16s on first gen
+6. **Investigate decode** — why 17.8s vs 8.2s?
 
 ### Medium-term
-6. **Q8_0 WGSL shader** — would make VV on GPU viable (same speed as Q4_0 LLM)
-7. **Prefill** — batch all prompt tokens in one GPU dispatch (not one per step)
-8. **Streaming decode** — play audio while generating
+7. Streaming decode
+8. Decoder on GPU (Q8_0 shader for conv1d)
+9. Prefill (batch prompt tokens)
 
-### Why VV on GPU failed
-Burn's generic F32 matmul on WebGPU is extremely slow because:
-- No workgroup-level tiling (naive 1-thread-per-element)
-- F32 tensors are 4x larger than Q4_0 (more memory bandwidth)
-- 10 ODE steps × 6 layers × 3 matmuls = 180 GPU dispatches per VV call
-- Each dispatch has ~2ms overhead on WebGPU
-- Total: 180 × 2ms overhead + compute = 5000ms
-
-To make VV on GPU work, we need:
-- Q8_0 WGSL shader (like our Q4_0 shader_naive.wgsl but for Q8_0 blocks)
-- Or a tiled F32 matmul shader (shared memory, proper workgroup sizes)
+### Long-term
+10. Fused LLM+VV kernel
+11. Model distillation
