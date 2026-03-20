@@ -13,6 +13,7 @@ pub mod model;
 use burn::backend::wgpu::{Wgpu, WgpuDevice};
 use burn::tensor::Tensor;
 
+use model::vibevoice::BurnVibeVoice;
 use model::{LayerCaches, TadaLlama};
 use tada_core::config::TadaConfig;
 use tada_core::tada_model::{self, BOS_TOKEN_ID, EOS_TOKEN_ID, EOT_TOKEN_ID, VoicePrompt};
@@ -39,6 +40,13 @@ impl WasmRng {
 }
 
 impl tada_model::Rng for WasmRng {
+    fn sample_normal(&mut self) -> f32 {
+        use rand::Rng;
+        self.inner.sample(self.distr)
+    }
+}
+
+impl model::vibevoice::Rng for WasmRng {
     fn sample_normal(&mut self) -> f32 {
         use rand::Rng;
         self.inner.sample(self.distr)
@@ -92,7 +100,11 @@ struct GenState {
 pub struct HybridTadaModel {
     /// Llama backbone on GPU (Burn/wgpu)
     llama: TadaLlama,
-    /// VibeVoice + decoder on CPU (candle)
+    /// VibeVoice diffusion head on GPU (Burn/wgpu) — optional.
+    /// When present, flow matching runs entirely on GPU and only
+    /// 512 acoustic floats + 2 time values are read back per step.
+    burn_vv: Option<BurnVibeVoice>,
+    /// VibeVoice + decoder on CPU (candle) — always present as fallback.
     candle_model: tada_core::tada_model::TadaModel,
     /// Config
     cfg: TadaConfig,
@@ -131,6 +143,20 @@ impl HybridTadaModel {
         let cursor = std::io::Cursor::new(&buf);
         let mut reader = gguf::GgufReader::open(cursor)?;
         let llama = model::load_tada_llama_gguf(&mut reader, device)?;
+
+        // Try to load VibeVoice into Burn/GPU as well.
+        // This is optional — if it fails (e.g. weights not present or dtype unsupported),
+        // we fall back to the candle CPU path without hard-failing the load.
+        let burn_vv = match model::load_burn_vibevoice(&mut reader, device) {
+            Ok(vv) => {
+                eprintln!("[tada] BurnVibeVoice loaded — GPU flow matching enabled");
+                Some(vv)
+            }
+            Err(e) => {
+                eprintln!("[tada] BurnVibeVoice load failed (candle fallback): {e}");
+                None
+            }
+        };
         drop(reader);
 
         // Load VibeVoice + decoder into candle/CPU (borrows same buf, skips LLM)
@@ -145,6 +171,7 @@ impl HybridTadaModel {
 
         Ok(Self {
             llama,
+            burn_vv,
             candle_model,
             cfg,
             gen_state: None,
@@ -328,31 +355,48 @@ impl HybridTadaModel {
             && !(state.voice_prompt.is_some()
                 && (step - state.shift_acoustic) < state.prompt_phase_len);
 
-        // Only read hidden state back to CPU when VibeVoice needs it.
-        // Skipping readback during prompt phase saves ~50ms × N prompt steps.
+        // Only run VibeVoice when needed.
+        // If BurnVibeVoice is loaded, flow matching runs entirely on GPU —
+        // the hidden state never leaves the GPU until the final 512-float readback.
+        // Otherwise, fall back to the candle CPU path (full ~2KB hidden readback).
         if need_vibevoice {
-            let hidden_data = hidden_burn.clone().into_data_async().await
-                .map_err(|e| anyhow::anyhow!("GPU readback failed: {e:?}"))?;
-            let hidden_vec: Vec<f32> = hidden_data.to_vec().unwrap();
-            let hidden_size = self.cfg.llama.hidden_size;
+            let (acoustic_vec, time_before, time_after) = if let Some(ref burn_vv) = self.burn_vv {
+                // GPU path: hidden stays on GPU, only result comes back
+                model::vibevoice::solve_flow_matching_burn(
+                    burn_vv,
+                    hidden_burn.clone(),
+                    state.noise_temp,
+                    state.num_flow_steps,
+                    state.cfg_scale,
+                    &mut state.rng,
+                )
+                .await?
+            } else {
+                // CPU fallback: read hidden back, run candle VV
+                let hidden_data = hidden_burn.clone().into_data_async().await
+                    .map_err(|e| anyhow::anyhow!("GPU readback failed: {e:?}"))?;
+                let hidden_vec: Vec<f32> = hidden_data.to_vec().unwrap();
+                let hidden_size = self.cfg.llama.hidden_size;
 
-            let hidden_candle = candle_core::Tensor::from_vec(
-                hidden_vec,
-                (1, 1, hidden_size),
-                &candle_core::Device::Cpu,
-            )?;
+                let hidden_candle = candle_core::Tensor::from_vec(
+                    hidden_vec,
+                    (1, 1, hidden_size),
+                    &candle_core::Device::Cpu,
+                )?;
 
-            let (acoustic, time_before, time_after) = self.candle_model.generate_acoustic(
-                &hidden_candle,
-                state.noise_temp,
-                &mut state.rng,
-                state.num_flow_steps,
-                state.cfg_scale,
-            )?;
+                let (acoustic, time_before, time_after) = self.candle_model.generate_acoustic(
+                    &hidden_candle,
+                    state.noise_temp,
+                    &mut state.rng,
+                    state.num_flow_steps,
+                    state.cfg_scale,
+                )?;
 
-            state
-                .acoustics
-                .push(acoustic.squeeze(0)?.to_vec1::<f32>()?);
+                let av = acoustic.squeeze(0)?.to_vec1::<f32>()?;
+                (av, time_before, time_after)
+            };
+
+            state.acoustics.push(acoustic_vec);
             state.times_before.push(time_before);
             state.times_after.push(time_after);
         } else if step >= state.shift_acoustic {

@@ -757,9 +757,31 @@ pub fn dequantize_q4_to_f32(bytes: &[u8], num_elements: usize) -> Vec<f32> {
     out
 }
 
-/// Load an F32 linear weight from GGUF, handling both F32 and Q4_0 tensors.
+/// Dequantize a Q8_0 byte buffer to f32.
 ///
-/// Q4_0 tensors are dequantized to F32. F32/F16 tensors are read directly.
+/// Q8_0 block format: 34 bytes per block of 32 values.
+///   - 2 bytes: f16 scale
+///   - 32 bytes: int8 quantized values
+/// Output: `num_elements` f32 values.
+pub fn dequantize_q8_to_f32(bytes: &[u8], num_elements: usize) -> Vec<f32> {
+    let num_blocks = num_elements / 32;
+    assert_eq!(bytes.len(), num_blocks * 34, "Q8_0 byte count mismatch");
+    let mut out = vec![0.0f32; num_elements];
+    for block in 0..num_blocks {
+        let bo = block * 34;
+        let d = f16_to_f32(u16::from_le_bytes([bytes[bo], bytes[bo + 1]]));
+        let base = block * 32;
+        for j in 0..32 {
+            let q = bytes[bo + 2 + j] as i8;
+            out[base + j] = q as f32 * d;
+        }
+    }
+    out
+}
+
+/// Load an F32 linear weight from GGUF, handling F32, F16, Q4_0, and Q8_0 tensors.
+///
+/// Quantized tensors are dequantized to F32 at load time.
 /// Returns (f32_data, [out_features, in_features]).
 pub fn load_f32_weight_any<R: Read + Seek>(
     reader: &mut GgufReader<R>,
@@ -783,6 +805,10 @@ pub fn load_f32_weight_any<R: Read + Seek>(
         GgmlDtype::Q4_0 => {
             let num_elements = info.num_elements() as usize;
             dequantize_q4_to_f32(&bytes, num_elements)
+        }
+        GgmlDtype::Q8_0 => {
+            let num_elements = info.num_elements() as usize;
+            dequantize_q8_to_f32(&bytes, num_elements)
         }
         other => bail!("Cannot load {:?} tensor '{name}' as f32 weight", other),
     };
