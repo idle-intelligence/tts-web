@@ -407,7 +407,7 @@
         const speedSlider = document.getElementById('speedSlider');
         const speedValue = document.getElementById('speedValue');
         const ipaDisplay = document.getElementById('ipaDisplay');
-        const kittenPhrases = document.getElementById('kittenPhrases');
+        // kittenPhrases removed
 
         const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
         const KITTEN_VOICES = ['bella', 'jasper', 'luna', 'bruno', 'rosie', 'hugo', 'kiki', 'leo'];
@@ -935,7 +935,7 @@
         function updateUIForModel(model) {
             voiceSection.style.display = model === 'pocket-tts' ? '' : 'none';
             kittenVoiceSection.style.display = model === 'kitten' ? '' : 'none';
-            kittenPhrases.style.display = model === 'kitten' ? 'flex' : 'none';
+
             tempSliderGroup.style.display = model === 'kitten' ? 'none' : '';
             tadaProgress.textContent = '';
             stepInfo.textContent = '';
