@@ -401,7 +401,12 @@ impl HarmonicSource {
         let out = out.tanh()?;            // ONNX applies Tanh after the linear combination
         let out = out.transpose(1, 2)?.contiguous()?; // [batch, 1, T]
 
-        debug_stats("harmonic_source: out (after l_linear + tanh)", &out);
+        // Mask unvoiced frames (f0 <= 10 Hz) to zero — matches ONNX Greater(f0, 10.0) node.
+        // f0 shape: [batch, 1, T_audio], out shape: [batch, 1, T_audio]
+        let voiced_mask = f0.gt(10.0_f32)?.to_dtype(out.dtype())?;
+        let out = out.mul(&voiced_mask)?;
+
+        debug_stats("harmonic_source: out (after l_linear + tanh + voiced mask)", &out);
 
         Ok(out)
     }
@@ -638,6 +643,17 @@ impl Generator {
             // add bias
             let b = self.ups_b[i].reshape((1, self.ups_b[i].dim(0)?, 1))?;
             h = h.broadcast_add(&b)?;
+
+            // After ups.1: reflect-pad 1 sample at the START of the time dimension.
+            // ONNX Pad node: pads=[0,0,1,0,0,0] mode=reflect on [batch,ch,time].
+            if i == 1 {
+                let t = h.dim(2)?;
+                if t >= 2 {
+                    // Reflect: the pad sample at position -1 mirrors position +1 (index 1).
+                    let reflect_start = h.i((.., .., 1..2))?.contiguous()?;
+                    h = Tensor::cat(&[&reflect_start, &h], 2)?;
+                }
+            }
 
             debug_stats(&format!("generator: after ups[{i}] ConvTranspose"), &h);
             if i == 0 {
