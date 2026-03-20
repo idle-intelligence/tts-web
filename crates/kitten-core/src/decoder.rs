@@ -635,6 +635,10 @@ impl Generator {
         for i in 0..self.upsample_rates.len() {
             h = leaky_relu_02(&h)?;
 
+            // Noise injection: compute BEFORE upsample (StyleTTS 2 order)
+            let noise = self.noise_convs[i].forward(&noise_stft)?;
+            let noise = self.noise_res[i].forward(&noise, style)?;
+
             // Upsample via ConvTranspose1d
             let stride = self.upsample_rates[i];
             let kernel = self.upsample_kernels[i];
@@ -663,11 +667,8 @@ impl Generator {
                 eprintln!("[CMP] GEN_UPS0_OUT shape={:?} ch0_first5={:.6?}", h.shape(), v);
             }
 
-            // Noise injection
-            let noise = self.noise_convs[i].forward(&noise_stft)?;
-            // trim/pad noise to match h's time dim
+            // Add noise (trim/pad to match upsampled h's time dim)
             let noise = match_time(&noise, h.dim(2)?)?;
-            let noise = self.noise_res[i].forward(&noise, style)?;
 
             debug_stats(&format!("generator: noise[{i}] after noise_res"), &noise);
 
