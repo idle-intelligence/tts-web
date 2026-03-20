@@ -147,16 +147,26 @@ impl HybridTadaModel {
         // Try to load VibeVoice into Burn/GPU as well.
         // This is optional — if it fails (e.g. weights not present or dtype unsupported),
         // we fall back to the candle CPU path without hard-failing the load.
-        // BurnVibeVoice (GPU) is available but currently slower than candle CPU
-        // due to WGSL dispatch overhead (180 dispatches/step for 10 ODE × 6 layers).
-        // Q8_0 GPU: 14.6s vs candle CPU Q8_0: 2s for same generation.
-        // Keep VV on CPU until we have a fused VV kernel.
-        let burn_vv: Option<model::vibevoice::BurnVibeVoice> = None;
+        // Try loading BurnVibeVoice with Q8_0 weights on GPU.
+        // F32 was too slow (5s/step), but Q8_0 shader should be ~280ms/step.
+        let burn_vv = match model::load_burn_vibevoice(&mut reader, device) {
+            Ok(vv) => {
+                eprintln!("[tada] BurnVibeVoice loaded (Q8_0 GPU)");
+                Some(vv)
+            }
+            Err(e) => {
+                eprintln!("[tada] BurnVibeVoice skipped (candle CPU fallback): {e}");
+                None
+            }
+        };
         drop(reader);
 
-        // Load VibeVoice + decoder into candle/CPU (borrows same buf, skips LLM)
-        let candle_model =
-            tada_core::tada_model::TadaModel::load_gguf_no_llm(&buf, &cfg, &candle_core::Device::Cpu)?;
+        // Load decoder + adapters into candle/CPU (skip LLM, skip VV if Burn handles it)
+        let candle_model = if burn_vv.is_some() {
+            tada_core::tada_model::TadaModel::load_gguf_no_llm_no_vv(&buf, &cfg, &candle_core::Device::Cpu)?
+        } else {
+            tada_core::tada_model::TadaModel::load_gguf_no_llm(&buf, &cfg, &candle_core::Device::Cpu)?
+        };
 
         // Free the raw GGUF bytes — all tensors are now in GPU/CPU memory
         drop(buf);

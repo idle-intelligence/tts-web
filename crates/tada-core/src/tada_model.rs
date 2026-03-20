@@ -299,10 +299,26 @@ impl TadaModel {
     /// Load only VibeVoice + decoder + adapters from GGUF (skip LLM).
     /// Used in hybrid mode where Burn handles the LLM on GPU.
     pub fn load_gguf_no_llm(data: &[u8], cfg: &TadaConfig, device: &Device) -> Result<Self> {
+        Self::load_gguf_no_llm_inner(data, cfg, device, true)
+    }
+
+    /// Load without LLM and without VV (decoder + adapters only).
+    /// Used when Burn handles both LLM and VV on GPU — saves ~400MB WASM memory.
+    pub fn load_gguf_no_llm_no_vv(data: &[u8], cfg: &TadaConfig, device: &Device) -> Result<Self> {
+        Self::load_gguf_no_llm_inner(data, cfg, device, false)
+    }
+
+    fn load_gguf_no_llm_inner(data: &[u8], cfg: &TadaConfig, device: &Device, load_vv: bool) -> Result<Self> {
         let mut gguf = GgufTensors::from_bytes(data, device)?;
 
-        // Skip LlamaModel — Burn handles it
-        let prediction_head = VibeVoiceDiffusionHead::load_gguf(&mut gguf, cfg)?;
+        // Only load VV if not handled by Burn GPU
+        let prediction_head = if load_vv {
+            VibeVoiceDiffusionHead::load_gguf(&mut gguf, cfg)?
+        } else {
+            // Dummy — Burn handles VV on GPU. We still need the struct but it won't be called.
+            // Load with zero-size layers to avoid allocating real weights.
+            VibeVoiceDiffusionHead::load_gguf(&mut gguf, &TadaConfig { head_layers: 0, ..cfg.clone() })?
+        };
         let decoder = Decoder::load_gguf(&mut gguf, "_decoder", &cfg.decoder)?;
 
         let acoustic_proj = gguf.qlinear("acoustic_proj")?;
