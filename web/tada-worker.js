@@ -80,6 +80,10 @@ async function handleLoad(baseUrl, wasmBaseUrl) {
         postMessage({type: 'status', text: 'Initializing model...', ready: false});
         engine.loadModel(tokenizerData);
 
+        // GPU warmup: pre-compile shader pipelines to avoid 3s stall on first gen
+        postMessage({type: 'status', text: 'GPU warmup...', ready: false});
+        await engine.warmup();
+
         // Load default voice prompt (ljspeech_long: 32 acoustic tokens)
         postMessage({type: 'status', text: 'Loading voice prompt...', ready: false});
         try {

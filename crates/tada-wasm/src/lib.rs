@@ -765,6 +765,37 @@ pub mod web {
             Ok(())
         }
 
+        /// Run warmup passes to pre-compile GPU shader pipelines.
+        /// Call after loadModel to avoid ~3s warmup on first generation.
+        #[wasm_bindgen]
+        pub async fn warmup(&mut self) -> Result<(), JsError> {
+            let model = self.model_mut()?;
+            wasm_log("[tada] GPU warmup: running dummy forward passes...");
+
+            let acoustic = vec![0.0f32; model.cfg.acoustic_dim];
+            let mut cache = model.llama.create_cache(16);
+
+            // Run 5 forward passes to compile all WGSL shader variants
+            for i in 0..5u32 {
+                let hidden = model.llama.forward_step(
+                    128000 + i, // dummy token
+                    &acoustic,
+                    0,
+                    0,
+                    0,
+                    &mut cache,
+                );
+                // Force GPU execution by reading back (async)
+                let _ = hidden.into_data_async().await;
+            }
+
+            // Reset cache but keep GPU buffer allocations
+            cache.reset_keep_buffers();
+
+            wasm_log("[tada] GPU warmup complete");
+            Ok(())
+        }
+
         fn model(&self) -> Result<&HybridTadaModel, JsError> {
             self.inner.as_ref().ok_or_else(|| JsError::new("Model not loaded. Call loadModel first."))
         }

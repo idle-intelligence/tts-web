@@ -103,7 +103,7 @@ def analyze(path):
     # GPU tasks analysis
     gpu_tasks = [e for e in events if isinstance(e, dict) and 'GPUTask' in str(e.get('name', ''))]
     if gpu_tasks:
-        gpu_durs = [e['dur']/1000 for e in gpu_tasks]
+        gpu_durs = [e.get('dur', 0)/1000 for e in gpu_tasks]
         print(f"\nGPU tasks: {len(gpu_tasks)}")
         print(f"  Total:             {sum(gpu_durs):.0f}ms")
         print(f"  Avg:               {sum(gpu_durs)/len(gpu_durs):.1f}ms")
