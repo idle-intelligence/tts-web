@@ -44,6 +44,13 @@ const server = createServer((req, res) => {
     } else if (pathname.startsWith("/tada-pkg/")) {
         // TADA WASM build output from crates/tada-wasm/pkg/
         filePath = join(ROOT, "crates/tada-wasm/pkg", pathname.slice("/tada-pkg/".length));
+    } else if (pathname.startsWith("/kitten-pkg/")) {
+        // Kitten WASM build output from crates/kitten-wasm/pkg/
+        filePath = join(ROOT, "crates/kitten-wasm/pkg", pathname.slice("/kitten-pkg/".length));
+    } else if (pathname === "/kitten-model.safetensors") {
+        filePath = join(ROOT, "../hf/kitten-tts-nano-0.8/kitten-nano.safetensors");
+    } else if (pathname === "/kitten-voices.safetensors") {
+        filePath = join(ROOT, "../hf/kitten-tts-nano-0.8/kitten-voices.safetensors");
     } else if (pathname.startsWith("/pkg/")) {
         // WASM build output from crates/tts-wasm/pkg/
         filePath = join(ROOT, "crates/tts-wasm", pathname);
