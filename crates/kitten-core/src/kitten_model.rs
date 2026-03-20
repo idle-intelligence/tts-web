@@ -70,7 +70,7 @@ impl KittenModel {
         let bert_out = self.bert.forward(&input_ids)?;
 
         // 3. Text encoder → (lstm_features [1, seq, 256], cnn_features [1, 128, seq])
-        let (lstm_features, cnn_features) = self.text_encoder.forward(&bert_out, style)?;
+        let (lstm_features, cnn_features) = self.text_encoder.forward(&bert_out, &input_ids, style)?;
 
         // 4. Predictor → (durations, expanded_features, shared_lstm_out, f0, n_amp)
         let (durations, _expanded_features, shared_lstm_out, f0, n_amp) =
@@ -121,7 +121,7 @@ impl KittenModel {
         let input_ids = Tensor::from_vec(ids_u32, (1, seq_len), device)?;
 
         let bert_output = self.bert.forward(&input_ids)?;
-        let (lstm_features, cnn_features) = self.text_encoder.forward(&bert_output, style)?;
+        let (lstm_features, cnn_features) = self.text_encoder.forward(&bert_output, &input_ids, style)?;
 
         let (durations, expanded_features, shared_lstm_out, f0, n_amp) =
             self.predictor.forward(&lstm_features, style, speed)?;

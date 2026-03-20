@@ -1,5 +1,5 @@
 use candle_core::{IndexOp, Tensor};
-use candle_nn::{linear, Linear, Module, VarBuilder};
+use candle_nn::{embedding, linear, Embedding, Linear, Module, VarBuilder};
 use anyhow::Result;
 
 use crate::config::KittenConfig;
@@ -221,6 +221,7 @@ impl AdaIn {
 
 pub struct TextEncoder {
     // CNN path (for decoder)
+    embedding: Embedding, // text_encoder.embedding.weight [178, 128]
     cnn0: CnnBlock,
     cnn1: CnnBlock,
     cnn_lstm: BiLstm,
@@ -243,6 +244,7 @@ impl TextEncoder {
 
         // CNN path weights are under text_encoder.*
         let vb_te = vb.pp("text_encoder");
+        let embedding = embedding(cfg.n_token - 1, hidden_dim, vb_te.pp("embedding"))?;
         let cnn0 = CnnBlock::load(hidden_dim, hidden_dim, 5, 2, vb_te.pp("cnn").pp("0"))?;
         let cnn1 = CnnBlock::load(hidden_dim, hidden_dim, 5, 2, vb_te.pp("cnn").pp("1"))?;
 
@@ -261,6 +263,7 @@ impl TextEncoder {
         let adain3 = AdaIn::load(style_half, hidden_dim, vb_pte.pp("lstms.3"))?;
 
         Ok(Self {
+            embedding,
             cnn0, cnn1, cnn_lstm,
             lstm0, adain1, lstm2, adain3,
             style_half,
@@ -270,8 +273,9 @@ impl TextEncoder {
     /// Returns `(lstm_features, cnn_features)`:
     /// - `lstm_features`: `[batch, seq, 256]` — LSTM chain output for predictor
     /// - `cnn_features`:  `[batch, 128, seq]` — CNN path output for decoder
-    pub fn forward(&self, bert_output: &Tensor, style: &Tensor) -> Result<(Tensor, Tensor)> {
+    pub fn forward(&self, bert_output: &Tensor, input_ids: &Tensor, style: &Tensor) -> Result<(Tensor, Tensor)> {
         // bert_output: [batch, seq, 128]
+        // input_ids: [batch, seq] u32
         // style: [batch, 256]
         let (batch, seq, _) = bert_output.dims3()?;
 
@@ -280,8 +284,9 @@ impl TextEncoder {
         let style_for_lstm = style.i((.., self.style_half..))?.contiguous()?; // [batch, 128]
 
         // ── CNN path ──────────────────────────────────────────────────────────
-        // [batch, seq, 128] → [batch, 128, seq]
-        let cnn_in = bert_output.transpose(1, 2)?.contiguous()?;
+        // Embed input_ids using text_encoder's own embedding (not BERT output)
+        let cnn_embed = self.embedding.forward(input_ids)?; // [batch, seq, 128]
+        let cnn_in = cnn_embed.transpose(1, 2)?.contiguous()?;
         let cnn_out = self.cnn0.forward(&cnn_in)?;
         let cnn_out = self.cnn1.forward(&cnn_out)?;
         // [batch, 128, seq] → [seq, batch, 128]

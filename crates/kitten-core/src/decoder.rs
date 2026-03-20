@@ -628,6 +628,12 @@ impl Generator {
             h = h.broadcast_add(&b)?;
 
             debug_stats(&format!("generator: after ups[{i}] ConvTranspose"), &h);
+            if i == 0 {
+                let t = h.dim(2)?;
+                let n = 5.min(t);
+                let v = h.i((0, 0, ..n))?.to_vec1::<f32>()?;
+                eprintln!("[CMP] GEN_UPS0_OUT shape={:?} ch0_first5={:.6?}", h.shape(), v);
+            }
 
             // Noise injection
             let noise = self.noise_convs[i].forward(&noise_stft)?;
@@ -648,12 +654,25 @@ impl Generator {
             let rb1_out = self.resblocks[rb0 + 1].forward(&rb_in, style)?;
             h = ((rb0_out + rb1_out)? / 2.0)?;
             debug_stats(&format!("generator: h after resblocks[{rb0}+{}] (parallel avg)", rb0 + 1), &h);
+            if i == 0 {
+                let t = h.dim(2)?;
+                let n = 5.min(t);
+                let v = h.i((0, 0, ..n))?.to_vec1::<f32>()?;
+                eprintln!("[CMP] GEN_RESBLOCK_AVG0_OUT shape={:?} ch0_first5={:.6?}", h.shape(), v);
+            }
         }
 
         h = leaky_relu_02(&h)?;
         h = self.conv_post.forward(&h)?; // [batch, 22, T_stft]
 
         debug_stats("generator: h after conv_post (22ch)", &h);
+        {
+            let t = h.dim(2)?;
+            let n = 5.min(t);
+            let v0 = h.i((0, 0, ..n))?.to_vec1::<f32>()?;
+            let v11 = h.i((0, 11, ..n))?.to_vec1::<f32>()?;
+            eprintln!("[CMP] CONV_POST_OUT shape={:?} ch0_first5={:.6?} ch11_first5={:.6?}", h.shape(), v0, v11);
+        }
 
         // Split for inspection
         let log_amp_slice = h.i((.., ..11usize, ..))?.contiguous()?;
@@ -672,6 +691,11 @@ impl Generator {
         let waveform = self.stft.inverse_synthesis(&h)?;
 
         debug_stats("generator: final waveform", &waveform);
+        {
+            let n = 20.min(waveform.dim(2)?);
+            let v = waveform.i((0, 0, ..n))?.to_vec1::<f32>()?;
+            eprintln!("[CMP] FINAL_WAVEFORM shape={:?} first20={:.6?}", waveform.shape(), v);
+        }
 
         Ok(waveform)
     }
@@ -766,6 +790,12 @@ impl Decoder {
         let enc_in = Tensor::cat(&[&lstm_aligned, &f0_down, &n_down], 1)?; // [batch, 130, T]
         let mut h = self.encode.forward(&enc_in, &style_half)?; // [batch, 256, T]
         debug_stats("ENCODE_OUT", &h);
+        {
+            let t = h.dim(2)?;
+            let n = 10.min(t);
+            let v = h.i((0, 0, ..n))?.to_vec1::<f32>()?;
+            eprintln!("[CMP] ENCODE_OUT shape={:?} ch0_first10={:.6?}", h.shape(), v);
+        }
 
         // Four DecodeBlocks
         for (block_idx, block) in self.decode.iter().enumerate() {
@@ -777,6 +807,12 @@ impl Decoder {
             let dec_in = Tensor::cat(&[&h, &asr_t, &f0_t, &n_t], 1)?; // [batch, 322, ht]
             h = block.forward(&dec_in, &style_half)?;
             debug_stats(&format!("DECODE_{block_idx}_OUT"), &h);
+            {
+                let t = h.dim(2)?;
+                let n = 5.min(t);
+                let v = h.i((0, 0, ..n))?.to_vec1::<f32>()?;
+                eprintln!("[CMP] DECODE_{block_idx}_OUT shape={:?} ch0_first5={:.6?}", h.shape(), v);
+            }
         }
         // After block 3: h is [batch, 256, 2T]
 
