@@ -866,14 +866,11 @@
                 wasmBaseUrl: KITTEN_WASM_BASE,
                 onStatus: (text, ready, progress) => {
                     if (ready) {
-                        kittenReady = true;
                         updateStatus('ready', text);
                         generateBtn.disabled = false;
                         progressBar.classList.remove('visible');
                         progressInfo.textContent = '';
                         downloadBtn.style.display = 'none';
-                        // Auto-generate demo on load
-                        triggerKittenGenerate(true);
                     } else {
                         updateStatus('loading', text);
                         if (typeof progress === 'number') {
@@ -1038,6 +1035,11 @@
         async function initClient() {
             try {
                 await tts.init();
+                // For kitten: mark ready and auto-generate after init resolves
+                if (currentModel === 'kitten') {
+                    kittenReady = true;
+                    triggerKittenGenerate(true);
+                }
             } catch (err) {
                 updateStatus('error', 'Failed to initialize: ' + err.message);
                 downloadBtn.style.display = '';
