@@ -1,0 +1,12 @@
+{
+  "text": "He would first hunt up Gregson and begin his work there. You mean for this State, General, Alberta. He had been foiled in his attempt to escape.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/emov_disgusted.wav",
+  "token_values_shape": [
+    37,
+    512
+  ],
+  "token_positions_shape": [
+    37
+  ]
+}
