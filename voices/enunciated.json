@@ -1,0 +1,12 @@
+{
+  "text": "Today in Rapid City it isn't gonna rain, there'll be scattered clouds, with a high of sixty four and a low of fifty seven.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/expresso_enunciated.wav",
+  "token_values_shape": [
+    29,
+    512
+  ],
+  "token_positions_shape": [
+    29
+  ]
+}

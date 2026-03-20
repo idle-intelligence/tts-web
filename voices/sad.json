@@ -1,0 +1,12 @@
+{
+  "text": "They are set for tomorrow at six forty five PM and at four eighteen PM, and another for this Thursday at three forty five AM.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/expresso_sad.wav",
+  "token_values_shape": [
+    28,
+    512
+  ],
+  "token_positions_shape": [
+    28
+  ]
+}

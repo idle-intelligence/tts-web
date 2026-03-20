@@ -1,0 +1,12 @@
+{
+  "text": "I'm sorry, I don't have that information, however, tomorrow in Los Angeles, California it'll be partly cloudy with a high of forty and lows down to nineteen degrees Fahrenheit.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/expresso_happy.wav",
+  "token_values_shape": [
+    39,
+    512
+  ],
+  "token_positions_shape": [
+    39
+  ]
+}
