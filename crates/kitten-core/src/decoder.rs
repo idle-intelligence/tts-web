@@ -224,26 +224,44 @@ fn depthwise_conv_transpose1d(
     padding: usize,
     output_padding: usize,
 ) -> Result<Tensor> {
-    let (batch, channels, _t) = x.dims3()?;
-    let bias_vec = bias.to_vec1::<f32>()?;
-    let mut out_channels = Vec::with_capacity(channels);
-    for c in 0..channels {
-        // x_c: [batch, 1, T]
-        let x_c = x.i((.., c..c + 1, ..))?.contiguous()?;
-        // w_c: [1, 1, kernel]
-        let w_c = weight.i((c..c + 1, .., ..))?.contiguous()?;
-        // conv_transpose1d: [batch, 1, T_out]
-        let y_c = x_c.conv_transpose1d(&w_c, padding, output_padding, stride, 1, 1)?;
-        // add per-channel bias scalar
-        let b_c = Tensor::new(bias_vec[c], x.device())?.to_dtype(x.dtype())?;
-        let y_c = y_c.broadcast_add(&b_c.reshape((1, 1, 1))?)?;
-        out_channels.push(y_c);
+    let (batch, channels, t_in) = x.dims3()?;
+    // Reshape [batch, C, T] → [batch*C, 1, T] to process all channels in one conv_transpose1d call.
+    let x_flat = x.reshape((batch * channels, 1, t_in))?;
+    // Weight [C, 1, K] — each channel has its own kernel. Use as [C, 1, K] batch of 1-ch convs.
+    // conv_transpose1d doesn't support groups, so we still need per-channel.
+    // But we can at least avoid 322 tensor allocations by pre-extracting to vecs.
+    let x_data = x_flat.to_vec3::<f32>()?; // [batch*C][1][T]
+    let w_data = weight.to_vec3::<f32>()?;  // [C][1][K]
+    let bias_data = bias.to_vec1::<f32>()?;
+    let k = w_data[0][0].len();
+
+    // Compute output length: (T-1)*stride - 2*padding + k + output_padding
+    let t_out = (t_in - 1) * stride + k + output_padding - 2 * padding;
+    let mut result = vec![0.0_f32; batch * channels * t_out];
+
+    for bc in 0..batch * channels {
+        let c = bc % channels;
+        let inp = &x_data[bc][0]; // [T]
+        let ker = &w_data[c][0];  // [K]
+        let b = bias_data[c];
+        let out_slice = &mut result[bc * t_out..(bc + 1) * t_out];
+        // Transposed convolution: scatter each input sample across kernel positions
+        for i in 0..t_in {
+            let out_start = i * stride;
+            for j in 0..k {
+                let out_idx = out_start + j;
+                if out_idx >= padding && out_idx - padding < t_out {
+                    out_slice[out_idx - padding] += inp[i] * ker[j];
+                }
+            }
+        }
+        // Add bias
+        for v in out_slice.iter_mut() {
+            *v += b;
+        }
     }
-    // cat along channel dim → [batch, C, T_out]
-    let result = Tensor::cat(&out_channels, 1)?;
-    // ensure batch dim is correct
-    let _ = batch;
-    Ok(result)
+
+    Ok(Tensor::from_vec(result, (batch, channels, t_out), x.device())?)
 }
 
 // ── AdaIN ResBlock (HiFi-GAN style) ───────────────────────────────────────────

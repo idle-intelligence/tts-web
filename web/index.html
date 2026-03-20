@@ -897,8 +897,8 @@
                     for (const chunk of allChunks) { pcm.set(chunk, offset); offset += chunk.length; }
                     const sampleRate = tts.sampleRate || 24000;
                     const audioDur = totalLength / sampleRate;
-                    const rtf = audioDur / totalTime;
-                    stepInfo.textContent = `${audioDur.toFixed(1)}s audio in ${totalTime.toFixed(1)}s (${rtf.toFixed(2)}x RTF)`;
+                    const speedup = audioDur / totalTime;
+                    stepInfo.textContent = `${audioDur.toFixed(1)}s audio in ${totalTime.toFixed(1)}s (${speedup.toFixed(2)}x realtime)`;
 
                     if (isDemoGen) {
                         isDemoGen = false;

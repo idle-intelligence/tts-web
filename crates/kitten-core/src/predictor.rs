@@ -10,15 +10,31 @@ fn depthwise_conv_transpose1d(
     stride: usize,
     output_padding: usize,
 ) -> Result<Tensor> {
-    let channels = x.dim(1)?;
-    let mut outputs = Vec::with_capacity(channels);
-    for c in 0..channels {
-        let xc = x.i((.., c..c + 1, ..))?.contiguous()?;
-        let wc = weight.i(c..c + 1)?.contiguous()?; // [1, 1, k]
-        let out_c = xc.conv_transpose1d(&wc, padding, output_padding, stride, 1, 1)?;
-        outputs.push(out_c);
+    let (batch, channels, t_in) = x.dims3()?;
+    let x_data = x.to_vec3::<f32>()?;      // [batch][C][T]
+    let w_data = weight.to_vec3::<f32>()?;  // [C][1][K]
+    let k = w_data[0][0].len();
+    let t_out = (t_in - 1) * stride + k + output_padding - 2 * padding;
+
+    let mut result = vec![0.0_f32; batch * channels * t_out];
+    for b in 0..batch {
+        for c in 0..channels {
+            let inp = &x_data[b][c];
+            let ker = &w_data[c][0];
+            let out_slice = &mut result[(b * channels + c) * t_out..(b * channels + c + 1) * t_out];
+            for i in 0..t_in {
+                let out_start = i * stride;
+                for j in 0..k {
+                    let out_idx = out_start + j;
+                    if out_idx >= padding && out_idx - padding < t_out {
+                        out_slice[out_idx - padding] += inp[i] * ker[j];
+                    }
+                }
+            }
+        }
     }
-    let out = Tensor::cat(&outputs, 1)?;
+
+    let out = Tensor::from_vec(result, (batch, channels, t_out), x.device())?;
     if let Some(b) = bias {
         Ok(out.broadcast_add(&b.reshape((1, channels, 1))?)?)
     } else {
