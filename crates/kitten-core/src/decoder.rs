@@ -28,14 +28,6 @@ fn instance_norm(x: &Tensor) -> Result<Tensor> {
     Ok(x.broadcast_sub(&mean)?.broadcast_div(&(var + eps)?.sqrt()?)?)
 }
 
-fn debug_stats(name: &str, t: &Tensor) {
-    let data = t.flatten_all().unwrap().to_vec1::<f32>().unwrap();
-    let min = data.iter().copied().fold(f32::INFINITY, f32::min);
-    let max = data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let nans = data.iter().filter(|x| x.is_nan()).count();
-    let first5: Vec<f32> = data.iter().copied().take(5).collect();
-    eprintln!("[GEN] {name}: shape={:?} min={min:.6} max={max:.6} nans={nans} first5={first5:.6?}", t.shape());
-}
 
 // ── AdaIN ─────────────────────────────────────────────────────────────────────
 // Reuses the same pattern as predictor.rs: optional affine instance norm.
@@ -388,12 +380,8 @@ impl HarmonicSource {
         };
         let phase = Tensor::cat(&phase_slices, 2)?; // [batch, n_h, T]
 
-        debug_stats("harmonic_source: phase (after accumulation)", &phase);
-
         // sin of accumulated phase, scaled by 0.1 (ONNX Mul_10/Mul_12 const=0.1)
         let harmonics_sin = (phase.sin()? * 0.1)?; // [batch, n_h, T]
-
-        debug_stats("harmonic_source: harmonics_sin (after sin)", &harmonics_sin);
 
         // linear combination: [batch, T, n_h] @ [1, n_h, 1] → [batch, T, 1] → [batch, 1, T]
         let hs_t = harmonics_sin.transpose(1, 2)?.contiguous()?; // [batch, T, n_h]
@@ -409,8 +397,6 @@ impl HarmonicSource {
         // f0 shape: [batch, 1, T_audio], out shape: [batch, 1, T_audio]
         let voiced_mask = f0.gt(10.0_f32)?.to_dtype(out.dtype())?;
         let out = out.mul(&voiced_mask)?;
-
-        debug_stats("harmonic_source: out (after l_linear + tanh + voiced mask)", &out);
 
         Ok(out)
     }
@@ -439,7 +425,6 @@ impl Stft {
     // x: [batch, 1, T_audio] → [batch, 22, T_stft]
     // ONNX: edge-pad by 10, conv with pad=0, then polar form (log_amp, phase)
     fn forward_analysis(&self, x: &Tensor) -> Result<Tensor> {
-        debug_stats("stft_forward_analysis: input x", x);
         let t = x.dim(2)?;
         let first = x.i((.., .., 0..1))?.contiguous()?; // [batch, 1, 1]
         let last = x.i((.., .., t - 1..t))?.contiguous()?;
@@ -461,7 +446,6 @@ impl Stft {
         let phase = tensor_atan2(&imag, &real)?;
 
         let out = Tensor::cat(&[mag, phase], 1)?; // [batch, 22, T_stft]
-        debug_stats("stft_forward_analysis: output (22ch)", &out);
         Ok(out)
     }
 
@@ -478,19 +462,12 @@ impl Stft {
         let log_amp = x.i((.., ..n_harm, ..))?.contiguous()?; // [batch, 11, T_stft]
         let raw_phase = x.i((.., n_harm.., ..))?.contiguous()?;
 
-        debug_stats("stft_inverse: log_amp (before exp)", &log_amp);
-
         let amp = log_amp.exp()?;
-
-        debug_stats("stft_inverse: amp (after exp)", &amp);
 
         // ONNX: sin(raw_phase) first, then sin/cos of THAT
         let phase1 = raw_phase.sin()?;    // first sin
         let sin_p = phase1.sin()?;        // sin(sin(raw_phase))
         let cos_p = phase1.cos()?;        // cos(sin(raw_phase))
-
-        debug_stats("stft_inverse: sin_p", &sin_p);
-        debug_stats("stft_inverse: cos_p", &cos_p);
 
         let real_part = amp.mul(&cos_p)?; // [batch, 11, T_stft]
         let imag_part = amp.mul(&sin_p)?;
@@ -498,9 +475,6 @@ impl Stft {
         // ConvTranspose1d: NO padding (pads=[0,0] in ONNX)
         let wv_real = real_part.conv_transpose1d(&self.weight_bwd_real, 0, 0, 5, 1, 1)?;
         let wv_imag = imag_part.conv_transpose1d(&self.weight_bwd_imag, 0, 0, 5, 1, 1)?;
-
-        debug_stats("stft_inverse: wv_real (after ConvTranspose)", &wv_real);
-        debug_stats("stft_inverse: wv_imag (after ConvTranspose)", &wv_imag);
 
         // waveform = real_component - imag_component (from ONNX trace)
         let waveform = (wv_real - wv_imag)?; // [batch, 1, T_out]
@@ -634,8 +608,6 @@ impl Generator {
 
         let mut h = x.clone();
 
-        debug_stats("generator: input h (after leaky_relu will follow)", &h);
-
         // ONNX uses alpha=0.1 before ups.0 and ups.1 (not 0.2)
         let gen_lrelu_alphas = [0.1, 0.1];
         for i in 0..self.upsample_rates.len() {
@@ -665,22 +637,10 @@ impl Generator {
                 }
             }
 
-            debug_stats(&format!("generator: after ups[{i}] ConvTranspose"), &h);
-            if i == 0 {
-                let t = h.dim(2)?;
-                let n = 5.min(t);
-                let v = h.i((0, 0, ..n))?.to_vec1::<f32>()?;
-                eprintln!("[CMP] GEN_UPS0_OUT shape={:?} ch0_first5={:.6?}", h.shape(), v);
-            }
-
             // Add noise (trim/pad to match upsampled h's time dim)
             let noise = match_time(&noise, h.dim(2)?)?;
 
-            debug_stats(&format!("generator: noise[{i}] after noise_res"), &noise);
-
             h = (h + noise)?;
-
-            debug_stats(&format!("generator: h after noise injection [{i}]"), &h);
 
             // AdaIN ResBlocks: parallel (averaged), not sequential
             let rb0 = i * 2;
@@ -688,50 +648,14 @@ impl Generator {
             let rb0_out = self.resblocks[rb0].forward(&rb_in, style)?;
             let rb1_out = self.resblocks[rb0 + 1].forward(&rb_in, style)?;
             h = ((rb0_out + rb1_out)? / 2.0)?;
-            debug_stats(&format!("generator: h after resblocks[{rb0}+{}] (parallel avg)", rb0 + 1), &h);
-            if i == 0 {
-                let t = h.dim(2)?;
-                let n = 5.min(t);
-                let v = h.i((0, 0, ..n))?.to_vec1::<f32>()?;
-                eprintln!("[CMP] GEN_RESBLOCK_AVG0_OUT shape={:?} ch0_first5={:.6?}", h.shape(), v);
-            }
         }
 
         // ONNX uses alpha=0.01 before conv_post (much less negative leakage)
         h = leaky_relu(&h, 0.01)?;
         h = self.conv_post.forward(&h)?; // [batch, 22, T_stft]
 
-        debug_stats("generator: h after conv_post (22ch)", &h);
-        {
-            let t = h.dim(2)?;
-            let n = 5.min(t);
-            let v0 = h.i((0, 0, ..n))?.to_vec1::<f32>()?;
-            let v11 = h.i((0, 11, ..n))?.to_vec1::<f32>()?;
-            eprintln!("[CMP] CONV_POST_OUT shape={:?} ch0_first5={:.6?} ch11_first5={:.6?}", h.shape(), v0, v11);
-        }
-
-        // Split for inspection
-        let log_amp_slice = h.i((.., ..11usize, ..))?.contiguous()?;
-        debug_stats("generator: log_amplitude slice (before exp)", &log_amp_slice);
-
-        let amp_after_exp = log_amp_slice.exp()?;
-        debug_stats("generator: amp after exp(log_amplitude)", &amp_after_exp);
-
-        let phase_slice = h.i((.., 11usize.., ..))?.contiguous()?;
-        let sin_phase = phase_slice.sin()?;
-        let cos_phase = phase_slice.cos()?;
-        debug_stats("generator: sin(phase)", &sin_phase);
-        debug_stats("generator: cos(phase)", &cos_phase);
-
         // STFT inverse synthesis → [batch, 1, T_audio]
         let waveform = self.stft.inverse_synthesis(&h)?;
-
-        debug_stats("generator: final waveform", &waveform);
-        {
-            let n = 20.min(waveform.dim(2)?);
-            let v = waveform.i((0, 0, ..n))?.to_vec1::<f32>()?;
-            eprintln!("[CMP] FINAL_WAVEFORM shape={:?} first20={:.6?}", waveform.shape(), v);
-        }
 
         Ok(waveform)
     }
@@ -825,13 +749,6 @@ impl Decoder {
         let lstm_aligned = match_time(shared_lstm_out, t)?;
         let enc_in = Tensor::cat(&[&lstm_aligned, &f0_down, &n_down], 1)?; // [batch, 130, T]
         let mut h = self.encode.forward(&enc_in, &style_half)?; // [batch, 256, T]
-        debug_stats("ENCODE_OUT", &h);
-        {
-            let t = h.dim(2)?;
-            let n = 10.min(t);
-            let v = h.i((0, 0, ..n))?.to_vec1::<f32>()?;
-            eprintln!("[CMP] ENCODE_OUT shape={:?} ch0_first10={:.6?}", h.shape(), v);
-        }
 
         // Four DecodeBlocks
         for (block_idx, block) in self.decode.iter().enumerate() {
@@ -842,13 +759,6 @@ impl Decoder {
             let n_t = match_time(&n_down, ht)?;
             let dec_in = Tensor::cat(&[&h, &asr_t, &f0_t, &n_t], 1)?; // [batch, 322, ht]
             h = block.forward(&dec_in, &style_half)?;
-            debug_stats(&format!("DECODE_{block_idx}_OUT"), &h);
-            {
-                let t = h.dim(2)?;
-                let n = 5.min(t);
-                let v = h.i((0, 0, ..n))?.to_vec1::<f32>()?;
-                eprintln!("[CMP] DECODE_{block_idx}_OUT shape={:?} ch0_first5={:.6?}", h.shape(), v);
-            }
         }
         // After block 3: h is [batch, 256, 2T]
 
