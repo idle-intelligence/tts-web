@@ -1,60 +1,42 @@
 use candle_core::{IndexOp, Tensor};
-use candle_nn::{embedding, linear, Embedding, Linear, Module, VarBuilder};
+use candle_nn::{embedding, linear, Embedding, LayerNorm, Linear, Module, VarBuilder};
 use anyhow::Result;
 
 use crate::config::KittenConfig;
 
-// ── InstanceNorm1d ────────────────────────────────────────────────────────────
-// Input: [batch, channels, length]
-// Normalizes over the `length` dimension for each (batch, channel).
-struct InstanceNorm1d {
-    gamma: Tensor, // [channels]
-    beta: Tensor,  // [channels]
-    eps: f64,
-}
-
-impl InstanceNorm1d {
-    fn load(channels: usize, vb: VarBuilder) -> Result<Self> {
-        let gamma = vb.get(channels, "gamma")?;
-        let beta = vb.get(channels, "beta")?;
-        Ok(Self { gamma, beta, eps: 1e-5 })
-    }
-
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        // x: [batch, channels, length]
-        let (batch, channels, length) = x.dims3()?;
-        // mean/var over length dim
-        let mean = x.mean_keepdim(2)?; // [batch, channels, 1]
-        let diff = x.broadcast_sub(&mean)?;
-        let var = diff.sqr()?.mean_keepdim(2)?; // [batch, channels, 1]
-        let std = (var + self.eps)?.sqrt()?;
-        let normed = diff.broadcast_div(&std)?; // [batch, channels, length]
-
-        // gamma/beta: [channels] → [1, channels, 1]
-        let gamma = self.gamma.reshape((1, channels, 1))?.broadcast_as((batch, channels, length))?;
-        let beta = self.beta.reshape((1, channels, 1))?.broadcast_as((batch, channels, length))?;
-        Ok((normed * gamma)?.add(&beta)?)
-    }
-}
-
-// ── Conv1d + InstanceNorm block ───────────────────────────────────────────────
+// ── Conv1d + LayerNorm block ──────────────────────────────────────────────────
+// Matches the ONNX CNN path which uses LayerNorm over the feature (channel) dim.
+// ONNX: Conv1d → Transpose(→ time-first) → LayerNorm(over 128 features) → [→ Transpose back?] → LeakyReLU
+//
+// transpose_back=true  (cnn.0): output stays [batch, channels, time]
+// transpose_back=false (cnn.1): output stays [batch, time, channels] — ready for LSTM
 struct CnnBlock {
     conv: candle_nn::Conv1d,
-    norm: InstanceNorm1d,
+    layer_norm: LayerNorm,
+    transpose_back: bool,
 }
 
 impl CnnBlock {
-    fn load(in_c: usize, out_c: usize, kernel: usize, pad: usize, vb: VarBuilder) -> Result<Self> {
+    fn load(in_c: usize, out_c: usize, kernel: usize, pad: usize, transpose_back: bool, vb: VarBuilder) -> Result<Self> {
         let cfg = candle_nn::Conv1dConfig { padding: pad, ..Default::default() };
         let conv = candle_nn::conv1d(in_c, out_c, kernel, cfg, vb.pp("0"))?;
-        let norm = InstanceNorm1d::load(out_c, vb.pp("1"))?;
-        Ok(Self { conv, norm })
+        // Weights in safetensors are named "gamma"/"beta" not "weight"/"bias"
+        let weight = vb.pp("1").get(out_c, "gamma")?;
+        let bias = vb.pp("1").get(out_c, "beta")?;
+        let layer_norm = LayerNorm::new(weight, bias, 1e-5);
+        Ok(Self { conv, layer_norm, transpose_back })
     }
 
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        // x: [batch, channels, length]
-        let x = self.conv.forward(x)?;
-        let x = self.norm.forward(&x)?;
+        // x: [batch, channels, time]
+        let x = self.conv.forward(x)?;           // [batch, channels, time]
+        let x = x.transpose(1, 2)?;              // [batch, time, channels] — LN over last dim
+        let x = self.layer_norm.forward(&x)?;    // [batch, time, channels]
+        let x = if self.transpose_back {
+            x.transpose(1, 2)?.contiguous()?     // [batch, channels, time]
+        } else {
+            x.contiguous()?                      // [batch, time, channels]
+        };
         // LeakyReLU(0.2)
         let neg = (x.clone() * 0.2)?;
         let mask = x.ge(0f32)?;
@@ -245,8 +227,8 @@ impl TextEncoder {
         // CNN path weights are under text_encoder.*
         let vb_te = vb.pp("text_encoder");
         let embedding = embedding(cfg.n_token - 1, hidden_dim, vb_te.pp("embedding"))?;
-        let cnn0 = CnnBlock::load(hidden_dim, hidden_dim, 5, 2, vb_te.pp("cnn").pp("0"))?;
-        let cnn1 = CnnBlock::load(hidden_dim, hidden_dim, 5, 2, vb_te.pp("cnn").pp("1"))?;
+        let cnn0 = CnnBlock::load(hidden_dim, hidden_dim, 5, 2, true,  vb_te.pp("cnn").pp("0"))?;
+        let cnn1 = CnnBlock::load(hidden_dim, hidden_dim, 5, 2, false, vb_te.pp("cnn").pp("1"))?;
 
         // CNN LSTM and LSTM chain weights are under predictor.text_encoder.*
         let vb_pte = vb.pp("predictor").pp("text_encoder");
@@ -287,10 +269,10 @@ impl TextEncoder {
         // Embed input_ids using text_encoder's own embedding (not BERT output)
         let cnn_embed = self.embedding.forward(input_ids)?; // [batch, seq, 128]
         let cnn_in = cnn_embed.transpose(1, 2)?.contiguous()?;
-        let cnn_out = self.cnn0.forward(&cnn_in)?;
-        let cnn_out = self.cnn1.forward(&cnn_out)?;
-        // [batch, 128, seq] → [seq, batch, 128]
-        let cnn_out = cnn_out.transpose(1, 2)?.transpose(0, 1)?.contiguous()?;
+        let cnn_out = self.cnn0.forward(&cnn_in)?;  // [batch, 128, seq]
+        let cnn_out = self.cnn1.forward(&cnn_out)?; // [batch, seq, 128]  (no transpose_back)
+        // [batch, seq, 128] → [seq, batch, 128]
+        let cnn_out = cnn_out.transpose(0, 1)?.contiguous()?;
         let cnn_lstm_out = self.cnn_lstm.forward(&cnn_out)?; // [seq, batch, 128]
         // [seq, batch, 128] → [batch, 128, seq]
         let cnn_features = cnn_lstm_out.transpose(0, 1)?.transpose(1, 2)?.contiguous()?;
