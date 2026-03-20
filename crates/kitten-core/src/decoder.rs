@@ -168,6 +168,13 @@ impl DecodeBlock {
     fn forward(&self, x: &Tensor, style: &Tensor) -> Result<Tensor> {
         if self.pool_weight.is_some() {
             // Upsampling decode block (decode.3)
+            // ONNX execution order (verified by node trace):
+            //   1. skip = conv1x1(nearest_upsample(x))      → [256, 2T]
+            //   2. h = norm1(x)                             → [322, T]  (norm on original T)
+            //   3. h = leaky_relu(h)                        → [322, T]
+            //   4. h_up = ConvTranspose(h)                  → [322, 2T] (transpose on normed)
+            //   5. h = conv1(h_up) → norm2 → leaky → conv2 → [256, 2T]
+            //   6. output = (skip + h) / sqrt(2)
             let t = x.dim(2)?;
             let t2 = t * 2;
 
@@ -175,9 +182,13 @@ impl DecodeBlock {
             let x_up = x.upsample_nearest1d(t2)?; // [batch, 322, 2T]
             let skip = x_up.conv1d(&self.conv1x1_w, 0, 1, 1, 1)?; // [batch, 256, 2T]
 
-            // Main path: depthwise ConvTranspose1d (stride=2)
+            // Main path: norm1 on original x (T frames), then ConvTranspose
+            let h = self.norm1.forward(x, style)?; // [batch, 322, T]
+            let h = leaky_relu_02(&h)?;             // [batch, 322, T]
+
+            // Depthwise ConvTranspose1d (stride=2) on the normed+relu output
             let h_up = depthwise_conv_transpose1d(
-                x,
+                &h,
                 self.pool_weight.as_ref().unwrap(),
                 self.pool_bias.as_ref().unwrap(),
                 2, // stride
@@ -185,9 +196,7 @@ impl DecodeBlock {
                 1, // output_padding
             )?; // [batch, 322, 2T]
 
-            let h = self.norm1.forward(&h_up, style)?;
-            let h = leaky_relu_02(&h)?;
-            let h = self.conv1.forward(&h)?;
+            let h = self.conv1.forward(&h_up)?;
             let h = self.norm2.forward(&h, style)?;
             let h = leaky_relu_02(&h)?;
             let h = self.conv2.forward(&h)?;
@@ -771,8 +780,8 @@ impl Decoder {
         n_amp: &Tensor,
         style: &Tensor,
     ) -> Result<Tensor> {
-        // style_half = style[:, 128:]
-        let style_half = style.i((.., self.style_half..))?; // [batch, 128]
+        // style_half = style[:, :128] (first half — ONNX uses first 128 dims for decoder)
+        let style_half = style.i((.., ..self.style_half))?; // [batch, 128]
 
         // Project ASR features: [batch, 128, T] → [batch, 64, T]
         let asr = self.asr_res.forward(asr_features)?;
@@ -823,5 +832,61 @@ impl Decoder {
         // Generator → waveform [batch, 1, num_samples]
         let waveform = self.generator.forward(&h, &f0_gen, &style_half)?;
         Ok(waveform)
+    }
+
+    /// Decoder forward pass that accepts pre-computed intermediate tensors (from ONNX fixtures)
+    /// and returns all stage outputs for comparison.
+    ///
+    /// Instead of computing asr_res/f0_down/n_down internally, caller can pass them directly.
+    /// If `onnx_shared_lstm_out` etc. are Some, they bypass the conv/LSTM steps so we can
+    /// inject ONNX ground-truth tensors at each stage boundary.
+    ///
+    /// Returns (encode_out, decode0_out, decode1_out, decode2_out, decode3_out, waveform).
+    pub fn debug_decoder_forward(
+        &self,
+        // These are the ONNX-fixture tensors (already downsampled / projected by ONNX):
+        shared_lstm_out: &Tensor, // [1, 128, T] — ONNX /MatMul_1_output_0
+        asr_res_out: &Tensor,     // [1, 64, T]  — ONNX /decoder/asr_res output
+        f0_down: &Tensor,         // [1, 1, T]   — ONNX /decoder/F0_conv output
+        n_down: &Tensor,          // [1, 1, T]   — ONNX /decoder/N_conv output
+        style_half: &Tensor,      // [1, 128]    — style[:, 128:]
+        // f0 at original 2T rate (for generator upsample)
+        f0_2t: &Tensor,           // [1, 1, 2T]  — passed through for generator
+    ) -> Result<(Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)> {
+        let t = f0_down.dim(2)?;
+
+        let lstm_aligned = match_time(shared_lstm_out, t)?;
+        let asr = match_time(asr_res_out, t)?;
+
+        // EncodeBlock
+        let enc_in = Tensor::cat(&[&lstm_aligned, f0_down, n_down], 1)?; // [1, 130, T]
+        let encode_out = self.encode.forward(&enc_in, style_half)?;       // [1, 256, T]
+
+        // Decode blocks 0..3
+        let mut h = encode_out.clone();
+        let mut decode_outs = Vec::with_capacity(4);
+        for block in &self.decode {
+            let ht = h.dim(2)?;
+            let asr_t = match_time(&asr, ht)?;
+            let f0_t = match_time(f0_down, ht)?;
+            let n_t = match_time(n_down, ht)?;
+            let dec_in = Tensor::cat(&[&h, &asr_t, &f0_t, &n_t], 1)?;
+            h = block.forward(&dec_in, style_half)?;
+            decode_outs.push(h.clone());
+        }
+
+        // Generator (uses decode.3 output + f0 at 2T)
+        let t2 = h.dim(2)?;
+        let f0_gen = f0_2t.upsample_nearest1d(t2)?;
+        let waveform = self.generator.forward(&h, &f0_gen, style_half)?;
+
+        Ok((
+            encode_out,
+            decode_outs[0].clone(),
+            decode_outs[1].clone(),
+            decode_outs[2].clone(),
+            decode_outs[3].clone(),
+            waveform,
+        ))
     }
 }

@@ -6,6 +6,7 @@
 
 use candle_core::{Device, IndexOp, Tensor};
 use kitten_core::config::KittenConfig;
+use kitten_core::decoder::Decoder;
 use kitten_core::kitten_model::KittenModel;
 use kitten_core::phoneme_map::map_phonemes_to_ids;
 use safetensors::SafeTensors;
@@ -278,5 +279,243 @@ fn test_duration_prediction_matches_onnx() -> anyhow::Result<()> {
     );
 
     eprintln!("test_duration_prediction_matches_onnx: PASS (max_diff={max_diff})");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ONNX fixture injection test
+// ---------------------------------------------------------------------------
+
+/// Load a .npy file saved by extract_onnx_intermediates.py.
+/// Supports F32 arrays only (that's what we save). Shape is preserved.
+fn load_npy(path: &str) -> anyhow::Result<Tensor> {
+    // .npy format: 10-byte magic + 1-byte major + 1-byte minor + 2-byte header_len (LE) + header + data
+    let bytes = std::fs::read(path)?;
+    anyhow::ensure!(bytes.len() >= 10, "npy too short");
+    anyhow::ensure!(&bytes[..6] == b"\x93NUMPY", "not a .npy file: {path}");
+
+    let major = bytes[6];
+    let header_len_bytes = if major == 1 {
+        let hl = u16::from_le_bytes([bytes[8], bytes[9]]) as usize;
+        (10, hl)
+    } else {
+        // version 2: header_len is 4 bytes at offset 8
+        let hl = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize;
+        (12, hl)
+    };
+    let (prefix, hl) = header_len_bytes;
+    let header_end = prefix + hl;
+    anyhow::ensure!(bytes.len() >= header_end, "npy header truncated");
+
+    let header = std::str::from_utf8(&bytes[prefix..header_end])?;
+
+    // Parse shape from header string like "{'descr': '<f4', 'fortran_order': False, 'shape': (1, 256, 51), }"
+    let shape = parse_npy_shape(header)?;
+    let data_bytes = &bytes[header_end..];
+
+    // Expect float32 ('descr': '<f4' or '=f4')
+    let n_elements: usize = shape.iter().product();
+    anyhow::ensure!(
+        data_bytes.len() >= n_elements * 4,
+        "data too short for shape {shape:?}: need {} bytes, got {}",
+        n_elements * 4,
+        data_bytes.len()
+    );
+
+    let floats: Vec<f32> = data_bytes[..n_elements * 4]
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect();
+
+    Ok(Tensor::from_vec(floats, shape.as_slice(), &Device::Cpu)?)
+}
+
+fn parse_npy_shape(header: &str) -> anyhow::Result<Vec<usize>> {
+    // Find 'shape': (...)
+    let start = header.find("'shape':").ok_or_else(|| anyhow::anyhow!("no 'shape' in header: {header}"))?;
+    let rest = &header[start + 8..];
+    let lparen = rest.find('(').ok_or_else(|| anyhow::anyhow!("no '(' after shape"))?;
+    let rparen = rest.find(')').ok_or_else(|| anyhow::anyhow!("no ')' after shape"))?;
+    let inner = rest[lparen + 1..rparen].trim();
+    if inner.is_empty() {
+        return Ok(vec![]);
+    }
+    let dims: Vec<usize> = inner
+        .split(',')
+        .filter_map(|s| {
+            let s = s.trim();
+            if s.is_empty() { None } else { s.parse().ok() }
+        })
+        .collect();
+    Ok(dims)
+}
+
+/// Compare two tensors element-wise, printing stats and returning max abs diff.
+fn compare_tensors(label: &str, rust: &Tensor, onnx: &Tensor) -> anyhow::Result<f32> {
+    let rust_flat = rust.flatten_all()?.to_vec1::<f32>()?;
+    let onnx_flat = onnx.flatten_all()?.to_vec1::<f32>()?;
+
+    anyhow::ensure!(
+        rust_flat.len() == onnx_flat.len(),
+        "{label}: shape mismatch — Rust len={} ONNX len={} (Rust shape={:?} ONNX shape={:?})",
+        rust_flat.len(),
+        onnx_flat.len(),
+        rust.shape(),
+        onnx.shape(),
+    );
+
+    let max_diff = rust_flat
+        .iter()
+        .zip(onnx_flat.iter())
+        .map(|(r, o)| (r - o).abs())
+        .fold(0f32, f32::max);
+
+    let mean_diff = rust_flat
+        .iter()
+        .zip(onnx_flat.iter())
+        .map(|(r, o)| (r - o).abs())
+        .sum::<f32>()
+        / rust_flat.len() as f32;
+
+    // First channel first 10 values for both
+    let n_show = 10.min(rust_flat.len());
+    let rust_first: Vec<f32> = rust_flat[..n_show].to_vec();
+    let onnx_first: Vec<f32> = onnx_flat[..n_show].to_vec();
+
+    eprintln!(
+        "[INJECT] {label}: max_diff={max_diff:.6} mean_diff={mean_diff:.6} shape={:?}",
+        rust.shape()
+    );
+    eprintln!("  Rust  first{n_show}: {rust_first:.6?}");
+    eprintln!("  ONNX  first{n_show}: {onnx_first:.6?}");
+
+    Ok(max_diff)
+}
+
+#[test]
+#[ignore]
+fn test_decoder_with_onnx_inputs() -> anyhow::Result<()> {
+    // Load model weights
+    let cfg = KittenConfig::nano();
+    let data = std::fs::read(MODEL_PATH)?;
+    use candle_core::DType;
+    use candle_nn::VarBuilder;
+    let vb = VarBuilder::from_buffered_safetensors(data, DType::F32, &Device::Cpu)?;
+    let decoder = Decoder::load(vb, &cfg)?;
+
+    eprintln!("\n=== DECODER ONNX INJECTION TEST ===");
+    eprintln!("Loading ONNX fixture tensors from /tmp/onnx_fixtures/");
+
+    let fix = |name: &str| -> anyhow::Result<Tensor> {
+        let path = format!("/tmp/onnx_fixtures/{name}");
+        let t = load_npy(&path)?;
+        eprintln!("  Loaded {name}: shape={:?}", t.shape());
+        Ok(t)
+    };
+
+    // Load all fixtures
+    let shared_lstm_out = fix("shared_lstm_out_128ch.npy")?;  // [1, 128, 51]
+    let asr_res_out     = fix("asr_res_64ch.npy")?;           // [1, 64, 51]
+    let f0_down         = fix("f0_down_1ch.npy")?;            // [1, 1, 51]
+    let n_down          = fix("n_down_1ch.npy")?;             // [1, 1, 51]
+    let style_half      = fix("style_first_half.npy")?;        // [1, 128] — style[:, :128]
+
+    // ONNX expected outputs
+    let onnx_encode_out  = fix("encode_output_256ch.npy")?;   // [1, 256, 51]
+    let onnx_decode0_out = fix("decode0_output_256ch.npy")?;  // [1, 256, 51]
+    let onnx_decode1_out = fix("decode1_output_256ch.npy")?;  // [1, 256, 51]
+    let onnx_decode2_out = fix("decode2_output_256ch.npy")?;  // [1, 256, 51]
+    let onnx_decode3_out = fix("decode3_output_256ch.npy")?;  // [1, 256, 102]
+    let onnx_conv_post   = fix("conv_post_output_22ch.npy")?; // [1, 22, T_stft]
+    let onnx_waveform    = fix("waveform_before_tanh.npy")?;  // [1, 1, T_audio]
+
+    // f0_2t: we don't have the pre-downsampled f0, so reconstruct by nearest-upsample from f0_down.
+    // This matches what the Rust decoder.forward() does when given f0 at 2T.
+    let t = f0_down.dim(2)?;
+    let f0_2t = f0_down.upsample_nearest1d(t * 2)?; // [1, 1, 102]
+
+    eprintln!("\n--- Running debug_decoder_forward with ONNX fixture inputs ---");
+    let (rust_encode_out, rust_decode0_out, rust_decode1_out, rust_decode2_out, rust_decode3_out, rust_waveform) =
+        decoder.debug_decoder_forward(
+            &shared_lstm_out,
+            &asr_res_out,
+            &f0_down,
+            &n_down,
+            &style_half,
+            &f0_2t,
+        )?;
+
+    eprintln!("\n=== STAGE COMPARISON ===");
+
+    let diff_encode  = compare_tensors("ENCODE_OUT",  &rust_encode_out,  &onnx_encode_out)?;
+    let diff_decode0 = compare_tensors("DECODE_0_OUT", &rust_decode0_out, &onnx_decode0_out)?;
+    let diff_decode1 = compare_tensors("DECODE_1_OUT", &rust_decode1_out, &onnx_decode1_out)?;
+    let diff_decode2 = compare_tensors("DECODE_2_OUT", &rust_decode2_out, &onnx_decode2_out)?;
+    let diff_decode3 = compare_tensors("DECODE_3_OUT", &rust_decode3_out, &onnx_decode3_out)?;
+
+    // Waveform: shapes may differ slightly due to STFT padding/trim differences
+    let rust_wv_flat = rust_waveform.flatten_all()?.to_vec1::<f32>()?;
+    let onnx_wv_flat = onnx_waveform.flatten_all()?.to_vec1::<f32>()?;
+    let min_len = rust_wv_flat.len().min(onnx_wv_flat.len());
+    eprintln!(
+        "\n[INJECT] WAVEFORM: Rust len={} ONNX len={} comparing first {min_len}",
+        rust_wv_flat.len(),
+        onnx_wv_flat.len()
+    );
+    let wv_max_diff = rust_wv_flat[..min_len]
+        .iter()
+        .zip(onnx_wv_flat[..min_len].iter())
+        .map(|(r, o)| (r - o).abs())
+        .fold(0f32, f32::max);
+    let n_show = 20.min(min_len);
+    eprintln!("  Rust  first{n_show}: {:.6?}", &rust_wv_flat[..n_show]);
+    eprintln!("  ONNX  first{n_show}: {:.6?}", &onnx_wv_flat[..n_show]);
+    eprintln!("  waveform max_diff={wv_max_diff:.6}");
+
+    eprintln!("\n=== SUMMARY ===");
+    eprintln!("  encode  max_diff: {diff_encode:.6}");
+    eprintln!("  decode0 max_diff: {diff_decode0:.6}");
+    eprintln!("  decode1 max_diff: {diff_decode1:.6}");
+    eprintln!("  decode2 max_diff: {diff_decode2:.6}");
+    eprintln!("  decode3 max_diff: {diff_decode3:.6}");
+    eprintln!("  waveform max_diff: {wv_max_diff:.6}");
+
+    // Tolerance: numerical differences from float32 ops should be < 1e-4
+    // If a stage diverges significantly (> 0.1), it points to a computation bug.
+    const TIGHT_TOL: f32 = 1e-3;
+    const LOOSE_TOL: f32 = 1.0; // for downstream stages that amplify earlier errors
+
+    // Stage 0 (encode block) gets ONNX-exact inputs, so any divergence here is a computation bug.
+    if diff_encode > TIGHT_TOL {
+        eprintln!("  [FAIL] ENCODE block diverges with ONNX-exact inputs! Bug in encode computation.");
+    } else {
+        eprintln!("  [PASS] ENCODE block matches ONNX (max_diff={diff_encode:.6} <= {TIGHT_TOL})");
+    }
+
+    if diff_decode0 > TIGHT_TOL {
+        eprintln!("  [FAIL] DECODE.0 block diverges. Bug in decode.0 computation.");
+    } else {
+        eprintln!("  [PASS] DECODE.0 block matches ONNX (max_diff={diff_decode0:.6})");
+    }
+
+    if diff_decode1 > LOOSE_TOL {
+        eprintln!("  [FAIL] DECODE.1 block diverges significantly.");
+    } else {
+        eprintln!("  [INFO] DECODE.1 max_diff={diff_decode1:.6}");
+    }
+
+    if diff_decode2 > LOOSE_TOL {
+        eprintln!("  [FAIL] DECODE.2 block diverges significantly.");
+    } else {
+        eprintln!("  [INFO] DECODE.2 max_diff={diff_decode2:.6}");
+    }
+
+    if diff_decode3 > LOOSE_TOL {
+        eprintln!("  [FAIL] DECODE.3 block diverges significantly.");
+    } else {
+        eprintln!("  [INFO] DECODE.3 max_diff={diff_decode3:.6}");
+    }
+
+    eprintln!("\ntest_decoder_with_onnx_inputs: DONE");
     Ok(())
 }
