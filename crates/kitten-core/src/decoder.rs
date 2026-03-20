@@ -398,9 +398,10 @@ impl HarmonicSource {
         let out = hs_t.matmul(&w.contiguous()?)?; // [batch, T, 1]
         let b = self.l_linear_b.reshape((1, 1, 1))?;
         let out = out.broadcast_add(&b)?; // [batch, T, 1]
+        let out = out.tanh()?;            // ONNX applies Tanh after the linear combination
         let out = out.transpose(1, 2)?.contiguous()?; // [batch, 1, T]
 
-        debug_stats("harmonic_source: out (after l_linear combination)", &out);
+        debug_stats("harmonic_source: out (after l_linear + tanh)", &out);
 
         Ok(out)
     }
@@ -441,14 +442,16 @@ impl Stft {
         let real = padded.conv1d(&self.weight_fwd_real, 0, 5, 1, 1)?; // [batch, 11, T_stft]
         let imag = padded.conv1d(&self.weight_fwd_imag, 0, 5, 1, 1)?;
 
-        // Convert to polar: log_amp = log(sqrt(real² + imag²) + eps), phase = atan2(imag, real)
+        // Convert to polar: mag = sqrt(real² + imag²) + eps (raw magnitude, NOT log)
+        // NOTE: forward_analysis is used for the noise/harmonic path only.
+        // The STFT inverse (conv_post) receives log_amplitude from the network and applies exp().
+        // These are different representations — do NOT take log() here.
         let eps = 1e-7_f64;
         let mag = ((real.powf(2.0)? + imag.powf(2.0)?)? + eps)?.sqrt()?;
-        let log_amp = mag.log()?;
         // atan2(imag, real) computed element-wise via f32 stdlib (no NaN edge cases)
         let phase = tensor_atan2(&imag, &real)?;
 
-        let out = Tensor::cat(&[log_amp, phase], 1)?; // [batch, 22, T_stft]
+        let out = Tensor::cat(&[mag, phase], 1)?; // [batch, 22, T_stft]
         debug_stats("stft_forward_analysis: output (22ch)", &out);
         Ok(out)
     }
