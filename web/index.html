@@ -340,10 +340,27 @@
         <textarea id="textInput" placeholder="Hello, this is a test of the text-to-speech system."></textarea>
         <div class="controls">
             <button id="generateBtn" class="primary" disabled>Generate</button>
-            <div class="slider-group">
+            <div id="pocketControls" class="slider-group">
                 <label for="tempSlider">Temperature</label>
                 <input type="range" id="tempSlider" min="0.1" max="1.5" step="0.05" value="0.7">
                 <span id="tempValue">0.7</span>
+            </div>
+            <div id="tadaControls" style="display:none">
+                <div class="slider-group">
+                    <label for="noiseSlider">Noise</label>
+                    <input type="range" id="noiseSlider" min="0.1" max="1.5" step="0.05" value="0.9">
+                    <span id="noiseValue">0.9</span>
+                </div>
+                <div class="slider-group">
+                    <label for="cfgSlider">CFG</label>
+                    <input type="range" id="cfgSlider" min="1.0" max="3.0" step="0.1" value="1.0">
+                    <span id="cfgValue">1.0</span>
+                </div>
+                <div class="slider-group">
+                    <label for="stepsSlider">Steps</label>
+                    <input type="range" id="stepsSlider" min="3" max="20" step="1" value="10">
+                    <span id="stepsValue">10</span>
+                </div>
             </div>
         </div>
         <div id="stepInfo"></div>
@@ -460,6 +477,26 @@
             tempValue.textContent = parseFloat(tempSlider.value).toFixed(2);
         });
 
+        // TADA parameter sliders
+        const pocketControls = document.getElementById('pocketControls');
+        const tadaControls = document.getElementById('tadaControls');
+        const noiseSlider = document.getElementById('noiseSlider');
+        const noiseValue = document.getElementById('noiseValue');
+        const cfgSlider = document.getElementById('cfgSlider');
+        const cfgValue = document.getElementById('cfgValue');
+        const stepsSlider = document.getElementById('stepsSlider');
+        const stepsValue = document.getElementById('stepsValue');
+
+        noiseSlider.addEventListener('input', () => {
+            noiseValue.textContent = parseFloat(noiseSlider.value).toFixed(2);
+        });
+        cfgSlider.addEventListener('input', () => {
+            cfgValue.textContent = parseFloat(cfgSlider.value).toFixed(1);
+        });
+        stepsSlider.addEventListener('input', () => {
+            stepsValue.textContent = stepsSlider.value;
+        });
+
         // Detect local dev server (not deployed to GitHub Pages)
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
@@ -537,18 +574,10 @@
             if (loadingTadaVoice || generating) return;
             const voiceDef = TADA_VOICES.find(v => v.name === name);
             if (name === activeTadaVoice) {
-                // Same voice — just generate next demo phrase
-                const userText = textInput.value.trim();
+                // Same voice — populate next demo phrase (user clicks Generate)
                 const demoText = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];
                 tadaPhraseIndex++;
-                isDemoGen = !userText;
-                if (isDemoGen) textInput.value = '';
-                generating = true;
-                generateBtn.disabled = true;
-                setTadaVoiceBtnsEnabled(false);
-                tts.generate(userText || demoText, parseFloat(tempSlider.value), {
-                    noiseTemp: 0.9, numFlowSteps: 10, cfgScale: 1.0,
-                });
+                textInput.value = demoText;
                 return;
             }
             loadingTadaVoice = true;
@@ -719,20 +748,10 @@
                         if (btn.dataset.voice === name) btn.classList.add('active');
                     });
                     setTadaVoiceBtnsEnabled(true);
-                    // Auto-generate: cycle through demo phrases
-                    const userText = textInput.value.trim();
+                    // Populate a demo phrase for the user to generate
                     const demoText = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];
                     tadaPhraseIndex++;
-                    isDemoGen = !userText;
-                    if (isDemoGen) textInput.value = '';
-                    generating = true;
-                    generateBtn.disabled = true;
-                    setTadaVoiceBtnsEnabled(false);
-                    tts.generate(userText || demoText, parseFloat(tempSlider.value), {
-                        noiseTemp: 0.9,
-                        numFlowSteps: 10,
-                        cfgScale: 1.0,
-                    });
+                    textInput.value = demoText;
                 },
                 onStatus: (text, ready, progress) => {
                     if (ready) {
@@ -745,7 +764,9 @@
                             tadaVoiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
                                 if (btn.dataset.voice === 'ljspeech') btn.classList.add('active');
                             });
-                            // Voice is ready — user clicks a voice button to generate
+                            // Populate first demo phrase
+                            textInput.value = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];
+                            tadaPhraseIndex++;
                         }
                         progressBar.classList.remove('visible');
                         progressInfo.textContent = '';
@@ -822,10 +843,14 @@
             if (model === 'tada') {
                 voiceSection.style.display = 'none';
                 tadaVoiceSection.style.display = '';
+                pocketControls.style.display = 'none';
+                tadaControls.style.display = '';
                 tadaProgress.textContent = '';
             } else {
                 voiceSection.style.display = '';
                 tadaVoiceSection.style.display = 'none';
+                pocketControls.style.display = '';
+                tadaControls.style.display = 'none';
                 tadaProgress.textContent = '';
             }
             stepInfo.textContent = '';
@@ -942,9 +967,9 @@
             if (currentModel === 'pocket-tts') setVoiceBtnsEnabled(false);
             if (currentModel === 'tada') setTadaVoiceBtnsEnabled(false);
             const opts = currentModel === 'tada' ? {
-                noiseTemp: 0.9,
-                numFlowSteps: 10,
-                cfgScale: 1.0,
+                noiseTemp: parseFloat(noiseSlider.value),
+                numFlowSteps: parseInt(stepsSlider.value),
+                cfgScale: parseFloat(cfgSlider.value),
             } : {};
             tts.generate(text, parseFloat(tempSlider.value), opts);
         });
