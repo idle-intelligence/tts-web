@@ -103,6 +103,7 @@ export class TtsClient {
         const { type, ...data } = e.data;
         switch (type) {
             case 'status':
+                if (data.ready) this._ready = true;
                 this.onStatus(data.text, data.ready || false, data.progress);
                 break;
             case 'loaded':
