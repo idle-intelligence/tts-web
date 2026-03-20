@@ -1,0 +1,33 @@
+[package]
+name = "kitten-wasm"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[features]
+default = []
+wasm = [
+    "wasm-bindgen",
+    "js-sys",
+    "web-sys",
+    "console_error_panic_hook",
+    "getrandom/wasm_js",
+]
+
+[dependencies]
+kitten-core = { path = "../kitten-core" }
+candle-core = "0.9"
+candle-nn = "0.9"
+anyhow = { workspace = true }
+safetensors = "0.4"
+
+wasm-bindgen = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true }
+console_error_panic_hook = { workspace = true, optional = true }
+getrandom = { workspace = true, optional = true }

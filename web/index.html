@@ -306,6 +306,7 @@
         <div class="model-selector">
             <label><input type="radio" name="model" value="pocket-tts" checked> Pocket TTS (128 MB)</label>
             <label><input type="radio" name="model" value="tada"> TADA-1B (~1.1 GB)</label>
+            <label><input type="radio" name="model" value="kitten"> KittenTTS (~45 MB)</label>
         </div>
     </section>
 
@@ -327,6 +328,22 @@
     <section id="voiceSection">
         <h2>voice</h2>
         <div class="voice-grid" id="voiceGrid"></div>
+    </section>
+
+    <section id="kittenVoiceSection" style="display:none">
+        <h2>voice <span class="sub">· kitten</span></h2>
+        <div class="voice-grid" id="kittenVoiceGrid"></div>
+        <div class="slider-group" style="margin-top:12px">
+            <label for="speedSlider">Speed</label>
+            <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.05" value="1.0">
+            <span id="speedValue">1.00</span>
+        </div>
+    </section>
+
+    <section id="ipaSection" style="display:none">
+        <h2>phonemes <span class="sub">· IPA</span></h2>
+        <p class="info">KittenTTS uses IPA phonemes. Paste IPA below (espeak integration coming soon).</p>
+        <textarea id="ipaInput" placeholder="hɛloʊ ðɪs ɪz ə tɛst" style="min-height:60px"></textarea>
     </section>
 
     <section>
@@ -372,8 +389,15 @@
         const audioSection = document.getElementById('audioSection');
         const audioPlayer = document.getElementById('audioPlayer');
         const voiceSection = document.getElementById('voiceSection');
+        const kittenVoiceSection = document.getElementById('kittenVoiceSection');
+        const kittenVoiceGrid = document.getElementById('kittenVoiceGrid');
+        const ipaSection = document.getElementById('ipaSection');
+        const ipaInput = document.getElementById('ipaInput');
+        const speedSlider = document.getElementById('speedSlider');
+        const speedValue = document.getElementById('speedValue');
 
         const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
+        const KITTEN_VOICES = ['bella', 'jasper', 'luna', 'bruno', 'rosie', 'hugo', 'kiki', 'leo'];
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
 
         let allChunks = [];
@@ -383,6 +407,8 @@
         let loadingVoice = false;
         let isDemoGen = false;
         let currentModel = 'pocket-tts';
+        let kittenVoiceIdx = 0;
+        let kittenVoiceNames = KITTEN_VOICES;
 
         const BATCH_MS = 500;
         const TARGET_DURATION = 8;
@@ -436,6 +462,26 @@
             tempValue.textContent = parseFloat(tempSlider.value).toFixed(2);
         });
 
+        speedSlider.addEventListener('input', () => {
+            speedValue.textContent = parseFloat(speedSlider.value).toFixed(2);
+        });
+
+        // ---- Kitten voice grid ----
+        for (let i = 0; i < KITTEN_VOICES.length; i++) {
+            const name = KITTEN_VOICES[i];
+            const btn = document.createElement('button');
+            btn.className = 'voice-btn' + (i === 0 ? ' active' : '');
+            btn.textContent = name;
+            btn.dataset.voiceIdx = i;
+            btn.addEventListener('click', () => {
+                if (generating) return;
+                kittenVoiceIdx = i;
+                kittenVoiceGrid.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+            kittenVoiceGrid.appendChild(btn);
+        }
+
         // Detect local dev server (not deployed to GitHub Pages)
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
@@ -458,6 +504,24 @@
                 const cache = await caches.open(TADA_CACHE);
                 const url = 'https://huggingface.co/idle-intelligence/tada-gguf/resolve/main/tada-1b-q4_0.gguf';
                 return !!(await cache.match(url));
+            } catch { return false; }
+        }
+
+        const KITTEN_MODEL_URL = isLocal
+            ? `${location.origin}/kitten-model.safetensors`
+            : 'https://huggingface.co/idle-intelligence/kitten-tts/resolve/main/kitten-model.safetensors';
+        const KITTEN_VOICES_URL = isLocal
+            ? `${location.origin}/kitten-voices.safetensors`
+            : 'https://huggingface.co/idle-intelligence/kitten-tts/resolve/main/kitten-voices.safetensors';
+        const KITTEN_WASM_BASE = isLocal
+            ? `${location.origin}/kitten-pkg`
+            : './kitten-pkg';
+        const KITTEN_CACHE = 'kitten-model-v1';
+        async function isKittenCached() {
+            if (isLocal) return true;
+            try {
+                const cache = await caches.open(KITTEN_CACHE);
+                return !!(await cache.match(KITTEN_MODEL_URL));
             } catch { return false; }
         }
 
@@ -712,15 +776,73 @@
             });
         }
 
+        // ---- Kitten client ----
+        function makeKittenClient() {
+            return new TtsClient({
+                modelType: 'kitten',
+                workerUrl: './kitten-worker.js',
+                modelUrl: KITTEN_MODEL_URL,
+                voicesUrl: KITTEN_VOICES_URL,
+                wasmBaseUrl: KITTEN_WASM_BASE,
+                onStatus: (text, ready, progress) => {
+                    if (ready) {
+                        updateStatus('ready', text);
+                        generateBtn.disabled = false;
+                        progressBar.classList.remove('visible');
+                        progressInfo.textContent = '';
+                        downloadBtn.style.display = 'none';
+                    } else {
+                        updateStatus('loading', text);
+                        if (typeof progress === 'number') {
+                            progressBar.classList.add('visible');
+                            progressFill.style.width = (progress * 100) + '%';
+                            progressInfo.textContent = text;
+                        }
+                    }
+                },
+                onError: (err) => {
+                    updateStatus('error', 'Error: ' + err.message);
+                    generating = false;
+                    generateBtn.disabled = false;
+                    stepInfo.textContent = '';
+                    tadaProgress.textContent = '';
+                    console.error(err);
+                },
+                onChunk: (data, step) => {
+                    const chunk = data instanceof Float32Array ? data : new Float32Array(data);
+                    allChunks.push(chunk);
+                },
+                onDone: (totalSteps) => {
+                    const totalTime = ((performance.now() - genStartTime) / 1000).toFixed(2);
+                    generating = false;
+                    generateBtn.disabled = false;
+                    updateStatus('ready', 'Ready');
+
+                    const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
+                    if (totalLength === 0) {
+                        stepInfo.textContent = `Done in ${totalTime}s — no audio produced`;
+                        return;
+                    }
+                    const pcm = new Float32Array(totalLength);
+                    let offset = 0;
+                    for (const chunk of allChunks) { pcm.set(chunk, offset); offset += chunk.length; }
+                    const audioDur = (totalLength / tts.sampleRate).toFixed(2);
+                    stepInfo.textContent = `${audioDur}s audio in ${totalTime}s`;
+
+                    const wav = encodeWav(pcm, tts.sampleRate);
+                    const blob = new Blob([wav], { type: 'audio/wav' });
+                    audioPlayer.src = URL.createObjectURL(blob);
+                    audioSection.style.display = 'block';
+                }
+            });
+        }
+
         // ---- Model switching ----
         function updateUIForModel(model) {
-            if (model === 'tada') {
-                voiceSection.style.display = 'none';
-                tadaProgress.textContent = '';
-            } else {
-                voiceSection.style.display = '';
-                tadaProgress.textContent = '';
-            }
+            voiceSection.style.display = model === 'pocket-tts' ? '' : 'none';
+            kittenVoiceSection.style.display = model === 'kitten' ? '' : 'none';
+            ipaSection.style.display = model === 'kitten' ? '' : 'none';
+            tadaProgress.textContent = '';
             stepInfo.textContent = '';
             audioSection.style.display = 'none';
         }
@@ -762,6 +884,17 @@
                     await initClient();
                 } else {
                     updateStatus('', 'TADA model not downloaded (~1.1 GB)');
+                    downloadBtn.style.display = '';
+                    downloadBtn.disabled = false;
+                }
+            } else if (model === 'kitten') {
+                tts = makeKittenClient();
+                const cached = await isKittenCached();
+                if (cached) {
+                    updateStatus('loading', 'Loading KittenTTS...');
+                    await initClient();
+                } else {
+                    updateStatus('', 'KittenTTS model not downloaded (~45 MB)');
                     downloadBtn.style.display = '';
                     downloadBtn.disabled = false;
                 }
@@ -822,6 +955,28 @@
             const text = textInput.value.trim();
             if (!text || generating) return;
             if (currentModel === 'pocket-tts' && !activeVoice) return;
+            if (currentModel === 'kitten') {
+                const ipa = ipaInput.value.trim();
+                if (!ipa) {
+                    stepInfo.textContent = 'Paste IPA phonemes above before generating.';
+                    return;
+                }
+                isDemoGen = false;
+                generating = true;
+                generateBtn.disabled = true;
+                allChunks = [];
+                genStartTime = performance.now();
+                audioSection.style.display = 'none';
+                stepInfo.textContent = 'Synthesizing...';
+                updateStatus('generating', 'Synthesizing...');
+                tts.generate(text, 1.0, {
+                    ipa,
+                    voiceIdx: kittenVoiceIdx,
+                    speed: parseFloat(speedSlider.value),
+                    textLen: text.length,
+                });
+                return;
+            }
             isDemoGen = false;
             generating = true;
             generateBtn.disabled = true;

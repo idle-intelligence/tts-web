@@ -12,10 +12,14 @@ export class TtsClient {
 
         this.baseUrl = (options.baseUrl || '').replace(/\/+$/, '');
         this.wasmBaseUrl = options.wasmBaseUrl || null;
-        this.workerUrl = options.workerUrl || (this.baseUrl + (this.modelType === 'tada' ? '/tada-worker.js' : '/worker.js'));
+        const defaultWorker = this.modelType === 'tada' ? '/tada-worker.js'
+            : this.modelType === 'kitten' ? '/kitten-worker.js'
+            : '/worker.js';
+        this.workerUrl = options.workerUrl || (this.baseUrl + defaultWorker);
         this.modelUrl = options.modelUrl || null;
         this.voiceUrl = options.voiceUrl || null;
         this.tokenizerUrl = options.tokenizerUrl || null;
+        this.voicesUrl = options.voicesUrl || null;
 
         this.worker = null;
         this.sampleRate = 24000;
@@ -47,6 +51,13 @@ export class TtsClient {
                 const msg = { type: 'load', baseUrl: this.baseUrl || location.origin };
                 if (this.wasmBaseUrl) msg.wasmBaseUrl = this.wasmBaseUrl;
                 this.worker.postMessage(msg);
+            } else if (this.modelType === 'kitten') {
+                this.worker.postMessage({
+                    type: 'load',
+                    modelUrl: this.modelUrl,
+                    voicesUrl: this.voicesUrl,
+                    wasmBaseUrl: this.wasmBaseUrl,
+                });
             } else {
                 const config = { baseUrl: this.baseUrl };
                 if (this.modelUrl) config.modelUrl = this.modelUrl;
@@ -72,6 +83,14 @@ export class TtsClient {
                 noiseTemp: options.noiseTemp,
                 numFlowSteps: options.numFlowSteps,
                 cfgScale: options.cfgScale,
+            });
+        } else if (this.modelType === 'kitten') {
+            this.worker.postMessage({
+                type: 'generate',
+                ipa: options.ipa || text,
+                voiceIdx: options.voiceIdx || 0,
+                speed: options.speed || 1.0,
+                textLen: options.textLen || text.length,
             });
         } else {
             this.worker.postMessage({ type: 'generate', text, temperature });
@@ -104,7 +123,7 @@ export class TtsClient {
                 if (data.sampleRate) this.sampleRate = data.sampleRate;
                 this._ready = true;
                 if (this._pendingResolve) {
-                    this._pendingResolve();
+                    this._pendingResolve(data);
                     this._pendingResolve = null;
                     this._pendingReject = null;
                 }

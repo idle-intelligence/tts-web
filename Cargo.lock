@@ -2711,6 +2711,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "kitten-wasm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "candle-core",
+ "candle-nn",
+ "console_error_panic_hook",
+ "getrandom 0.3.4",
+ "js-sys",
+ "kitten-core",
+ "safetensors 0.4.5",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.182"
 source = "registry+https://github.com/rust-lang/crates.io-index"
