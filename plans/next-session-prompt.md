@@ -2,216 +2,115 @@
 
 ## What This Is
 
-You are continuing work on a browser-based TTS engine for the TADA-1B model.
-The stack is: Rust (candle ML framework) for inference + WASM bindings for browser
-deployment. The frontend lives in `web/`.
+Browser-based TTS engine for TADA-1B model.
+Stack: Rust (candle + Burn ML frameworks) → WASM + WebGPU for browser deployment.
 
 Repository: `/Users/tc/Code/idle-intelligence/tts-web`
 Branch: `feat/burn-wgpu-llama`
 
 ---
 
-## State of the Pipeline (as of 2026-03-13)
+## Session 2026-03-14 to 2026-03-20 — Major Progress
 
-The end-to-end native generation pipeline is working and producing good-quality audio.
-Two major bugs were found and fixed this session:
+### Benchmarks & Quality
 
-### Bug 1: Autoregressive time feedback (FIXED)
+**Post-bugfix benchmark round** (9 GGUF variants × 4 phrases):
+- All variants produce perceptually equivalent audio post-bugfix
+- Mixed/Var-C (1.3G) hit sub-1x RTF on native Metal
+- Q4_K_M Var-C (1.38G) added — near-identical quality to Q4_0
 
-The generation loop was feeding zeros for `time_before` / `time_after` at every
-autoregressive step instead of the model's own predictions. The fix was to check
-whether the *next* step's prompt_idx is still within the prompt phase (not the
-current step's). The corrected logic is in the update block at the end of each
-generation step in both:
+**Quality findings**:
+- fox: OK across all variants
+- call: sounds good, truncated early (model issue)
+- tyger: universally bad pronunciation (model issue, not quantization)
+- wutang: good with voice switch mid-phrase (weak voice conditioning)
+- Python BF16 reference: "complete but quieter, more noise/wind"
 
-- `crates/tada-core/examples/tada_generate.rs` (lines ~645–677)
-- `crates/tada-wasm/src/lib.rs` (lines ~347–383)
+**Voice prompts**:
+- ljspeech (5 tokens) → too short for stable conditioning
+- ljspeech_long (32 tokens) → much better with Python reference
+- Rickie from SBCSAE (75 tokens) → natural conversational voice
+- amazement/amusement from fb_ears → emotional voices
+- The "voice prompt leaking" issue (hearing end of prompt text in output) needs investigation
 
-### Bug 2: Trailing EOT frame (FIXED)
+### RoPE Bug Fix (THE breakthrough)
 
-Voice-prompted mode produced a junk final acoustic frame — the frame that encodes
-the EOT token itself rather than a shifted text token. Fixed by popping the last
-acoustic frame after generation in both files above.
+**Bug**: Burn's RoPE used interleaved pairs `(x[0],x[1]), (x[2],x[3])...` instead of Llama's split-half convention `(x[i], x[i+d/2])`.
 
-### Bug 3: WASM tokenize() used wrong EOT token (FIXED)
+**Impact**: Step 1 hidden states matched (cosine 0.9997) but step 2 completely diverged (cosine 0.005). All Burn GPU audio was gibberish.
 
-`tada-wasm/src/lib.rs` `tokenize()` was using `EOS_TOKEN_ID` (128001) for trailing
-padding instead of `EOT_TOKEN_ID` (128009). Fixed. The trailing tokens must be
-`128009` (`<|eot_id|>`) to match Python's reference exactly.
+**Fix**: One function change in `crates/tada-wasm/src/model/rope.rs` — split into first/second half instead of interleaved pairs.
 
-### Pipeline differences between Rust and Python that are intentional
+**Verification**: After fix, step 2 cosine = 0.99971. F32 Burn vs F32 candle: cosine = 1.000000.
 
-- **No CFG in Rust**: Python uses `acoustic_cfg_scale=1.6`. Rust uses 1.0 (no CFG).
-  User has evaluated both and *prefers* Rust's cleaner sound without CFG. Do NOT
-  implement CFG unless explicitly asked.
-- **`times_before` collection order**: Python collects the *input* fed to each step.
-  Rust collects the *prediction* from each step. This is intentional and
-  self-consistent; changing it made things worse and was reverted.
-- **EOS handling**: Python runs flow matching on ALL steps including EOT frames.
-  Rust skips flow matching during EOS countdown. This is deliberate.
+### Investigation Trail (for the write-up)
 
----
+1. **Suspected precision issue** → tested dot() replacement in WGSL shader → no effect
+2. **Suspected KV cache bug** → tested ring buffer vs concat → no effect
+3. **Suspected tensor stride issue** → tested materialization → no effect
+4. **F32 test proved**: Burn GPU operators are CORRECT for F32 (cosine 1.0 at step 1)
+5. **F32 step 2 still diverged** → proved it's NOT a precision issue but a LOGIC bug
+6. **Per-layer analysis**: cosine ~0.99999 at every layer, max_diff grows but RMSNorm normalizes
+7. **Matmul sanity check**: cat+swap_dims+matmul correct for small tensors
+8. **Debug dumps** revealed: divergence starts AFTER RoPE, not before
+9. **RoPE convention identified**: interleaved vs split-half → ONE LINE FIX
 
-## Current Configuration
+### Quantization
 
-All config values in `TadaConfig::tada_1b()` have been verified exact-match against
-the HF `config.json`. Critical verified values:
+- **Q4_K_M** quantization implemented in `quantize_tada.py` (k-quant super-blocks)
+- **Q8_0 WGSL shader** written for VibeVoice GPU path
+- Q8_0 LLM backbone tested: matches F16 on fox/call (exact sample count)
+- Mixed/Var-C/Q4_K_M all produce good audio with correct voice conditioning
 
-- `num_time_classes: 256` (NOT 1024 — checkpoint overrides Python class default)
-- `num_time_bits: 8`, `time_dim: 16`, `total_latent_dim: 528`
-- `head_layers: 6`, `head_ffn_ratio: 4.0`
-- `shift_acoustic: 5`
+### WASM Deployment
 
-Do NOT change these without re-verifying against the checkpoint.
+**Memory optimizations**:
+- Eliminated triple-copy of GGUF bytes (was 3× 1.38 GB → now 1× 1.38 GB)
+- `load_gguf_no_llm` skips LLM in candle (saves ~620 MB)
+- `load_gguf_no_llm_no_vv` skips VV when Burn handles it (saves ~350 MB more)
+- Dummy LLM with no embed_tokens dequant (saves ~1 GB)
+- F32Embedding stores data on CPU (avoids sync GPU readback panic on WASM)
+- Token embedding uses Q4 CPU EmbeddingStore (no GPU readback)
+- `into_data_async().await` for all GPU→CPU transfers
 
----
+**WebGPU performance optimizations**:
+- `tasks_max=512` (was 32 default) — batches entire LLM step into one queue.submit()
+- GPU warmup: 5 LLM forward passes + 2 VV ODE steps to pre-compile all WGSL shaders
+- VV skip during prompt phase — prompt acoustic frames are stripped, no need for VV
+- Q8_0 WGSL shader for VibeVoice on GPU (551ms/step vs 595ms CPU — 8% faster)
 
-## Recommended Build Command
+**Performance evolution (traced)**:
 
-```bash
-cargo run --example tada_generate -p tada-core --release --features metal -- \
-  --model /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-mixed.gguf \
-  --tokenizer /Users/tc/Code/idle-intelligence/hf/Llama-3.2-1B/tokenizer.json \
-  --voice voices/ljspeech.safetensors \
-  --noise-temp 0.9 \
-  --transition-steps 0 \
-  --output /tmp/tada_test.wav \
-  --text "The quick brown fox jumps over the lazy dog."
-```
+| Config | Total | Content step | Decode | Notes |
+|--------|-------|-------------|--------|-------|
+| Original (no opts) | 40.1s | 486ms | 6.2s | 56 steps |
+| VV skip + CPU warmup | 31.6s | 554ms | 9.7s | 25 steps |
+| tasks_max=512 | 53.1s* | 540ms | 8.2s | *longer voice prompt |
+| Q8_0 VV GPU | 50.6s | 551ms | 17.8s | Decode regressed |
+| + VV warmup | TBD | TBD | TBD | Building |
 
-Critical flags:
-- `--noise-temp 0.9` is mandatory. Without it audio is flat/dead.
-- `--transition-steps 0` is required for the current ljspeech voice prompt. The
-  prompt only has 5 acoustic tokens. With `--transition-steps 5` (old default), all
-  5 tokens are trimmed → zero-shot mode (no voice conditioning at all).
+*dispatch gap reduced 6x (340ms → 55ms per step)
 
-Available models:
-- `tada-1b-q4_0.gguf` (2.64 GB) — Q4_0 baseline
-- `tada-1b-mixed.gguf` (1.75 GB) — **Variant E: VV F16 + Embed Q4_0** — recommended
+### VV on GPU Experiment
 
----
+**F32 VV on GPU**: 98.7s (3x WORSE) — Burn's generic F32 matmul on WebGPU is 20x slower than candle CPU Q8_0
+**Q8_0 VV on GPU**: 551ms/step (8% faster than CPU) — custom Q8_0 WGSL shader
+**Key lesson**: naive 1-thread-per-element shader works for LLM (50 dispatches/step) but struggles for VV (180 dispatches/step). Q8_0 is viable but not a dramatic win.
 
-## Quantization Finding (Variant E Is the Winner)
+### Frontend
 
-From systematic mixed-precision testing, the only quantization config that produces
-correct gray-code time predictions for all test phrases is:
+- Voice selector with 4 voices (LJSpeech, Amazement, Amusement, Rickie)
+- Clicking voice populates demo text, user clicks Generate
+- Parameter sliders: Noise (0.9), CFG (1.6), Steps (20) — model defaults
+- Worker handles voice loading/switching
+- Auto-populates first demo phrase on model ready
 
-| Component | Precision | Rationale |
-|-----------|-----------|-----------|
-| LLM (Llama) | Q4_0 | Fine |
-| Embeddings | Q4_0 | **Critical** — Q8_0 causes gray-code bit flips |
-| VibeVoice | F16 | Sufficient. F32 adds 0.9 GB with no measurable benefit |
-| Decoder | Q4_0 | Doesn't affect output — acoustics arrive already fixed |
+### Known Issues
 
-Variant E (VV F16 + Embed Q4_0) = 1.75 GB vs 2.64 GB baseline = 34% smaller,
-identical audio for all tested phrases.
-
-Gray-code misprediction signature: `times_before[N]` = 59 instead of 4
-(gray(4)=0b00000110 → gray(59)=0b00100110, single bit 5 flip). This causes
-`expand_durations()` to insert ~55 zero frames → trailing noise.
-
-The `--max-time-before 40` clamp in `tada_generate.rs` is a guard against this
-producing audible damage even if a misprediction slips through.
-
-**Variant E has NOT been re-tested after the pipeline bug fixes.** This is a
-pending task — the pre-fix benchmarks may not be comparable.
-
----
-
-## Known Remaining Issues (Priority Order)
-
-### 1. Voice prompt too short (most impactful)
-
-`voices/ljspeech.safetensors` contains only 5 acoustic tokens. This is barely any
-voice conditioning. The TADA encoder (a separate model from the LLM) processes raw
-audio waveforms into acoustic tokens. A longer audio clip would produce more tokens
-and significantly improve voice stability.
-
-To regenerate:
-```bash
-# Activate venv first ("venv mon ami")
-source .venv/bin/activate
-python scripts/precompute_voice.py \
-  --audio /path/to/longer_ljspeech_clip.wav \
-  --text "The transcript of the clip." \
-  --output voices/ljspeech_long.safetensors
-```
-
-Then use `--voice voices/ljspeech_long.safetensors` and set `--transition-steps 5`
-(or whatever is appropriate for the new prompt length).
-
-Note: `precompute_voice.py` needs the TADA encoder model. Check its `--help` for the
-required model path argument.
-
-### 2. "call" phrase truncation
-
-Text: "I had to call you up in the middle of the night"
-
-This phrase consistently generates duration values of 1, 1, 1 for middle words,
-causing the audio to cut short. The model predicts almost-zero durations for "call",
-"you", "up". Likely a gray-code prediction issue specific to this phoneme context.
-
-Investigate by adding `--debug-dump /tmp/call_debug` to the generation command and
-examining `step_NNN/scalars.json` for the affected steps. Compare `times_before`
-values with a phrase that generates correctly.
-
-### 3. "tyger" mispronunciation
-
-Text: "Tyger Tyger, burning bright"
-
-Starts with the wrong pronunciation. Likely a tokenization artifact — "Tyger" is
-not a standard English word and may get split into unusual tokens that the model
-hasn't seen in TTS context. Check what token IDs are produced and whether prepending
-a phonetic respelling helps.
-
-### 4. Voice instability on long phrases
-
-Voice changes mid-utterance (heard on wutang-style long text). This is directly
-related to the weak voice conditioning from the 5-token ljspeech prompt. Fixing
-issue #1 (longer voice prompt) should help significantly.
-
-### 5. Re-test Variant E with fixed pipeline
-
-The benchmarks in `docs/benchmarks.md` and `docs/run_log.md` for Variant E were
-recorded before the autoregressive time feedback bug was fixed. Re-run with the same
-test phrases and record results in `docs/run_log.md` as a new run entry.
-
-Benchmark command (fox phrase, Metal):
-```bash
-cargo run --example tada_generate -p tada-core --release --features metal -- \
-  --model /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-mixed.gguf \
-  --tokenizer /Users/tc/Code/idle-intelligence/hf/Llama-3.2-1B/tokenizer.json \
-  --voice voices/ljspeech.safetensors \
-  --noise-temp 0.9 --transition-steps 0 --seed 42 \
-  --output /tmp/tada_varE_retest.wav \
-  --text "The quick brown fox jumps over the lazy dog."
-```
-
-Record: load time, gen time, decode time, audio duration, RTF, times_before array,
-any clamping events.
-
-### 6. WASM path testing
-
-All three bug fixes (time feedback, trailing frame, EOT token) have been applied to
-`crates/tada-wasm/src/lib.rs` but the WASM build has NOT been tested end-to-end
-since the fixes. Build and test in browser:
-
-```bash
-wasm-pack build crates/tada-wasm --target web --release
-node web/serve.mjs  # port 8081
-# Open http://localhost:8081
-```
-
-Known WASM architecture: Burn/wgpu runs the LLM on GPU (WebGPU), candle handles
-VibeVoice + decoder on CPU. The JS worker (`web/tada-worker.js`) drives the
-step-by-step generation loop.
-
-### 7. CFG implementation (low priority / optional)
-
-Python uses `acoustic_cfg_scale=1.6` for classifier-free guidance. This requires
-running the LLM twice per step (conditional + unconditional) and combining the
-logits. User has explicitly said they prefer the current Rust output quality without
-CFG. Only implement if asked.
+- **Decode is the new bottleneck**: 17.8s in WASM (native: 1.5s)
+- **First generation**: 10-16s warmup (shaders compiling). VV warmup added but untested.
+- **Voice prompt leaking**: first word of voice text sometimes audible in output
+- **Audio quality in browser**: untested with correct params + voice prompt
 
 ---
 
@@ -219,39 +118,57 @@ CFG. Only implement if asked.
 
 | File | Purpose |
 |------|---------|
-| `crates/tada-core/examples/tada_generate.rs` | Main native generation example. All pipeline fixes are here. |
-| `crates/tada-core/src/tada_model.rs` | Model: `load_gguf`, `build_input_embeds`, `generate_acoustic`, `decode_audio` |
-| `crates/tada-core/src/flow_matching.rs` | ODE solver, gray code decode, `expand_durations` |
-| `crates/tada-core/src/config.rs` | `TadaConfig::tada_1b()` — verified config values |
-| `crates/tada-wasm/src/lib.rs` | WASM bindings: mirrors `tada_generate.rs` logic, Burn/wgpu LLM |
-| `scripts/quantize_tada.py` | GGUF quantization, mixed precision support |
-| `scripts/precompute_voice.py` | Precompute voice prompt from audio |
-| `scripts/save_generation_debug.py` | Dump Python intermediates for comparison |
-| `voices/ljspeech.safetensors` | Current 5-token voice prompt (too short) |
-| `voices/ljspeech.json` | Companion metadata (prompt transcript) |
-| `docs/benchmarks.md` | All benchmark data (data only — no analysis) |
-| `docs/run_log.md` | Detailed run notes and findings |
+| `crates/tada-wasm/src/lib.rs` | WASM bindings, HybridTadaModel, generation loop |
+| `crates/tada-wasm/src/model/rope.rs` | RoPE (FIXED: split-half convention) |
+| `crates/tada-wasm/src/model/vibevoice.rs` | BurnVibeVoice (Q8_0 GPU flow matching) |
+| `crates/tada-wasm/src/model/kv_cache.rs` | KV cache (concat-based) |
+| `crates/tada-wasm/src/wgsl/shader_naive.wgsl` | Q4_0 matmul WGSL shader |
+| `crates/tada-wasm/src/wgsl/shader_q8_0.wgsl` | Q8_0 matmul WGSL shader |
+| `crates/tada-wasm/src/gguf.rs` | GGUF loader, Q4/Q8 tensors, embeddings |
+| `crates/tada-core/src/flow_matching.rs` | ODE solver + CFG support |
+| `crates/tada-core/src/tada_model.rs` | Candle model (load_gguf_no_llm_no_vv) |
+| `scripts/quantize_tada.py` | Q4_0/Q8_0/Q4_K quantization |
+| `scripts/analyze-trace.py` | Chrome DevTools trace analyzer |
+| `scripts/precompute_voice.py` | Voice prompt precomputation |
+| `web/tada-worker.js` | WASM worker (voice loading, generation loop) |
+| `web/index.html` | Frontend (voice selector, parameter sliders) |
+| `docs/results.md` | Benchmark results (pure data) |
+| `docs/lab-notebook.md` | Experiment log (parameters + user feedback) |
+| `plans/perf-plan.md` | Performance analysis + optimization roadmap |
 
 ---
 
-## Local Model Paths
+## Model Files
 
 ```
 Tokenizer:    /Users/tc/Code/idle-intelligence/hf/Llama-3.2-1B/tokenizer.json
-Model BF16:   /Users/tc/Code/idle-intelligence/hf/tada-1b/model.safetensors
-Model Q4_0:   /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-q4_0.gguf
-Model mixed:  /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-mixed.gguf
-Codec decoder: /Users/tc/Code/idle-intelligence/hf/tada-codec/decoder/model.safetensors
+Var-C (1.3G): /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-C-vvq8-eq4.gguf  ← default for web
+Q4_K_M (1.4G): /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-mixed-llmq4_k-vvq8_0-eq4_0.gguf
+Q4_0 (2.6G): /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-q4_0.gguf
+F32 (6.5G):  DELETE — no longer needed
 ```
+
+Symlink in repo root: `tada-1b-q4_0.gguf → tada-1b-C-vvq8-eq4.gguf`
 
 ---
 
-## Workflow Reminders
+## Build Commands
 
-- Use sub-agents for all research and code writing. Lead orchestrates, sub-agents
-  execute. Never do sequential manual edits from the lead.
-- Commit atomically. One logical change per commit.
-- Audio quality: do NOT judge by flatness/peak/RMS metrics. Have the user listen.
-- Benchmarks go in `docs/benchmarks.md` (data only). Analysis goes in separate docs.
-- Always use venv for Python scripts: `source .venv/bin/activate`
-- Dev server: `node web/serve.mjs` (port 8081)
+```bash
+# WASM build
+wasm-pack build crates/tada-wasm --target web --release -- --features wasm --no-default-features
+
+# Native Burn example (voice-prompted)
+cargo run --example tada_generate_burn -p tada-wasm --release -- \
+  --model /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-C-vvq8-eq4.gguf \
+  --tokenizer /Users/tc/Code/idle-intelligence/hf/Llama-3.2-1B/tokenizer.json \
+  --voice voices/ljspeech_long.safetensors \
+  --noise-temp 0.9 --transition-steps 5 --seed 42 --cfg-scale 1.6 \
+  --output /tmp/test.wav --text "The quick brown fox jumps over the lazy dog."
+
+# Dev server
+node web/serve.mjs  # port 8081
+
+# Analyze Chrome trace
+python scripts/analyze-trace.py /path/to/Trace-*.json
+```
