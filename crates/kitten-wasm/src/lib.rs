@@ -1,7 +1,7 @@
 #[cfg(feature = "wasm")]
 pub mod web {
     use candle_core::{DType, Device, IndexOp, Tensor};
-    use kitten_core::{config::KittenConfig, kitten_model::KittenModel, phoneme_map::map_phonemes_to_ids};
+    use kitten_core::{config::KittenConfig, kitten_model::KittenModel, phoneme_map::map_phonemes_to_ids, text_preprocess};
     use wasm_bindgen::prelude::*;
 
     fn wasm_log(msg: &str) {
@@ -160,6 +160,12 @@ pub mod web {
         #[wasm_bindgen(js_name = mapIpaToIds)]
         pub fn map_ipa_to_ids(ipa: &str) -> Vec<i32> {
             map_phonemes_to_ids(ipa)
+        }
+
+        /// Preprocess raw text (expand currencies, units, etc.) before phonemization.
+        #[wasm_bindgen(js_name = preprocessText)]
+        pub fn preprocess_text(text: &str) -> String {
+            text_preprocess::preprocess_text(text)
         }
 
         /// Sample rate (24000 Hz).

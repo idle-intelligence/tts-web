@@ -5,3 +5,4 @@ pub mod text_encoder;
 pub mod predictor;
 pub mod decoder;
 pub mod kitten_model;
+pub mod text_preprocess;

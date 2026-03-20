@@ -21,6 +21,7 @@ use candle_core::{DType, Device, IndexOp, Tensor};
 use kitten_core::config::KittenConfig;
 use kitten_core::kitten_model::KittenModel;
 use kitten_core::phoneme_map::map_phonemes_to_ids;
+use kitten_core::text_preprocess::preprocess_text;
 use safetensors::SafeTensors;
 
 // ---------------------------------------------------------------------------
@@ -180,12 +181,13 @@ fn main() -> anyhow::Result<()> {
     let args = parse_args();
 
     let t0 = std::time::Instant::now();
-    eprintln!("[1] Phonemizing: {:?}", args.text);
+    let text = preprocess_text(&args.text);
+    eprintln!("[1] Phonemizing: {:?}", text);
     let ipa = if let Some(ref ipa) = args.ipa {
         eprintln!("  IPA (from --ipa): {:?}", ipa);
         ipa.clone()
     } else {
-        match phonemize(&args.text) {
+        match phonemize(&text) {
             Ok(ipa) => {
                 eprintln!("  IPA: {:?}", ipa.trim());
                 ipa
