@@ -164,7 +164,7 @@ pub mod web {
 
         /// Preprocess raw text (expand currencies, units, etc.) before phonemization.
         #[wasm_bindgen(js_name = preprocessText)]
-        pub fn preprocess_text(text: &str) -> String {
+        pub fn preprocess_text(&self, text: &str) -> String {
             text_preprocess::preprocess_text(text)
         }
 
