@@ -147,16 +147,11 @@ impl HybridTadaModel {
         // Try to load VibeVoice into Burn/GPU as well.
         // This is optional — if it fails (e.g. weights not present or dtype unsupported),
         // we fall back to the candle CPU path without hard-failing the load.
-        let burn_vv = match model::load_burn_vibevoice(&mut reader, device) {
-            Ok(vv) => {
-                eprintln!("[tada] BurnVibeVoice loaded — GPU flow matching enabled");
-                Some(vv)
-            }
-            Err(e) => {
-                eprintln!("[tada] BurnVibeVoice load failed (candle fallback): {e}");
-                None
-            }
-        };
+        // BurnVibeVoice (GPU) is available but currently slower than candle CPU
+        // due to WGSL dispatch overhead (180 dispatches/step for 10 ODE × 6 layers).
+        // Q8_0 GPU: 14.6s vs candle CPU Q8_0: 2s for same generation.
+        // Keep VV on CPU until we have a fused VV kernel.
+        let burn_vv: Option<model::vibevoice::BurnVibeVoice> = None;
         drop(reader);
 
         // Load VibeVoice + decoder into candle/CPU (borrows same buf, skips LLM)
