@@ -244,8 +244,8 @@ impl Block0 {
         let h = self.norm2.forward(&h, style)?;
         let h = leaky_relu_02(&h)?;
         let h = self.conv2.forward(&h)?;
-        // residual + /2
-        Ok(((x + h)? / 2.0)?)
+        // residual + /√2 (ONNX divides by √2, not 2)
+        Ok(((x + h)? / 2.0_f64.sqrt())?)
     }
 }
 
@@ -264,18 +264,26 @@ struct Block1 {
 }
 
 impl Block1 {
-    fn load(vb: VarBuilder, style_half: usize, in_ch: usize, out_ch: usize) -> Result<Self> {
+    fn load(
+        vb: VarBuilder,
+        style_half: usize,
+        in_ch: usize,
+        out_ch: usize,
+        shared_norm_w: Option<Tensor>,
+        shared_norm_b: Option<Tensor>,
+    ) -> Result<Self> {
         let cfg3 = Conv1dConfig { padding: 1, ..Default::default() };
         let cfg1 = Conv1dConfig { ..Default::default() };
-        // conv1x1: residual skip (no bias — load weight manually)
         let conv1x1_w = vb.get((out_ch, in_ch, 1), "conv1x1.weight")?;
         let conv1x1 = Conv1d::new(conv1x1_w, None, cfg1);
-        // pool: depthwise conv, weight [in_ch, 1, 3] — stored as tensors, applied via depthwise_conv1d
         let pool_weight = vb.get((in_ch, 1, 3), "pool.weight")?;
         let pool_bias = vb.get(in_ch, "pool.bias")?;
+        // norm1 uses shared Block0 InstanceNorm weights (verified from ONNX graph)
+        let norm1_fc = linear(style_half, in_ch * 2, vb.pp("norm1").pp("fc"))?;
+        let norm1 = AdaIn { fc: norm1_fc, norm_weight: shared_norm_w, norm_bias: shared_norm_b };
         Ok(Self {
             conv1x1,
-            norm1: AdaIn::load(vb.pp("norm1"), style_half, in_ch)?,
+            norm1,
             conv1: conv1d(in_ch, out_ch, 3, cfg3, vb.pp("conv1"))?,
             norm2: AdaIn::load(vb.pp("norm2"), style_half, out_ch)?,
             conv2: conv1d(out_ch, out_ch, 3, cfg3, vb.pp("conv2"))?,
@@ -287,28 +295,24 @@ impl Block1 {
     // x: [batch, in_ch, T] → [batch, out_ch, 2T]
     // The pool is a depthwise ConvTranspose1d (stride=2) that upsamples T→2T
     fn forward(&self, x: &Tensor, style: &Tensor) -> Result<Tensor> {
-        // Main path with channel reduction
-        let skip = self.conv1x1.forward(x)?; // [batch, out_ch, T]
-        let h = self.norm1.forward(x, style)?;
+        let t = x.dim(2)?;
+        let t2 = t * 2;
+
+        // Skip path: upsample then conv1x1
+        let x_up = x.upsample_nearest1d(t2)?;   // [batch, 128, 2T]
+        let skip = self.conv1x1.forward(&x_up)?; // [batch, 64, 2T]
+
+        // Main path: norm1 at T → leaky_relu → pool upsample to 2T → conv1 → norm2 → leaky_relu → conv2
+        let h = self.norm1.forward(x, style)?;   // [batch, 128, T]
         let h = leaky_relu_02(&h)?;
-        let h = self.conv1.forward(&h)?;     // in_ch→out_ch
-        let h = self.norm2.forward(&h, style)?;
+        let h = depthwise_conv_transpose1d(&h, &self.pool_weight, Some(&self.pool_bias), 1, 2, 1)?; // [batch, 128, 2T]
+        let h = self.conv1.forward(&h)?;         // [batch, 64, 2T]
+        let h = self.norm2.forward(&h, style)?;  // [batch, 64, 2T]
         let h = leaky_relu_02(&h)?;
-        let h = self.conv2.forward(&h)?;     // out_ch→out_ch
-        let out = (skip + h)?;               // [batch, out_ch, T]
+        let h = self.conv2.forward(&h)?;         // [batch, 64, 2T]
 
-        // Pool: depthwise ConvTranspose1d (stride=2, pad=1, output_pad=1) upsamples T→2T
-        // Weight: [in_ch, 1, 3]. Applied to the original in_ch input, then take first out_ch.
-        let pooled = depthwise_conv_transpose1d(x, &self.pool_weight, Some(&self.pool_bias), 1, 2, 1)?;
-        // pooled: [batch, in_ch, 2T]
-        let out_ch = out.dim(1)?;
-        let pooled = pooled.i((.., ..out_ch, ..))?.contiguous()?; // [batch, out_ch, 2T]
-
-        // Upsample `out` to 2T via nearest neighbor to match pooled
-        let t2 = pooled.dim(2)?;
-        let out_up = out.upsample_nearest1d(t2)?; // [batch, out_ch, 2T]
-
-        Ok(((out_up + pooled)? / 2.0)?)
+        // Residual + 1/√2
+        Ok(((skip + h)? / 2.0_f64.sqrt())?)
     }
 }
 
@@ -342,7 +346,7 @@ impl Block2 {
         let h = self.norm2.forward(&h, style)?;
         let h = leaky_relu_02(&h)?;
         let h = self.conv2.forward(&h)?;
-        Ok((x + h)?)
+        Ok(((x + h)? / 2.0_f64.sqrt())?)
     }
 }
 
@@ -360,7 +364,10 @@ impl PredictorBranch {
     fn load(vb: VarBuilder, name: &str, style_half: usize, lstm_out: usize) -> Result<Self> {
         let half = lstm_out / 2;
         let block0 = Block0::load(vb.pp(name).pp("0"), style_half, lstm_out)?;
-        let block1 = Block1::load(vb.pp(name).pp("1"), style_half, lstm_out, half)?;
+        // Block1's norm1 shares Block0's InstanceNorm weights (verified from ONNX graph)
+        let b0_norm_w = vb.pp(name).pp("0").pp("norm1").pp("norm").get(lstm_out, "weight").ok();
+        let b0_norm_b = vb.pp(name).pp("0").pp("norm1").pp("norm").get(lstm_out, "bias").ok();
+        let block1 = Block1::load(vb.pp(name).pp("1"), style_half, lstm_out, half, b0_norm_w, b0_norm_b)?;
         let block2 = Block2::load(vb.pp(name).pp("2"), style_half, half)?;
         let proj_cfg = Conv1dConfig { ..Default::default() };
         let proj = conv1d(half, 1, 1, proj_cfg, vb.pp(format!("{}_proj", name)))?;
@@ -422,6 +429,23 @@ impl Predictor {
             max_duration: cfg.max_duration,
             style_half,
         })
+    }
+
+    /// Inject a pre-computed shared LSTM output and run only the F0 + N branches.
+    ///
+    /// - `shared_lstm_out`: [batch, 128, T] — output of the shared BiLSTM (NCL layout)
+    /// - `style`: [batch, style_dim] — full style vector; `style[:, 128:]` is used for AdaIN
+    ///
+    /// Returns `(f0, n_amp)` both `[batch, 1, 2T]` (after the branch's internal upsampling).
+    pub fn predict_f0_n(
+        &self,
+        shared_lstm_out: &Tensor,
+        style: &Tensor,
+    ) -> Result<(Tensor, Tensor)> {
+        let style_half = style.i((.., self.style_half..))?;
+        let f0 = self.f0_branch.forward(shared_lstm_out, &style_half)?;
+        let n_amp = self.n_branch.forward(shared_lstm_out, &style_half)?;
+        Ok((f0, n_amp))
     }
 
     /// text_features: [batch, seq, hidden_dim]

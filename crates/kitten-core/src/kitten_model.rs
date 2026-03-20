@@ -77,14 +77,14 @@ impl KittenModel {
             self.predictor.forward(&lstm_features, style, speed)?;
 
         // 5. Duration-expand cnn_features [1, 128, seq] → [1, 128, T]
-        //    cnn_features is NCL; expand each position by its duration.
-        let asr_features = expand_cnn_features(&cnn_features, &durations)?;
+        let expanded_cnn = expand_cnn_features(&cnn_features, &durations)?;
 
         // 6. Decoder → waveform [1, 1, num_samples]
-        // shared_lstm_out [1, 128, T] → encode block input
-        // asr_features    [1, 128, T] → asr_res projection
-        // f0/n_amp        [1, 1, T]   — from predictor F0/N branches
-        let waveform = self.decoder.forward(&shared_lstm_out, &asr_features, &f0, &n_amp, style)?;
+        // ONNX uses expanded CNN features for BOTH:
+        //   - encode block 128ch input (arg1)
+        //   - asr_res conv1x1(128→64) for decode blocks (arg2)
+        // shared_lstm_out is used only by the F0/N predictor, not the decoder.
+        let waveform = self.decoder.forward(&expanded_cnn, &expanded_cnn, &f0, &n_amp, style)?;
 
         // 7. Tanh clamp (ONNX model applies tanh as final step) + trim last 5000 samples
         let waveform = waveform.tanh()?;
@@ -126,9 +126,9 @@ impl KittenModel {
         let (durations, expanded_features, shared_lstm_out, f0, n_amp) =
             self.predictor.forward(&lstm_features, style, speed)?;
 
-        let asr_features = expand_cnn_features(&cnn_features, &durations)?;
+        let expanded_cnn = expand_cnn_features(&cnn_features, &durations)?;
 
-        let waveform = self.decoder.forward(&shared_lstm_out, &asr_features, &f0, &n_amp, style)?;
+        let waveform = self.decoder.forward(&expanded_cnn, &expanded_cnn, &f0, &n_amp, style)?;
 
         Ok(DebugOutput {
             bert_output,
