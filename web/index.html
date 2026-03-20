@@ -773,6 +773,12 @@
                         downloadBtn.style.display = 'none';
                     } else {
                         updateStatus('loading', text);
+                        // Show decode status in tadaProgress during generation
+                        if (generating && text.includes('Decoding')) {
+                            const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
+                            tadaProgress.textContent = `Decoding audio... (${elapsed}s)`;
+                            updateStatus('generating', 'Decoding audio...');
+                        }
                         if (typeof progress === 'number') {
                             progressBar.classList.add('visible');
                             progressFill.style.width = (progress * 100) + '%';
@@ -801,9 +807,9 @@
                 onProgress: (step, totalTokens, isEos, tokenId) => {
                     const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
                     if (totalTokens > 0) {
-                        tadaProgress.textContent = `Generating token ${step}/${totalTokens} (${elapsed}s)`;
+                        tadaProgress.textContent = `Generating token ${step + 1}/${totalTokens} (${elapsed}s)`;
                     } else {
-                        tadaProgress.textContent = `Generating token ${step}... (${elapsed}s)`;
+                        tadaProgress.textContent = `Generating token ${step + 1}... (${elapsed}s)`;
                     }
                 },
                 onChunk: (data, step) => {
