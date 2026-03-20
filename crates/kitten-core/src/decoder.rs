@@ -355,33 +355,22 @@ impl HarmonicSource {
         let f0_exp = f0.broadcast_as((batch, self.n_harmonics, t))?;
         let h_mult_exp = h_mult.broadcast_as((batch, self.n_harmonics, t))?;
 
-        // phase increment per sample: 2π·k·f0/sr
+        // Compute phase and sin in plain Rust (avoids 30K tensor ops for cumsum).
+        // phase_inc[b, h, t] = 2π * k * f0[t] / sr, then cumsum over t.
         let two_pi = 2.0 * std::f64::consts::PI;
         let scale = (two_pi / self.sample_rate as f64) as f32;
-        let scale_t = Tensor::new(scale, dev)?.to_dtype(dtype)?;
-        let phase_inc = f0_exp.mul(&h_mult_exp)?.broadcast_mul(&scale_t)?; // [batch, n_h, T]
-
-        // cumulative sum over time (candle has no cumsum, use prefix sum loop)
-        // For short T this is fine; for long sequences we pay O(T²) memory via scan.
-        // Use a running accumulation approach instead: build slice by slice.
-        let phase_slices: Vec<Tensor> = {
-            let mut acc: Option<Tensor> = None;
-            let mut slices = Vec::with_capacity(t);
-            for i in 0..t {
-                let step = phase_inc.i((.., .., i..i + 1))?.contiguous()?;
-                let cumulated = match acc {
-                    None => step.clone(),
-                    Some(ref prev) => (prev + &step)?,
-                };
-                slices.push(cumulated.clone());
-                acc = Some(cumulated);
+        let f0_data = f0.i((0, 0, ..))?.to_vec1::<f32>()?; // [T]
+        let n_h = self.n_harmonics;
+        let mut phase_sin = vec![0.0_f32; n_h * t]; // [n_h, T] row-major
+        for h in 0..n_h {
+            let k = (h + 1) as f32;
+            let mut acc = 0.0_f32;
+            for ti in 0..t {
+                acc += f0_data[ti] * k * scale;
+                phase_sin[h * t + ti] = acc.sin() * 0.1;
             }
-            slices
-        };
-        let phase = Tensor::cat(&phase_slices, 2)?; // [batch, n_h, T]
-
-        // sin of accumulated phase, scaled by 0.1 (ONNX Mul_10/Mul_12 const=0.1)
-        let harmonics_sin = (phase.sin()? * 0.1)?; // [batch, n_h, T]
+        }
+        let harmonics_sin = Tensor::from_vec(phase_sin, (1, n_h, t), dev)?; // [1, n_h, T]
 
         // linear combination: [batch, T, n_h] @ [1, n_h, 1] → [batch, T, 1] → [batch, 1, T]
         let hs_t = harmonics_sin.transpose(1, 2)?.contiguous()?; // [batch, T, n_h]
