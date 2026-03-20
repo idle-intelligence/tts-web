@@ -360,7 +360,7 @@
         <h2>input <span class="sub">· text</span></h2>
         <p class="info">Text stays on this device.</p>
         <textarea id="textInput" placeholder="Hello, this is a test of the text-to-speech system."></textarea>
-        <div id="kittenPhrases" style="display:none; margin-bottom:12px; display:none; flex-wrap:wrap; gap:6px"></div>
+        <!-- phrase chips removed -->
         <div class="controls">
             <button id="generateBtn" class="primary" disabled>Generate</button>
             <div class="slider-group" id="tempSliderGroup">
@@ -509,7 +509,7 @@
         for (let i = 0; i < KITTEN_VOICES.length; i++) {
             const name = KITTEN_VOICES[i];
             const btn = document.createElement('button');
-            btn.className = 'voice-btn' + (i === 0 ? ' active' : '');
+            btn.className = 'voice-btn';
             btn.textContent = name;
             btn.dataset.voiceIdx = i;
             btn.addEventListener('click', () => {
@@ -525,18 +525,7 @@
             kittenVoiceGrid.appendChild(btn);
         }
 
-        // ---- Kitten phrase chips ----
-        for (const phrase of Object.keys(KITTEN_IPA_TABLE)) {
-            const chip = document.createElement('button');
-            chip.className = 'ipa-chip';
-            chip.textContent = phrase.length > 35 ? phrase.slice(0, 33) + '…' : phrase;
-            chip.title = phrase;
-            chip.addEventListener('click', () => {
-                textInput.value = phrase;
-                if (kittenReady) triggerKittenGenerate(false);
-            });
-            kittenPhrases.appendChild(chip);
-        }
+        // Phrase chips removed — text input is freeform, IPA is shown as output
 
         function triggerKittenGenerate(isDemo) {
             if (generating) return;
@@ -1035,10 +1024,9 @@
         async function initClient() {
             try {
                 await tts.init();
-                // For kitten: mark ready and auto-generate after init resolves
                 if (currentModel === 'kitten') {
                     kittenReady = true;
-                    triggerKittenGenerate(true);
+                    updateStatus('ready', 'Select a voice');
                 }
             } catch (err) {
                 updateStatus('error', 'Failed to initialize: ' + err.message);
