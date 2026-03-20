@@ -807,9 +807,10 @@ pub mod web {
             if let Some(ref burn_vv) = model.burn_vv {
                 wasm_log("[tada] GPU warmup: VV Q8_0 shaders...");
                 let hidden_size = model.cfg.llama.hidden_size;
+                let device = WGPU_DEVICE.get().cloned().unwrap_or_else(WgpuDevice::default);
                 let dummy_hidden = burn::tensor::Tensor::<Wgpu, 3>::zeros(
                     [1, 1, hidden_size],
-                    &burn::backend::wgpu::WgpuDevice::default(),
+                    &device,
                 );
                 // Run one VV forward (2 ODE steps) to compile all Q8 matmul pipelines
                 let result = model::vibevoice::solve_flow_matching_burn(
