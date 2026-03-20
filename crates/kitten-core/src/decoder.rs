@@ -386,8 +386,8 @@ impl HarmonicSource {
 
         debug_stats("harmonic_source: phase (after accumulation)", &phase);
 
-        // sin of accumulated phase
-        let harmonics_sin = phase.sin()?; // [batch, n_h, T]
+        // sin of accumulated phase, scaled by 0.1 (ONNX Mul_10/Mul_12 const=0.1)
+        let harmonics_sin = (phase.sin()? * 0.1)?; // [batch, n_h, T]
 
         debug_stats("harmonic_source: harmonics_sin (after sin)", &harmonics_sin);
 
