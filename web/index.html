@@ -745,18 +745,20 @@
                             tadaVoiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
                                 if (btn.dataset.voice === 'ljspeech') btn.classList.add('active');
                             });
-                            // Auto-generate first demo phrase
-                            const demoText = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];
-                            tadaPhraseIndex++;
-                            isDemoGen = true;
-                            generating = true;
-                            generateBtn.disabled = true;
-                            setTadaVoiceBtnsEnabled(false);
-                            tts.generate(demoText, 0.9, {
-                                noiseTemp: 0.9,
-                                numFlowSteps: 10,
-                                cfgScale: 1.0,
-                            });
+                            // Auto-generate first demo phrase (after UI paint)
+                            setTimeout(() => {
+                                const demoText = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];
+                                tadaPhraseIndex++;
+                                isDemoGen = true;
+                                generating = true;
+                                generateBtn.disabled = true;
+                                setTadaVoiceBtnsEnabled(false);
+                                tts.generate(demoText, 0.9, {
+                                    noiseTemp: 0.9,
+                                    numFlowSteps: 10,
+                                    cfgScale: 1.0,
+                                });
+                            }, 100);
                         }
                         progressBar.classList.remove('visible');
                         progressInfo.textContent = '';
