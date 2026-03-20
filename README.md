@@ -16,24 +16,29 @@ Browser-native text-to-speech running 100% client-side via Rust/WASM.
 Generate speech from text with zero system dependencies:
 
 ```bash
-# Clone and build
+# Clone
 git clone https://github.com/idle-intelligence/tts-web.git
 cd tts-web
 
 # Download model weights (~60MB)
 hf download KittenML/kitten-tts-nano-0.8 --local-dir models/kitten-nano
 
-# Convert weights to safetensors
+# Convert ONNX weights to safetensors
 python scripts/convert_kitten_to_safetensors.py
 
-# Generate speech (embedded espeak — no install needed)
-cargo run --example kitten_generate -p kitten-core --release --features espeak -- \
+# Build (one-time)
+cargo build --example kitten_generate -p kitten-core --release --features espeak
+
+# Generate speech — no system dependencies needed
+./target/release/examples/kitten_generate \
   --model models/kitten-nano/kitten-nano.safetensors \
   --voices models/kitten-nano/kitten-voices.safetensors \
   --voice jasper \
   --text "Hello, this is a test of the text-to-speech system." \
   --output hello.wav
 ```
+
+The `--features espeak` flag bundles a pure-Rust espeak-ng port with English data, so text → IPA phonemization works out of the box. The built binary at `target/release/examples/kitten_generate` is standalone — use it directly without `cargo run`.
 
 8 built-in voices: bella, jasper, luna, bruno, rosie, hugo, kiki, leo.
 
