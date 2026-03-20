@@ -8,6 +8,29 @@ use crate::decoder::Decoder;
 use crate::predictor::Predictor;
 use crate::text_encoder::TextEncoder;
 
+/// Intermediate tensors from every stage of the pipeline, for debugging and
+/// comparison with the ONNX reference.
+pub struct DebugOutput {
+    /// BERT encoder output: [1, seq, 128]
+    pub bert_output: Tensor,
+    /// Text encoder BiLSTM output: [1, seq, 256]
+    pub lstm_features: Tensor,
+    /// Text encoder CNN output: [1, 128, seq]
+    pub cnn_features: Tensor,
+    /// Duration predictions: [1, seq] i64
+    pub durations: Tensor,
+    /// Duration-expanded text features (NCL): [1, 128, T]
+    pub expanded_features: Tensor,
+    /// Shared LSTM output (from predictor): [1, 128, T]
+    pub shared_lstm_out: Tensor,
+    /// F0 branch output: [1, 1, T]
+    pub f0: Tensor,
+    /// N amplitude branch output: [1, 1, T]
+    pub n_amp: Tensor,
+    /// Final waveform before tanh: [1, 1, num_samples]
+    pub waveform: Tensor,
+}
+
 pub struct KittenModel {
     bert: AlbertEncoder,
     text_encoder: TextEncoder,
@@ -79,6 +102,45 @@ impl KittenModel {
 
     pub fn sample_rate(&self) -> usize {
         self.cfg.sample_rate
+    }
+
+    /// Run the full pipeline and return every intermediate tensor for debugging.
+    ///
+    /// Same inputs as `synthesize`. The returned `DebugOutput` contains tensors
+    /// from every stage so callers can compare against ONNX reference values.
+    pub fn debug_forward(
+        &self,
+        phoneme_ids: &[i32],
+        style: &Tensor,
+        speed: f32,
+    ) -> Result<DebugOutput> {
+        let device = style.device();
+
+        let ids_u32: Vec<u32> = phoneme_ids.iter().map(|&x| x as u32).collect();
+        let seq_len = ids_u32.len();
+        let input_ids = Tensor::from_vec(ids_u32, (1, seq_len), device)?;
+
+        let bert_output = self.bert.forward(&input_ids)?;
+        let (lstm_features, cnn_features) = self.text_encoder.forward(&bert_output, style)?;
+
+        let (durations, expanded_features, shared_lstm_out, f0, n_amp) =
+            self.predictor.forward(&lstm_features, style, speed)?;
+
+        let asr_features = expand_cnn_features(&cnn_features, &durations)?;
+
+        let waveform = self.decoder.forward(&shared_lstm_out, &asr_features, &f0, &n_amp, style)?;
+
+        Ok(DebugOutput {
+            bert_output,
+            lstm_features,
+            cnn_features,
+            durations,
+            expanded_features,
+            shared_lstm_out,
+            f0,
+            n_amp,
+            waveform,
+        })
     }
 }
 

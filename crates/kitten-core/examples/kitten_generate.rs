@@ -18,6 +18,26 @@ use kitten_core::phoneme_map::map_phonemes_to_ids;
 use safetensors::SafeTensors;
 
 // ---------------------------------------------------------------------------
+// Debug tensor writer
+// ---------------------------------------------------------------------------
+
+/// Write tensor data as raw f32 LE bytes.
+/// Filename: `<dir>/<name>_<d0>x<d1>x...xdN.bin`
+fn write_debug_tensor(dir: &str, name: &str, tensor: &Tensor) -> anyhow::Result<()> {
+    use std::io::Write;
+    let shape = tensor.shape().dims();
+    let shape_str = shape.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("x");
+    let path = format!("{dir}/{name}_{shape_str}.bin");
+    let data = tensor.flatten_all()?.to_vec1::<f32>()?;
+    let mut f = std::fs::File::create(&path)?;
+    for v in &data {
+        f.write_all(&v.to_le_bytes())?;
+    }
+    eprintln!("  [debug] saved {path}  shape={shape:?}");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing (manual, no clap)
 // ---------------------------------------------------------------------------
 
@@ -28,6 +48,8 @@ struct Args {
     text: String,
     speed: f32,
     output_path: String,
+    /// If Some, save all intermediate tensors as .bin files to this directory.
+    debug_dir: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -38,18 +60,20 @@ fn parse_args() -> Args {
     let mut text = String::from("Hello, world.");
     let mut speed = 1.0f32;
     let mut output_path = String::from("/tmp/kitten_out.wav");
+    let mut debug_dir: Option<String> = None;
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--model" => { i += 1; model_path = args[i].clone(); }
-            "--voices" => { i += 1; voices_path = args[i].clone(); }
-            "--voice" => { i += 1; voice_name = args[i].clone(); }
-            "--text" => { i += 1; text = args[i].clone(); }
-            "--speed" => { i += 1; speed = args[i].parse().expect("speed must be f32"); }
-            "--output" => { i += 1; output_path = args[i].clone(); }
+            "--model"     => { i += 1; model_path  = args[i].clone(); }
+            "--voices"    => { i += 1; voices_path = args[i].clone(); }
+            "--voice"     => { i += 1; voice_name  = args[i].clone(); }
+            "--text"      => { i += 1; text        = args[i].clone(); }
+            "--speed"     => { i += 1; speed       = args[i].parse().expect("speed must be f32"); }
+            "--output"    => { i += 1; output_path = args[i].clone(); }
+            "--debug-dir" => { i += 1; debug_dir   = Some(args[i].clone()); }
             "--help" | "-h" => {
-                eprintln!("Usage: kitten_generate [--model PATH] [--voices PATH] [--voice NAME] [--text TEXT] [--speed FLOAT] [--output PATH]");
+                eprintln!("Usage: kitten_generate [--model PATH] [--voices PATH] [--voice NAME] [--text TEXT] [--speed FLOAT] [--output PATH] [--debug-dir DIR]");
                 std::process::exit(0);
             }
             other => {
@@ -60,7 +84,7 @@ fn parse_args() -> Args {
         i += 1;
     }
 
-    Args { model_path, voices_path, voice_name, text, speed, output_path }
+    Args { model_path, voices_path, voice_name, text, speed, output_path, debug_dir }
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +178,28 @@ fn main() -> anyhow::Result<()> {
 
     eprintln!("[5] Synthesizing (speed={:.2})...", args.speed);
     let t_gen = std::time::Instant::now();
+
+    // If --debug-dir is set, run debug_forward and save all intermediates.
+    if let Some(ref dir) = args.debug_dir {
+        eprintln!("  [debug] saving intermediates to: {dir}");
+        std::fs::create_dir_all(dir)
+            .map_err(|e| anyhow::anyhow!("cannot create debug dir {dir}: {e}"))?;
+
+        let dbg = model.debug_forward(&phoneme_ids, &style, args.speed)?;
+
+        write_debug_tensor(dir, "bert_output",    &dbg.bert_output)?;
+        write_debug_tensor(dir, "lstm_features",  &dbg.lstm_features)?;
+        write_debug_tensor(dir, "cnn_features",   &dbg.cnn_features)?;
+        write_debug_tensor(dir, "durations",      &dbg.durations.to_dtype(candle_core::DType::F32)?)?;
+        write_debug_tensor(dir, "expanded_features", &dbg.expanded_features)?;
+        write_debug_tensor(dir, "shared_lstm_out",&dbg.shared_lstm_out)?;
+        write_debug_tensor(dir, "f0",             &dbg.f0)?;
+        write_debug_tensor(dir, "n_amp",          &dbg.n_amp)?;
+        write_debug_tensor(dir, "waveform",       &dbg.waveform)?;
+
+        eprintln!("  [debug] done — run: python scripts/compare_pipeline.py --debug-dir {dir}");
+    }
+
     let samples = model.synthesize(&phoneme_ids, &style, args.speed)?;
     let gen_elapsed = t_gen.elapsed().as_secs_f32();
 
