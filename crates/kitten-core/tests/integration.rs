@@ -9,6 +9,7 @@ use kitten_core::config::KittenConfig;
 use kitten_core::decoder::Decoder;
 use kitten_core::kitten_model::KittenModel;
 use kitten_core::phoneme_map::map_phonemes_to_ids;
+use kitten_core::predictor::Predictor;
 use safetensors::SafeTensors;
 
 const MODEL_PATH: &str = "/Users/tc/Code/idle-intelligence/hf/kitten-tts-nano-0.8/kitten-nano.safetensors";
@@ -57,22 +58,65 @@ fn load_style(voice_name: &str, text_len: usize) -> anyhow::Result<Tensor> {
     Ok(t.i(idx)?.unsqueeze(0)?)
 }
 
-fn check_audio_basic(samples: &[f32], label: &str) {
-    assert!(!samples.is_empty(), "{label}: output is empty");
+fn check_audio_quality(samples: &[f32], label: &str) {
+    let n = samples.len();
+    assert!(n > 0, "{label}: output is empty");
 
+    // 1. No NaN or Inf
     let nan_count = samples.iter().filter(|x| x.is_nan()).count();
     let inf_count = samples.iter().filter(|x| x.is_infinite()).count();
     assert_eq!(nan_count, 0, "{label}: {nan_count} NaN values");
     assert_eq!(inf_count, 0, "{label}: {inf_count} Inf values");
 
+    // 2. All values in [-1, 1] (tanh clamped)
     let max_abs = samples.iter().copied().map(|x| x.abs()).fold(0f32, f32::max);
-    assert!(
-        max_abs <= 1.0 + 1e-5,
-        "{label}: max_abs={max_abs:.4} exceeds 1.0 (tanh clamp failed)"
-    );
+    assert!(max_abs <= 1.0 + 1e-5, "{label}: max_abs={max_abs:.4}");
 
-    let rms: f32 = (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt();
-    assert!(rms > 0.001, "{label}: RMS={rms:.6} too low (all zeros?)");
+    // 3. RMS level check — ONNX reference is ~0.10, speech should be 0.02-0.30
+    //    If RMS > 0.40, the output is way too loud (noise/saturation)
+    let rms: f32 = (samples.iter().map(|x| x * x).sum::<f32>() / n as f32).sqrt();
+    eprintln!("  [{label}] RMS={rms:.4}");
+    assert!(rms > 0.001, "{label}: RMS={rms:.6} too low (silence)");
+    assert!(rms < 0.40, "{label}: RMS={rms:.4} too high (>0.40, ONNX ref is ~0.10 — likely noise/saturation)");
+
+    // 4. Tanh saturation — count samples at ±0.999+
+    //    Speech should have very few; noise/broken output has many
+    let saturated = samples.iter().filter(|&&x| x.abs() > 0.999).count();
+    let sat_pct = saturated as f64 / n as f64 * 100.0;
+    eprintln!("  [{label}] saturated={saturated} ({sat_pct:.2}%)");
+    assert!(sat_pct < 1.0, "{label}: {sat_pct:.1}% samples saturated (>0.999) — pre-tanh values too large");
+
+    // 5. Peak amplitude should be reasonable — ONNX peak is ~0.5
+    //    If peak is > 0.95, pre-tanh values were large (bad)
+    assert!(max_abs < 0.95, "{label}: peak={max_abs:.4} too close to 1.0 (pre-tanh overflow)");
+
+    // 6. First 500 samples should be quiet (speech starts with silence/ramp)
+    if n > 500 {
+        let head_rms: f32 = (samples[..500].iter().map(|x| x * x).sum::<f32>() / 500.0).sqrt();
+        eprintln!("  [{label}] head_rms(0-500)={head_rms:.6}");
+        assert!(head_rms < 0.10, "{label}: head_rms={head_rms:.4} — first 500 samples too loud (no silence ramp)");
+    }
+
+    // 7. Dynamic range — speech has varying amplitude, noise is flat
+    //    Split into 10 chunks, check variance of per-chunk RMS
+    if n >= 1000 {
+        let chunk_size = n / 10;
+        let chunk_rms: Vec<f32> = (0..10)
+            .map(|i| {
+                let start = i * chunk_size;
+                let end = start + chunk_size;
+                (samples[start..end].iter().map(|x| x * x).sum::<f32>() / chunk_size as f32).sqrt()
+            })
+            .collect();
+        let mean_rms: f32 = chunk_rms.iter().sum::<f32>() / 10.0;
+        let rms_var: f32 = chunk_rms.iter().map(|x| (x - mean_rms).powi(2)).sum::<f32>() / 10.0;
+        let rms_std = rms_var.sqrt();
+        eprintln!("  [{label}] chunk_rms_std={rms_std:.4} (dynamic range indicator)");
+        // Speech has varying loudness; pure noise is flat
+        // Very low std (<0.001) means flat noise; very high (>0.3) means extreme variation
+    }
+
+    eprintln!("  [{label}] PASS — {n} samples, RMS={rms:.4}, peak={max_abs:.4}, sat={sat_pct:.1}%");
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +162,7 @@ fn test_synthesize_hello_world() {
         samples.len()
     );
 
-    check_audio_basic(&samples, "hello_world");
+    check_audio_quality(&samples, "hello_world");
     eprintln!("test_synthesize_hello_world: PASS");
 }
 
@@ -145,7 +189,7 @@ fn test_synthesize_fox() {
         samples.len()
     );
 
-    check_audio_basic(&samples, "fox");
+    check_audio_quality(&samples, "fox");
     eprintln!("test_synthesize_fox: PASS");
 }
 
@@ -161,7 +205,7 @@ fn test_all_voices() {
         let samples = model
             .synthesize(&phoneme_ids, &style, 1.0)
             .unwrap_or_else(|e| panic!("voice {voice}: synthesize failed: {e}"));
-        check_audio_basic(&samples, voice);
+        check_audio_quality(&samples, voice);
         eprintln!(
             "voice {voice}: {} samples ({:.2}s)",
             samples.len(),
@@ -517,5 +561,112 @@ fn test_decoder_with_onnx_inputs() -> anyhow::Result<()> {
     }
 
     eprintln!("\ntest_decoder_with_onnx_inputs: DONE");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Raw binary loader (flat f32, little-endian)
+// ---------------------------------------------------------------------------
+
+/// Load a flat binary file of f32 values (little-endian) and reshape to `shape`.
+fn load_bin_f32(path: &str, shape: &[usize]) -> anyhow::Result<Tensor> {
+    let bytes = std::fs::read(path)?;
+    let n: usize = shape.iter().product();
+    anyhow::ensure!(
+        bytes.len() == n * 4,
+        "load_bin_f32 {path}: expected {} bytes for shape {shape:?}, got {}",
+        n * 4,
+        bytes.len()
+    );
+    let floats: Vec<f32> = bytes
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect();
+    Ok(Tensor::from_vec(floats, shape, &Device::Cpu)?)
+}
+
+// ---------------------------------------------------------------------------
+// F0 predictor isolation test: inject ONNX shared-LSTM output, compare F0 output
+// ---------------------------------------------------------------------------
+
+#[test]
+#[ignore]
+fn test_f0_predictor_with_onnx_shared_lstm() -> anyhow::Result<()> {
+    use candle_core::DType;
+    use candle_nn::VarBuilder;
+
+    eprintln!("\n=== F0 PREDICTOR ISOLATION TEST ===");
+
+    // Load model weights (just need the predictor)
+    let cfg = KittenConfig::nano();
+    let data = std::fs::read(MODEL_PATH)?;
+    let vb = VarBuilder::from_buffered_safetensors(data, DType::F32, &Device::Cpu)?;
+    let predictor = Predictor::load(vb, &cfg)?;
+    eprintln!("Model loaded.");
+
+    // Load ONNX shared LSTM output: [1, 128, 51] f32 flat binary
+    let shared_lstm = load_bin_f32("/tmp/onnx_shared_lstm_1x128x51.bin", &[1, 128, 51])?;
+    eprintln!("shared_lstm shape: {:?}", shared_lstm.shape());
+
+    // Load ONNX style vector: [1, 256] f32 flat binary
+    let style = load_bin_f32("/tmp/onnx_style_1x256.bin", &[1, 256])?;
+    eprintln!("style shape: {:?}", style.shape());
+
+    // style[:, 128:] — what the predictor's AdaIN actually uses
+    let style_half = style.i((.., 128..))?;
+    eprintln!("style_half (128:) shape: {:?}", style_half.shape());
+
+    // Run ONLY the F0 + N predictor branches
+    let (f0, n_amp) = predictor.predict_f0_n(&shared_lstm, &style)?;
+    eprintln!("F0 output shape:   {:?}", f0.shape());
+    eprintln!("N_amp output shape: {:?}", n_amp.shape());
+
+    // F0 stats
+    let f0_flat = f0.flatten_all()?.to_vec1::<f32>()?;
+    let f0_min = f0_flat.iter().cloned().fold(f32::INFINITY, f32::min);
+    let f0_max = f0_flat.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let n_show = 10.min(f0_flat.len());
+    let f0_first10: Vec<f32> = f0_flat[..n_show].to_vec();
+
+    eprintln!("\n--- F0 branch output (BEFORE F0_conv stride=2 downsample) ---");
+    eprintln!("  shape:  {:?}", f0.shape());
+    eprintln!("  range:  [{f0_min:.4}, {f0_max:.4}]");
+    eprintln!("  first{n_show}: {f0_first10:.4?}");
+
+    // N_amp stats
+    let n_flat = n_amp.flatten_all()?.to_vec1::<f32>()?;
+    let n_min = n_flat.iter().cloned().fold(f32::INFINITY, f32::min);
+    let n_max = n_flat.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let n_first10: Vec<f32> = n_flat[..10.min(n_flat.len())].to_vec();
+
+    eprintln!("\n--- N branch output (BEFORE N_conv stride=2 downsample) ---");
+    eprintln!("  shape:  {:?}", n_amp.shape());
+    eprintln!("  range:  [{n_min:.4}, {n_max:.4}]");
+    eprintln!("  first10: {n_first10:.4?}");
+
+    // ONNX F0_down (AFTER F0_conv stride=2) reference for comparison.
+    // The Rust output is at T=102 (2×51); ONNX F0_down is at T=51 (after stride-2 conv).
+    // We compare Rust values at even indices [0,2,4,...] against ONNX F0_down values,
+    // which is an approximation since stride-2 conv != simple subsampling.
+    let onnx_f0_down_first10: [f32; 10] =
+        [0.52, 0.62, 0.72, 0.75, 0.74, 0.68, 0.65, 0.62, 0.59, 0.55];
+    let onnx_f0_range: (f32, f32) = (-39.2, 0.75);
+
+    eprintln!("\n--- ONNX F0_down reference (AFTER stride-2 conv, for scale comparison) ---");
+    eprintln!("  range:  [{:.2}, {:.2}]", onnx_f0_range.0, onnx_f0_range.1);
+    eprintln!("  first10: {onnx_f0_down_first10:.4?}");
+
+    eprintln!("\n--- Interpretation ---");
+    eprintln!("  Rust F0 is pre-F0_conv (shape T={}), ONNX F0_down is post (T=51).", f0_flat.len());
+    eprintln!("  If Rust range matches ONNX range magnitude → F0 branch is likely correct.");
+    eprintln!("  If Rust range is wildly different → F0 predictor bug.");
+
+    // Sanity: output must be finite
+    let nan_count = f0_flat.iter().filter(|x| x.is_nan()).count();
+    let inf_count = f0_flat.iter().filter(|x| x.is_infinite()).count();
+    assert_eq!(nan_count, 0, "F0 output contains {nan_count} NaN values");
+    assert_eq!(inf_count, 0, "F0 output contains {inf_count} Inf values");
+
+    eprintln!("\ntest_f0_predictor_with_onnx_shared_lstm: DONE");
     Ok(())
 }
