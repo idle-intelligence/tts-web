@@ -9,6 +9,7 @@ export class TtsClient {
         this.onGenStart = options.onGenStart || (() => {});
         this.onVoiceLoaded = options.onVoiceLoaded || (() => {});
         this.onProgress = options.onProgress || (() => {});
+        this.onPhonemized = options.onPhonemized || (() => {});
 
         this.baseUrl = (options.baseUrl || '').replace(/\/+$/, '');
         this.wasmBaseUrl = options.wasmBaseUrl || null;
@@ -87,10 +88,11 @@ export class TtsClient {
         } else if (this.modelType === 'kitten') {
             this.worker.postMessage({
                 type: 'generate',
-                ipa: options.ipa || text,
+                ipa: options.ipa || '',
                 voiceIdx: options.voiceIdx || 0,
                 speed: options.speed || 1.0,
                 textLen: options.textLen || text.length,
+                text,
             });
         } else {
             this.worker.postMessage({ type: 'generate', text, temperature });
@@ -147,6 +149,9 @@ export class TtsClient {
                 break;
             case 'done':
                 this.onDone(data.totalSteps);
+                break;
+            case 'phonemized':
+                this.onPhonemized(data.ipa);
                 break;
             case 'error':
                 this.onError(new Error(data.message || data.error));

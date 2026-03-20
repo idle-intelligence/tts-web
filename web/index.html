@@ -534,19 +534,16 @@
         function triggerKittenGenerate(isDemo) {
             if (generating) return;
             const text = textInput.value.trim() || DEMO_TEXT;
-            const ipa = lookupIPA(text);
-            if (!ipa) {
-                stepInfo.textContent = 'IPA not available for this text — use a preset phrase';
-                return;
-            }
+            const ipa = lookupIPA(text) || '';
             isDemoGen = isDemo;
             generating = true;
             generateBtn.disabled = true;
             allChunks = [];
             genStartTime = performance.now();
             audioSection.style.display = 'none';
-            stepInfo.textContent = 'Synthesizing...';
-            updateStatus('generating', 'Synthesizing...');
+            ipaDisplay.style.display = 'none';
+            stepInfo.textContent = ipa ? 'Synthesizing...' : 'Phonemizing...';
+            updateStatus('generating', ipa ? 'Synthesizing...' : 'Phonemizing...');
             const prior = KITTEN_SPEED_PRIORS[KITTEN_VOICES[kittenVoiceIdx]] || 0.8;
             const effectiveSpeed = parseFloat(speedSlider.value) * prior;
             tts.generate(text, 1.0, {
@@ -883,6 +880,10 @@
                     tadaProgress.textContent = '';
                     console.error(err);
                 },
+                onPhonemized: (ipa) => {
+                    ipaDisplay.textContent = 'IPA: ' + ipa;
+                    ipaDisplay.style.display = '';
+                },
                 onChunk: (data, step) => {
                     const chunk = data instanceof Float32Array ? data : new Float32Array(data);
                     allChunks.push(chunk);
@@ -1057,19 +1058,16 @@
             if (!text || generating) return;
             if (currentModel === 'pocket-tts' && !activeVoice) return;
             if (currentModel === 'kitten') {
-                const ipa = lookupIPA(text);
-                if (!ipa) {
-                    stepInfo.textContent = 'IPA not available for this text — use a preset phrase';
-                    return;
-                }
+                const ipa = lookupIPA(text) || '';
                 isDemoGen = false;
                 generating = true;
                 generateBtn.disabled = true;
                 allChunks = [];
                 genStartTime = performance.now();
                 audioSection.style.display = 'none';
-                stepInfo.textContent = 'Synthesizing...';
-                updateStatus('generating', 'Synthesizing...');
+                ipaDisplay.style.display = 'none';
+                stepInfo.textContent = ipa ? 'Synthesizing...' : 'Phonemizing...';
+                updateStatus('generating', ipa ? 'Synthesizing...' : 'Phonemizing...');
                 const prior = KITTEN_SPEED_PRIORS[KITTEN_VOICES[kittenVoiceIdx]] || 0.8;
                 const effectiveSpeed = parseFloat(speedSlider.value) * prior;
                 tts.generate(text, 1.0, {

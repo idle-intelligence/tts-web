@@ -4,6 +4,17 @@ const CACHE_NAME = 'kitten-model-v1';
 
 let wasm = null;
 let engine = null;
+let phonemizeFn = null;
+
+async function initPhonemizer() {
+    try {
+        const mod = await import('https://esm.sh/phonemizer@1.2.1');
+        phonemizeFn = mod.phonemize;
+        console.log('[kitten-worker] phonemizer ready');
+    } catch (e) {
+        console.warn('[kitten-worker] phonemizer not available:', e);
+    }
+}
 
 async function cachedFetch(url, label) {
     const cache = await caches.open(CACHE_NAME);
@@ -67,19 +78,38 @@ async function handleLoad(modelUrl, voicesUrl, wasmBaseUrl) {
         const voiceNames = engine.getVoiceNames();
         postMessage({ type: 'status', text: 'Ready', ready: true });
         postMessage({ type: 'loaded', sampleRate: 24000, voiceNames });
+        // Init phonemizer in background — non-blocking
+        initPhonemizer();
     } catch (e) {
         console.error('[kitten-worker] load error:', e);
         postMessage({ type: 'error', error: e.message || String(e) });
     }
 }
 
-async function handleGenerate(ipa, voiceIdx, speed, textLen) {
+async function handleGenerate(ipa, voiceIdx, speed, textLen, text) {
     if (!engine) {
         postMessage({ type: 'error', error: 'Model not loaded' });
         return;
     }
     if (!engine.isReady()) {
         postMessage({ type: 'error', error: 'Model not ready' });
+        return;
+    }
+
+    // Phonemize if no IPA provided but text is available
+    if (!ipa && text) {
+        if (!phonemizeFn) {
+            postMessage({ type: 'error', error: 'No IPA available and phonemizer not loaded yet — try again in a moment' });
+            return;
+        }
+        postMessage({ type: 'status', text: 'Phonemizing...', ready: true });
+        const result = await phonemizeFn(text, 'en-us');
+        ipa = result[0];
+        postMessage({ type: 'phonemized', ipa });
+    }
+
+    if (!ipa) {
+        postMessage({ type: 'error', error: 'No IPA available' });
         return;
     }
 
@@ -105,7 +135,7 @@ self.onmessage = async (e) => {
             await handleLoad(msg.modelUrl, msg.voicesUrl, msg.wasmBaseUrl);
             break;
         case 'generate':
-            await handleGenerate(msg.ipa, msg.voiceIdx, msg.speed, msg.textLen);
+            await handleGenerate(msg.ipa, msg.voiceIdx, msg.speed, msg.textLen, msg.text);
             break;
     }
 };
