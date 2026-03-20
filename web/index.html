@@ -417,31 +417,6 @@
         };
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
 
-        // ---- IPA lookup table ----
-        const KITTEN_IPA_TABLE = {
-            'Hello, this is a test of the text-to-speech system.': 'həlˈəʊ ðɪs ɪz ɐ tˈɛst ɒvðə tˈɛksttəspˈiːtʃ sˈɪstəm',
-            'Tyger Tyger, burning bright, In the forests of the night.': 'tˈaɪɡə tˈaɪɡə bˈɜːnɪŋ bɹˈaɪt ɪnðə fˈɒɹɪsts ɒvðə nˈaɪt',
-            'Time is money, who can afford to pay attention?': 'tˈaɪm ɪz mˈʌni hˌuː kan ɐfˈɔːd tə pˈeɪ ɐtˈɛnʃən',
-            'There is a pleasure in the pathless woods, There is a rapture on the lonely shore': 'ðeəɹ ɪz ɐ plˈɛʒəɹ ɪnðə pˈaθləs wˈʊdz ðeəɹ ɪz ɐ ɹˈaptʃəɹ ɒnðə lˈəʊnli ʃˈɔː',
-            'Your smile is like a breath of spring, Your voice is soft like summer rain.': 'jɔː smˈaɪl ɪz lˈaɪk ɐ bɹˈɛθ ɒv spɹˈɪŋ jɔː vˈɔɪs ɪz sˈɒft lˈaɪk sˈʌmə ɹˈeɪn',
-            "Do you think your Wu-Tang sword can defeat me? En garde, I'll let you try my Wu-Tang style.": 'dˈuː juː θˈɪŋk jɔː wˈuːtˈaŋ sˈɔːd kan dɪfˈiːt mˌiː ˈɛn ɡˈɑːd aɪl lˈɛt juː tɹˈaɪ maɪ wˈuːtˈaŋ stˈaɪl',
-            "There's no one around and your phone is dead. Out of the corner of your eye, you spot him...": 'ðeəz nˈəʊwˈɒn ɐɹˈaʊnd and jɔː fˈəʊn ɪz dˈɛd ˌaʊtəv ðə kˈɔːnəɹ ɒv jɔːɹ ˈaɪ juː spˈɒt hˌɪm',
-            "I'll tell you one thing about the universe, though. The universe is a pretty big place.": 'aɪl tˈɛl juː wˈɒn θˈɪŋ ɐbˌaʊt ðə jˈuːnɪvˌɜːs ðˈəʊ ðə jˈuːnɪvˌɜːs ɪz ɐ pɹˈɪti bˈɪɡ plˈeɪs',
-            "Just a little longer. And then, cat, we'll be their cats.": 'dʒˈʌst ɐ lˈɪtəl lˈɒŋɡə and ðˈɛn kˈat wiːl biː ðeə kˈats',
-            'Hello world': 'həlˈəʊ wˈɜːld',
-            'The quick brown fox jumps over the lazy dog.': 'ðə kwˈɪk bɹˈaʊn fˈɒks dʒˈʌmps ˌəʊvə ðə lˈeɪzi dˈɒɡ',
-            'Good morning, how are you?': 'ɡˈʊd mˈɔːnɪŋ hˌaʊ ɑːɹ jˈuː',
-        };
-
-        function lookupIPA(text) {
-            if (KITTEN_IPA_TABLE[text]) return KITTEN_IPA_TABLE[text];
-            const lower = text.toLowerCase();
-            for (const [k, v] of Object.entries(KITTEN_IPA_TABLE)) {
-                if (k.toLowerCase() === lower) return v;
-            }
-            return null;
-        }
-
         let allChunks = [];
         let generating = false;
         let tts = null;
@@ -535,8 +510,8 @@
         function triggerKittenGenerate(isDemo) {
             if (generating) return;
             const text = textInput.value.trim() || DEMO_TEXT;
-            const ipa = lookupIPA(text) || '';
-            lastIpa = ipa || null; // set from lookup; onPhonemized will override if worker phonemizes
+            const ipa = '';
+            lastIpa = null; // onPhonemized will set this when worker returns IPA
             isDemoGen = isDemo;
             generating = true;
             generateBtn.disabled = true;
@@ -1060,7 +1035,7 @@
             if (!text || generating) return;
             if (currentModel === 'pocket-tts' && !activeVoice) return;
             if (currentModel === 'kitten') {
-                const ipa = lookupIPA(text) || '';
+                const ipa = '';
                 isDemoGen = false;
                 generating = true;
                 generateBtn.disabled = true;
