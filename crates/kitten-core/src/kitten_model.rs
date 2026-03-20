@@ -66,36 +66,25 @@ impl KittenModel {
         let seq_len = ids_u32.len();
         let input_ids = Tensor::from_vec(ids_u32, (1, seq_len), device)?;
 
-        let t0 = std::time::Instant::now();
-
         // 2. BERT → [1, seq, 128]
         let bert_out = self.bert.forward(&input_ids)?;
-        let t1 = std::time::Instant::now();
 
         // 3. Text encoder → (lstm_features [1, seq, 256], cnn_features [1, 128, seq])
         let (lstm_features, cnn_features) = self.text_encoder.forward(&bert_out, &input_ids, style)?;
-        let t2 = std::time::Instant::now();
 
         // 4. Predictor → (durations, expanded_features, shared_lstm_out, f0, n_amp)
-        let (durations, _expanded_features, shared_lstm_out, f0, n_amp) =
+        let (durations, _expanded_features, _shared_lstm_out, f0, n_amp) =
             self.predictor.forward(&lstm_features, style, speed)?;
-        let t3 = std::time::Instant::now();
 
         // 5. Duration-expand cnn_features [1, 128, seq] → [1, 128, T]
         let expanded_cnn = expand_cnn_features(&cnn_features, &durations)?;
-        let t4 = std::time::Instant::now();
 
         // 6. Decoder → waveform [1, 1, num_samples]
-        // ONNX uses expanded CNN features for BOTH:
-        //   - encode block 128ch input (arg1)
-        //   - asr_res conv1x1(128→64) for decode blocks (arg2)
-        // shared_lstm_out is used only by the F0/N predictor, not the decoder.
         let waveform = self.decoder.forward(&expanded_cnn, &expanded_cnn, &f0, &n_amp, style)?;
-        let t5 = std::time::Instant::now();
 
         // 7. Tanh clamp (ONNX model applies tanh as final step) + trim last 5000 samples
         let waveform = waveform.tanh()?;
-        let samples = waveform.i((0, 0, ..))?; // [num_samples]
+        let samples = waveform.i((0, 0, ..))?;
         let n = samples.dim(0)?;
         let trim = n.saturating_sub(5000);
         let samples = if trim > 0 {
@@ -103,21 +92,8 @@ impl KittenModel {
         } else {
             samples
         };
-        let result = samples.to_vec1::<f32>()?;
-        let t6 = std::time::Instant::now();
 
-        eprintln!(
-            "[PERF] bert={:.0}ms text_enc={:.0}ms predictor={:.0}ms expand={:.0}ms decoder={:.0}ms post={:.0}ms total={:.0}ms",
-            t1.duration_since(t0).as_millis(),
-            t2.duration_since(t1).as_millis(),
-            t3.duration_since(t2).as_millis(),
-            t4.duration_since(t3).as_millis(),
-            t5.duration_since(t4).as_millis(),
-            t6.duration_since(t5).as_millis(),
-            t6.duration_since(t0).as_millis(),
-        );
-
-        Ok(result)
+        Ok(samples.to_vec1::<f32>()?)
     }
 
     pub fn sample_rate(&self) -> usize {
