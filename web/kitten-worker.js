@@ -104,7 +104,7 @@ async function handleGenerate(ipa, voiceIdx, speed, textLen, text) {
         }
         postMessage({ type: 'status', text: 'Phonemizing...', ready: true });
         const result = await phonemizeFn(text, 'en-us');
-        ipa = result[0];
+        ipa = Array.isArray(result) ? result.join(' ') : result;
         postMessage({ type: 'phonemized', ipa });
     }
 

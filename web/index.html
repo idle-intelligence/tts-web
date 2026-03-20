@@ -450,6 +450,7 @@
         let isDemoGen = false;
         let currentModel = 'pocket-tts';
         let kittenVoiceIdx = 0;
+        let lastIpa = null;
         let kittenVoiceNames = KITTEN_VOICES;
         let kittenReady = false;
 
@@ -535,6 +536,7 @@
             if (generating) return;
             const text = textInput.value.trim() || DEMO_TEXT;
             const ipa = lookupIPA(text) || '';
+            lastIpa = ipa || null; // set from lookup; onPhonemized will override if worker phonemizes
             isDemoGen = isDemo;
             generating = true;
             generateBtn.disabled = true;
@@ -881,14 +883,14 @@
                     console.error(err);
                 },
                 onPhonemized: (ipa) => {
-                    ipaDisplay.textContent = 'IPA: ' + ipa;
-                    ipaDisplay.style.display = '';
+                    lastIpa = ipa;
                 },
                 onChunk: (data, step) => {
                     const chunk = data instanceof Float32Array ? data : new Float32Array(data);
                     allChunks.push(chunk);
                 },
-                onDone: (totalSteps, usedIpa) => {
+                onDone: (totalSteps) => {
+                    const usedIpa = lastIpa;
                     const totalTime = (performance.now() - genStartTime) / 1000;
                     generating = false;
                     generateBtn.disabled = false;
