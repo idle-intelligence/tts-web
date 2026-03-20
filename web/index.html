@@ -399,9 +399,14 @@
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
 
         const TADA_VOICES = [
-            { name: 'ljspeech', label: 'LJSpeech', file: 'ljspeech_long' },
+            { name: 'default', label: 'Default', file: 'default' },
+            { name: 'happy', label: 'Happy \u{1F60A}', file: 'happy' },
+            { name: 'sad', label: 'Sad \u{1F622}', file: 'sad' },
+            { name: 'whisper', label: 'Whisper \u{1F92B}', file: 'whisper' },
+            { name: 'confused', label: 'Confused \u{1F914}', file: 'confused' },
+            { name: 'laughing', label: 'Laughing \u{1F602}', file: 'laughing' },
+            { name: 'enunciated', label: 'Enunciated \u{1F399}', file: 'enunciated' },
             { name: 'amazement', label: 'Amazement \u{1F632}', file: 'amazement' },
-            { name: 'amusement', label: 'Amusement \u{1F604}', file: 'amusement' },
             { name: 'rickie', label: 'Rickie \u{1F4AC}', file: 'rickie' },
         ];
         const TADA_PHRASES = [
@@ -760,9 +765,9 @@
                         setTadaVoiceBtnsEnabled(true);
                         // Mark the default voice as active on first ready + auto-generate demo
                         if (!activeTadaVoice) {
-                            activeTadaVoice = 'ljspeech';
+                            activeTadaVoice = 'default';
                             tadaVoiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
-                                if (btn.dataset.voice === 'ljspeech') btn.classList.add('active');
+                                if (btn.dataset.voice === 'default') btn.classList.add('active');
                             });
                             // Populate first demo phrase
                             textInput.value = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];

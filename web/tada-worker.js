@@ -84,12 +84,12 @@ async function handleLoad(baseUrl, wasmBaseUrl) {
         postMessage({type: 'status', text: 'Reticulating splines...', ready: false});
         await engine.warmup();
 
-        // Load default voice prompt (ljspeech_long: 32 acoustic tokens)
+        // Load default voice prompt
         postMessage({type: 'status', text: 'Loading voice prompt...', ready: false});
         try {
             const [voiceStBytes, voiceJsonResp] = await Promise.all([
-                fetch(baseUrl + '/voices/ljspeech_long.safetensors').then(r => r.arrayBuffer()),
-                fetch(baseUrl + '/voices/ljspeech_long.json').then(r => r.json()),
+                fetch(baseUrl + '/voices/default.safetensors').then(r => r.arrayBuffer()),
+                fetch(baseUrl + '/voices/default.json').then(r => r.json()),
             ]);
             voiceBytes = new Uint8Array(voiceStBytes);
             voiceText = voiceJsonResp.text;
