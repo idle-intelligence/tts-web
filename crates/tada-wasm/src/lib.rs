@@ -812,16 +812,17 @@ pub mod web {
                     [1, 1, hidden_size],
                     &device,
                 );
-                // Run one VV forward (2 ODE steps) to compile all Q8 matmul pipelines
+                // Run full VV forward with CFG to compile ALL Q8 shader variants
+                let mut rng = crate::WasmRng::new();
                 let result = model::vibevoice::solve_flow_matching_burn(
                     burn_vv,
-                    dummy_hidden,
-                    0.9,  // noise_temp
-                    2,    // just 2 ODE steps for warmup (compiles same shaders as 10)
-                    1.0,  // no CFG
-                    &mut crate::WasmRng::new(),
+                    dummy_hidden.clone(),
+                    0.9,
+                    10,   // full 10 ODE steps
+                    1.6,  // with CFG (runs VV twice — compiles both paths)
+                    &mut rng,
                 ).await;
-                let _ = result; // ignore result, just wanted shader compilation
+                let _ = result;
             }
 
             wasm_log("[tada] GPU warmup complete");
