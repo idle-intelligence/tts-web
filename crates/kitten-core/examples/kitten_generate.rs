@@ -46,9 +46,9 @@ struct Args {
     voices_path: String,
     voice_name: String,
     text: String,
+    ipa: Option<String>,
     speed: f32,
     output_path: String,
-    /// If Some, save all intermediate tensors as .bin files to this directory.
     debug_dir: Option<String>,
 }
 
@@ -61,10 +61,12 @@ fn parse_args() -> Args {
     let mut speed = 1.0f32;
     let mut output_path = String::from("/tmp/kitten_out.wav");
     let mut debug_dir: Option<String> = None;
+    let mut ipa: Option<String> = None;
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--ipa" => { i += 1; ipa = Some(args[i].clone()); }
             "--model"     => { i += 1; model_path  = args[i].clone(); }
             "--voices"    => { i += 1; voices_path = args[i].clone(); }
             "--voice"     => { i += 1; voice_name  = args[i].clone(); }
@@ -84,7 +86,7 @@ fn parse_args() -> Args {
         i += 1;
     }
 
-    Args { model_path, voices_path, voice_name, text, speed, output_path, debug_dir }
+    Args { model_path, voices_path, voice_name, text, ipa, speed, output_path, debug_dir }
 }
 
 // ---------------------------------------------------------------------------
@@ -151,10 +153,27 @@ fn phonemize(text: &str) -> anyhow::Result<String> {
 fn main() -> anyhow::Result<()> {
     let args = parse_args();
 
-    eprintln!("[1] Phonemizing: {:?}", args.text);
     let t0 = std::time::Instant::now();
-    let ipa = phonemize(&args.text)?;
-    eprintln!("  IPA: {:?}", ipa.trim());
+    eprintln!("[1] Phonemizing: {:?}", args.text);
+    let ipa = if let Some(ref ipa) = args.ipa {
+        eprintln!("  IPA (from --ipa): {:?}", ipa);
+        ipa.clone()
+    } else {
+        match phonemize(&args.text) {
+            Ok(ipa) => {
+                eprintln!("  IPA: {:?}", ipa.trim());
+                ipa
+            }
+            Err(e) => {
+                eprintln!("Error: {e}");
+                eprintln!();
+                eprintln!("espeak-ng is needed for text-to-IPA conversion.");
+                eprintln!("Either install it (brew install espeak-ng) or pass IPA directly:");
+                eprintln!("  --ipa \"həlˈəʊ wˈɜːld\"");
+                std::process::exit(1);
+            }
+        }
+    };
     let phoneme_ids = map_phonemes_to_ids(&ipa);
     eprintln!("  IDs ({} tokens): {:?}", phoneme_ids.len(), &phoneme_ids[..phoneme_ids.len().min(20)]);
 
