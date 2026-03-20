@@ -176,7 +176,12 @@ fn main() -> anyhow::Result<()> {
     let style = load_style(&voices_data, &args.voice_name, args.text.len(), &device)?;
     eprintln!("  style shape: {:?}", style.shape());
 
-    eprintln!("[5] Synthesizing (speed={:.2})...", args.speed);
+    let speed_prior = match args.voice_name.as_str() {
+        "hugo" => 0.9,
+        _ => 0.8,
+    };
+    let effective_speed = args.speed * speed_prior;
+    eprintln!("[5] Synthesizing (speed={:.2}, prior={:.2}, effective={:.2})...", args.speed, speed_prior, effective_speed);
     let t_gen = std::time::Instant::now();
 
     // If --debug-dir is set, run debug_forward and save all intermediates.
@@ -185,7 +190,7 @@ fn main() -> anyhow::Result<()> {
         std::fs::create_dir_all(dir)
             .map_err(|e| anyhow::anyhow!("cannot create debug dir {dir}: {e}"))?;
 
-        let dbg = model.debug_forward(&phoneme_ids, &style, args.speed)?;
+        let dbg = model.debug_forward(&phoneme_ids, &style, effective_speed)?;
 
         write_debug_tensor(dir, "bert_output",    &dbg.bert_output)?;
         write_debug_tensor(dir, "lstm_features",  &dbg.lstm_features)?;
@@ -200,7 +205,7 @@ fn main() -> anyhow::Result<()> {
         eprintln!("  [debug] done — run: python scripts/compare_pipeline.py --debug-dir {dir}");
     }
 
-    let samples = model.synthesize(&phoneme_ids, &style, args.speed)?;
+    let samples = model.synthesize(&phoneme_ids, &style, effective_speed)?;
     let gen_elapsed = t_gen.elapsed().as_secs_f32();
 
     let sample_rate = model.sample_rate() as u32;

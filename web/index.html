@@ -411,6 +411,10 @@
 
         const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
         const KITTEN_VOICES = ['bella', 'jasper', 'luna', 'bruno', 'rosie', 'hugo', 'kiki', 'leo'];
+        const KITTEN_SPEED_PRIORS = {
+            bella: 0.8, jasper: 0.8, luna: 0.8, bruno: 0.8,
+            rosie: 0.8, hugo: 0.9, kiki: 0.8, leo: 0.8,
+        };
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
 
         // ---- IPA lookup table ----
@@ -543,10 +547,12 @@
             audioSection.style.display = 'none';
             stepInfo.textContent = 'Synthesizing...';
             updateStatus('generating', 'Synthesizing...');
+            const prior = KITTEN_SPEED_PRIORS[KITTEN_VOICES[kittenVoiceIdx]] || 0.8;
+            const effectiveSpeed = parseFloat(speedSlider.value) * prior;
             tts.generate(text, 1.0, {
                 ipa,
                 voiceIdx: kittenVoiceIdx,
-                speed: parseFloat(speedSlider.value),
+                speed: effectiveSpeed,
                 textLen: text.length,
             });
         }
@@ -1064,10 +1070,12 @@
                 audioSection.style.display = 'none';
                 stepInfo.textContent = 'Synthesizing...';
                 updateStatus('generating', 'Synthesizing...');
+                const prior = KITTEN_SPEED_PRIORS[KITTEN_VOICES[kittenVoiceIdx]] || 0.8;
+                const effectiveSpeed = parseFloat(speedSlider.value) * prior;
                 tts.generate(text, 1.0, {
                     ipa,
                     voiceIdx: kittenVoiceIdx,
-                    speed: parseFloat(speedSlider.value),
+                    speed: effectiveSpeed,
                     textLen: text.length,
                 });
                 return;
