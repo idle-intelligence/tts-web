@@ -1,11 +1,17 @@
 /// Kitten TTS generation example.
 ///
 /// Usage:
+///   # With embedded espeak (no system dependency):
+///   cargo run --example kitten_generate -p kitten-core --release --features espeak -- \
+///     [--text "Hello world"]
+///
+///   # Without espeak feature (needs espeak-ng installed or --ipa flag):
 ///   cargo run --example kitten_generate -p kitten-core --release -- \
 ///     [--model /path/to/kitten-nano.safetensors] \
 ///     [--voices /path/to/kitten-voices.safetensors] \
 ///     [--voice jasper] \
 ///     [--text "Hello world"] \
+///     [--ipa "həlˈəʊ wˈɜːld"] \
 ///     [--speed 1.0] \
 ///     [--output /tmp/kitten_out.wav]
 ///
@@ -129,14 +135,34 @@ fn write_wav(path: &str, samples: &[f32], sample_rate: u32) -> std::io::Result<(
 }
 
 // ---------------------------------------------------------------------------
-// Phonemize via espeak-ng subprocess
+// Phonemize via espeak-ng (crate or subprocess)
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "espeak")]
+fn phonemize(text: &str) -> anyhow::Result<String> {
+    use std::sync::OnceLock;
+    static DATA_DIR: OnceLock<std::path::PathBuf> = OnceLock::new();
+    let dir = DATA_DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join("kitten-espeak-data");
+        std::fs::create_dir_all(&dir).ok();
+        espeak_ng::install_bundled_language(&dir, "en").ok();
+        dir
+    });
+    let translator = espeak_ng::translate::Translator::new("en", Some(dir.as_path()))
+        .map_err(|e| anyhow::anyhow!("espeak-ng init failed: {e}"))?;
+    translator.text_to_ipa(text)
+        .map_err(|e| anyhow::anyhow!("espeak-ng phonemize failed: {e}"))
+}
+
+#[cfg(not(feature = "espeak"))]
 fn phonemize(text: &str) -> anyhow::Result<String> {
     let output = std::process::Command::new("espeak-ng")
         .args(["--ipa", "-q", text])
         .output()
-        .map_err(|e| anyhow::anyhow!("failed to run espeak-ng: {e}. Is it installed?"))?;
+        .map_err(|e| anyhow::anyhow!(
+            "espeak-ng not found: {e}\nInstall it (brew install espeak-ng) or use --ipa flag, \
+             or build with --features espeak"
+        ))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -168,8 +194,10 @@ fn main() -> anyhow::Result<()> {
                 eprintln!("Error: {e}");
                 eprintln!();
                 eprintln!("espeak-ng is needed for text-to-IPA conversion.");
-                eprintln!("Either install it (brew install espeak-ng) or pass IPA directly:");
-                eprintln!("  --ipa \"həlˈəʊ wˈɜːld\"");
+                eprintln!("Options:");
+                eprintln!("  1. Build with embedded espeak: --features espeak");
+                eprintln!("  2. Install system espeak-ng: brew install espeak-ng");
+                eprintln!("  3. Pass IPA directly: --ipa \"həlˈəʊ wˈɜːld\"");
                 std::process::exit(1);
             }
         }
