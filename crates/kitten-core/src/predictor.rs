@@ -169,6 +169,18 @@ impl AdaIn {
         Ok(Self { fc, norm_weight, norm_bias })
     }
 
+    // Load fc from vb, but reuse the given InstanceNorm weights (shared affine params).
+    fn load_with_shared_norm(
+        vb: VarBuilder,
+        style_in: usize,
+        channels: usize,
+        shared_norm_weight: Option<Tensor>,
+        shared_norm_bias: Option<Tensor>,
+    ) -> Result<Self> {
+        let fc = linear(style_in, channels * 2, vb.pp("fc"))?;
+        Ok(Self { fc, norm_weight: shared_norm_weight, norm_bias: shared_norm_bias })
+    }
+
     // x: [batch, channels, T], style: [batch, style_in] → [batch, channels, T]
     fn forward(&self, x: &Tensor, style: &Tensor) -> Result<Tensor> {
         // instance norm (per-channel, over time)
@@ -206,10 +218,20 @@ struct Block0 {
 impl Block0 {
     fn load(vb: VarBuilder, style_half: usize, ch: usize) -> Result<Self> {
         let cfg = Conv1dConfig { padding: 1, ..Default::default() };
+        let norm1 = AdaIn::load(vb.pp("norm1"), style_half, ch)?;
+        // norm2 reuses norm1's InstanceNorm affine weights (verified from ONNX graph:
+        // /F0.0/norm2/norm/InstanceNormalization uses norm1.norm.weight/bias)
+        let norm2 = AdaIn::load_with_shared_norm(
+            vb.pp("norm2"),
+            style_half,
+            ch,
+            norm1.norm_weight.clone(),
+            norm1.norm_bias.clone(),
+        )?;
         Ok(Self {
-            norm1: AdaIn::load(vb.pp("norm1"), style_half, ch)?,
+            norm1,
             conv1: conv1d(ch, ch, 3, cfg, vb.pp("conv1"))?,
-            norm2: AdaIn::load(vb.pp("norm2"), style_half, ch)?,
+            norm2,
             conv2: conv1d(ch, ch, 3, cfg, vb.pp("conv2"))?,
         })
     }
