@@ -360,9 +360,10 @@
         <h2>input <span class="sub">· text</span></h2>
         <p class="info">Text stays on this device.</p>
         <textarea id="textInput" placeholder="Hello, this is a test of the text-to-speech system."></textarea>
+        <div id="kittenPhrases" style="display:none; margin-bottom:12px; display:none; flex-wrap:wrap; gap:6px"></div>
         <div class="controls">
             <button id="generateBtn" class="primary" disabled>Generate</button>
-            <div class="slider-group">
+            <div class="slider-group" id="tempSliderGroup">
                 <label for="tempSlider">Temperature</label>
                 <input type="range" id="tempSlider" min="0.1" max="1.5" step="0.05" value="0.7">
                 <span id="tempValue">0.7</span>
@@ -370,13 +371,6 @@
         </div>
         <div id="stepInfo"></div>
         <div id="tadaProgress"></div>
-    </section>
-
-    <section id="ipaSection" style="display:none">
-        <h2>input <span class="sub">· IPA phonemes</span></h2>
-        <p class="info">KittenTTS uses IPA phonemes. Paste IPA below (espeak integration coming soon).</p>
-        <textarea id="ipaInput" placeholder="hɛloʊ ðɪs ɪz ə tɛst" style="min-height:60px"></textarea>
-        <div id="ipaExamples" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px"></div>
     </section>
 
     <section id="audioSection">
@@ -402,6 +396,7 @@
         const textInput = document.getElementById('textInput');
         const tempSlider = document.getElementById('tempSlider');
         const tempValue = document.getElementById('tempValue');
+        const tempSliderGroup = document.getElementById('tempSliderGroup');
         const stepInfo = document.getElementById('stepInfo');
         const tadaProgress = document.getElementById('tadaProgress');
         const audioSection = document.getElementById('audioSection');
@@ -409,16 +404,39 @@
         const voiceSection = document.getElementById('voiceSection');
         const kittenVoiceSection = document.getElementById('kittenVoiceSection');
         const kittenVoiceGrid = document.getElementById('kittenVoiceGrid');
-        const ipaSection = document.getElementById('ipaSection');
-        const ipaInput = document.getElementById('ipaInput');
         const speedSlider = document.getElementById('speedSlider');
         const speedValue = document.getElementById('speedValue');
         const ipaDisplay = document.getElementById('ipaDisplay');
-        const ipaExamples = document.getElementById('ipaExamples');
+        const kittenPhrases = document.getElementById('kittenPhrases');
 
         const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
         const KITTEN_VOICES = ['bella', 'jasper', 'luna', 'bruno', 'rosie', 'hugo', 'kiki', 'leo'];
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
+
+        // ---- IPA lookup table ----
+        const KITTEN_IPA_TABLE = {
+            'Hello, this is a test of the text-to-speech system.': 'həlˈəʊ ðɪs ɪz ɐ tˈɛst ɒvðə tˈɛksttəspˈiːtʃ sˈɪstəm',
+            'Tyger Tyger, burning bright, In the forests of the night.': 'tˈaɪɡə tˈaɪɡə bˈɜːnɪŋ bɹˈaɪt ɪnðə fˈɒɹɪsts ɒvðə nˈaɪt',
+            'Time is money, who can afford to pay attention?': 'tˈaɪm ɪz mˈʌni hˌuː kan ɐfˈɔːd tə pˈeɪ ɐtˈɛnʃən',
+            'There is a pleasure in the pathless woods, There is a rapture on the lonely shore': 'ðeəɹ ɪz ɐ plˈɛʒəɹ ɪnðə pˈaθləs wˈʊdz ðeəɹ ɪz ɐ ɹˈaptʃəɹ ɒnðə lˈəʊnli ʃˈɔː',
+            'Your smile is like a breath of spring, Your voice is soft like summer rain.': 'jɔː smˈaɪl ɪz lˈaɪk ɐ bɹˈɛθ ɒv spɹˈɪŋ jɔː vˈɔɪs ɪz sˈɒft lˈaɪk sˈʌmə ɹˈeɪn',
+            "Do you think your Wu-Tang sword can defeat me? En garde, I'll let you try my Wu-Tang style.": 'dˈuː juː θˈɪŋk jɔː wˈuːtˈaŋ sˈɔːd kan dɪfˈiːt mˌiː ˈɛn ɡˈɑːd aɪl lˈɛt juː tɹˈaɪ maɪ wˈuːtˈaŋ stˈaɪl',
+            "There's no one around and your phone is dead. Out of the corner of your eye, you spot him...": 'ðeəz nˈəʊwˈɒn ɐɹˈaʊnd and jɔː fˈəʊn ɪz dˈɛd ˌaʊtəv ðə kˈɔːnəɹ ɒv jɔːɹ ˈaɪ juː spˈɒt hˌɪm',
+            "I'll tell you one thing about the universe, though. The universe is a pretty big place.": 'aɪl tˈɛl juː wˈɒn θˈɪŋ ɐbˌaʊt ðə jˈuːnɪvˌɜːs ðˈəʊ ðə jˈuːnɪvˌɜːs ɪz ɐ pɹˈɪti bˈɪɡ plˈeɪs',
+            "Just a little longer. And then, cat, we'll be their cats.": 'dʒˈʌst ɐ lˈɪtəl lˈɒŋɡə and ðˈɛn kˈat wiːl biː ðeə kˈats',
+            'Hello world': 'həlˈəʊ wˈɜːld',
+            'The quick brown fox jumps over the lazy dog.': 'ðə kwˈɪk bɹˈaʊn fˈɒks dʒˈʌmps ˌəʊvə ðə lˈeɪzi dˈɒɡ',
+            'Good morning, how are you?': 'ɡˈʊd mˈɔːnɪŋ hˌaʊ ɑːɹ jˈuː',
+        };
+
+        function lookupIPA(text) {
+            if (KITTEN_IPA_TABLE[text]) return KITTEN_IPA_TABLE[text];
+            const lower = text.toLowerCase();
+            for (const [k, v] of Object.entries(KITTEN_IPA_TABLE)) {
+                if (k.toLowerCase() === lower) return v;
+            }
+            return null;
+        }
 
         let allChunks = [];
         let generating = false;
@@ -429,6 +447,7 @@
         let currentModel = 'pocket-tts';
         let kittenVoiceIdx = 0;
         let kittenVoiceNames = KITTEN_VOICES;
+        let kittenReady = false;
 
         const BATCH_MS = 500;
         const TARGET_DURATION = 8;
@@ -498,28 +517,49 @@
                 kittenVoiceIdx = i;
                 kittenVoiceGrid.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
+                // Auto-generate when engine is ready
+                if (kittenReady) {
+                    triggerKittenGenerate(true);
+                }
             });
             kittenVoiceGrid.appendChild(btn);
         }
 
-        // ---- IPA example chips ----
-        const IPA_EXAMPLES = [
-            { text: 'Hello world', ipa: 'həlˈəʊ wˈɜːld' },
-            { text: 'The quick brown fox jumps over the lazy dog.', ipa: 'ðə kwˈɪk bɹˈaʊn fˈɒks dʒˈʌmps ˌəʊvə ðə lˈeɪzi dˈɒɡ.' },
-            { text: 'Good morning, how are you?', ipa: 'ɡˈʊd mˈɔːnɪŋ, hˌaʊ ɑːɹ jˈuː?' },
-            { text: 'I love programming', ipa: 'aɪ lˈʌv pɹˈəʊɡɹæmɪŋ' },
-            { text: 'Technology is amazing', ipa: 'tɛknˈɒlədʒi ɪz ɐmˈeɪzɪŋ' },
-        ];
-        for (const ex of IPA_EXAMPLES) {
+        // ---- Kitten phrase chips ----
+        for (const phrase of Object.keys(KITTEN_IPA_TABLE)) {
             const chip = document.createElement('button');
             chip.className = 'ipa-chip';
-            chip.textContent = ex.text;
-            chip.title = ex.ipa;
+            chip.textContent = phrase.length > 35 ? phrase.slice(0, 33) + '…' : phrase;
+            chip.title = phrase;
             chip.addEventListener('click', () => {
-                ipaInput.value = ex.ipa;
-                textInput.value = ex.text;
+                textInput.value = phrase;
+                if (kittenReady) triggerKittenGenerate(false);
             });
-            ipaExamples.appendChild(chip);
+            kittenPhrases.appendChild(chip);
+        }
+
+        function triggerKittenGenerate(isDemo) {
+            if (generating) return;
+            const text = textInput.value.trim() || DEMO_TEXT;
+            const ipa = lookupIPA(text);
+            if (!ipa) {
+                stepInfo.textContent = 'IPA not available for this text — use a preset phrase';
+                return;
+            }
+            isDemoGen = isDemo;
+            generating = true;
+            generateBtn.disabled = true;
+            allChunks = [];
+            genStartTime = performance.now();
+            audioSection.style.display = 'none';
+            stepInfo.textContent = 'Synthesizing...';
+            updateStatus('generating', 'Synthesizing...');
+            tts.generate(text, 1.0, {
+                ipa,
+                voiceIdx: kittenVoiceIdx,
+                speed: parseFloat(speedSlider.value),
+                textLen: text.length,
+            });
         }
 
         // Detect local dev server (not deployed to GitHub Pages)
@@ -826,11 +866,14 @@
                 wasmBaseUrl: KITTEN_WASM_BASE,
                 onStatus: (text, ready, progress) => {
                     if (ready) {
+                        kittenReady = true;
                         updateStatus('ready', text);
                         generateBtn.disabled = false;
                         progressBar.classList.remove('visible');
                         progressInfo.textContent = '';
                         downloadBtn.style.display = 'none';
+                        // Auto-generate demo on load
+                        triggerKittenGenerate(true);
                     } else {
                         updateStatus('loading', text);
                         if (typeof progress === 'number') {
@@ -852,40 +895,46 @@
                     const chunk = data instanceof Float32Array ? data : new Float32Array(data);
                     allChunks.push(chunk);
                 },
-                onDone: (totalSteps) => {
-                    const totalTime = ((performance.now() - genStartTime) / 1000).toFixed(2);
+                onDone: (totalSteps, usedIpa) => {
+                    const totalTime = (performance.now() - genStartTime) / 1000;
                     generating = false;
                     generateBtn.disabled = false;
                     updateStatus('ready', 'Ready');
 
                     const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
                     if (totalLength === 0) {
-                        stepInfo.textContent = `Done in ${totalTime}s — no audio produced`;
+                        stepInfo.textContent = `Done in ${totalTime.toFixed(2)}s — no audio produced`;
                         return;
                     }
                     const pcm = new Float32Array(totalLength);
                     let offset = 0;
                     for (const chunk of allChunks) { pcm.set(chunk, offset); offset += chunk.length; }
-                    const audioDur = (totalLength / tts.sampleRate).toFixed(2);
-                    stepInfo.textContent = `${audioDur}s audio in ${totalTime}s`;
+                    const sampleRate = tts.sampleRate || 24000;
+                    const audioDur = totalLength / sampleRate;
+                    const rtf = audioDur / totalTime;
+                    stepInfo.textContent = `${audioDur.toFixed(1)}s audio in ${totalTime.toFixed(1)}s (${rtf.toFixed(2)}x RTF)`;
 
-                    const wav = encodeWav(pcm, tts.sampleRate);
+                    if (isDemoGen) {
+                        isDemoGen = false;
+                        // Still show audio player for demo
+                        const wav = encodeWav(pcm, sampleRate);
+                        const blob = new Blob([wav], { type: 'audio/wav' });
+                        audioPlayer.src = URL.createObjectURL(blob);
+                        audioSection.style.display = 'block';
+                        audioPlayer.play().catch(() => {});
+                        if (usedIpa) {
+                            ipaDisplay.textContent = 'IPA: ' + usedIpa;
+                            ipaDisplay.style.display = '';
+                        }
+                        return;
+                    }
+
+                    const wav = encodeWav(pcm, sampleRate);
                     const blob = new Blob([wav], { type: 'audio/wav' });
-                    const url = URL.createObjectURL(blob);
-                    audioPlayer.src = url;
+                    audioPlayer.src = URL.createObjectURL(blob);
                     audioSection.style.display = 'block';
+                    audioPlayer.play().catch(() => {});
 
-                    // Autoplay via AudioContext
-                    const kittenSampleRate = tts.sampleRate || 24000;
-                    const kittenCtx = new AudioContext({ sampleRate: kittenSampleRate });
-                    const buf = kittenCtx.createBuffer(1, pcm.length, kittenSampleRate);
-                    buf.copyToChannel(pcm, 0);
-                    const src = kittenCtx.createBufferSource();
-                    src.buffer = buf;
-                    src.connect(kittenCtx.destination);
-                    src.start();
-
-                    const usedIpa = ipaInput.value.trim();
                     if (usedIpa) {
                         ipaDisplay.textContent = 'IPA: ' + usedIpa;
                         ipaDisplay.style.display = '';
@@ -900,7 +949,8 @@
         function updateUIForModel(model) {
             voiceSection.style.display = model === 'pocket-tts' ? '' : 'none';
             kittenVoiceSection.style.display = model === 'kitten' ? '' : 'none';
-            ipaSection.style.display = model === 'kitten' ? '' : 'none';
+            kittenPhrases.style.display = model === 'kitten' ? 'flex' : 'none';
+            tempSliderGroup.style.display = model === 'kitten' ? 'none' : '';
             tadaProgress.textContent = '';
             stepInfo.textContent = '';
             audioSection.style.display = 'none';
@@ -922,6 +972,7 @@
             activeVoice = null;
             loadingVoice = false;
             isDemoGen = false;
+            kittenReady = false;
             allChunks = [];
             generateBtn.disabled = true;
             progressBar.classList.remove('visible');
@@ -1010,9 +1061,9 @@
             if (!text || generating) return;
             if (currentModel === 'pocket-tts' && !activeVoice) return;
             if (currentModel === 'kitten') {
-                const ipa = ipaInput.value.trim();
+                const ipa = lookupIPA(text);
                 if (!ipa) {
-                    stepInfo.textContent = 'Paste IPA phonemes above before generating.';
+                    stepInfo.textContent = 'IPA not available for this text — use a preset phrase';
                     return;
                 }
                 isDemoGen = false;
