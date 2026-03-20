@@ -898,7 +898,7 @@
                     const sampleRate = tts.sampleRate || 24000;
                     const audioDur = totalLength / sampleRate;
                     const speedup = audioDur / totalTime;
-                    stepInfo.textContent = `${audioDur.toFixed(1)}s audio in ${totalTime.toFixed(1)}s (${speedup.toFixed(2)}x realtime)`;
+                    stepInfo.textContent = `${audioDur.toFixed(2)}s audio in ${totalTime.toFixed(2)}s \u2014 ${speedup.toFixed(2)}x realtime`;
 
                     if (isDemoGen) {
                         isDemoGen = false;
