@@ -697,7 +697,13 @@ pub mod web {
             backend: info.backend,
         };
 
-        let wgpu_device = init_device(setup, RuntimeOptions::default());
+        // Increase task batching: default is 32, but our LLM has ~50 dispatches per step.
+        // Batching all ops into fewer GPU submissions reduces dispatch overhead significantly.
+        let options = RuntimeOptions {
+            tasks_max: 512,
+            ..RuntimeOptions::default()
+        };
+        let wgpu_device = init_device(setup, options);
         WGPU_DEVICE.set(wgpu_device).ok();
     }
 
