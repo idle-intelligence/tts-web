@@ -49,7 +49,7 @@ async function handleLoad(modelUrl, voicesUrl, wasmBaseUrl) {
     try {
         postMessage({ type: 'status', text: 'Loading WASM module...', ready: false });
         wasm = await import(wasmBaseUrl + '/kitten_wasm.js');
-        await wasm.default(wasmBaseUrl + '/kitten_wasm_bg.wasm');
+        await wasm.default({ module_or_path: wasmBaseUrl + '/kitten_wasm_bg.wasm' });
 
         engine = new wasm.KittenEngine();
 

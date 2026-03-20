@@ -117,8 +117,41 @@ pub mod web {
                 .map_err(|e| JsError::new(&e.to_string()))?; // [1, 256]
 
             let ids = map_phonemes_to_ids(ipa);
+
+            // --- debug ---
+            wasm_log(&format!("[kitten] IPA received: {:?}", ipa));
+            wasm_log(&format!("[kitten] phoneme IDs (first 10): {:?}", &ids[..ids.len().min(10)]));
+            {
+                let style_data = style.to_vec2::<f32>()
+                    .map_err(|e| JsError::new(&e.to_string()))?;
+                let flat: &[f32] = &style_data[0];
+                let min = flat.iter().cloned().fold(f32::INFINITY, f32::min);
+                let max = flat.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                wasm_log(&format!(
+                    "[kitten] style shape=[1,{}] min={:.4} max={:.4} first3=[{:.4},{:.4},{:.4}]",
+                    flat.len(), min, max,
+                    flat.get(0).copied().unwrap_or(0.0),
+                    flat.get(1).copied().unwrap_or(0.0),
+                    flat.get(2).copied().unwrap_or(0.0),
+                ));
+            }
+            // --- end debug ---
+
             let samples = model.synthesize(&ids, &style, speed)
                 .map_err(|e| JsError::new(&e.to_string()))?;
+
+            // --- debug ---
+            {
+                let n = samples.len();
+                let min = samples.iter().cloned().fold(f32::INFINITY, f32::min);
+                let max = samples.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                wasm_log(&format!(
+                    "[kitten] output samples={} min={:.4} max={:.4} first5={:?}",
+                    n, min, max,
+                    &samples[..n.min(5)],
+                ));
+            }
+            // --- end debug ---
 
             Ok(js_sys::Float32Array::from(samples.as_slice()))
         }

@@ -318,7 +318,7 @@
     </header>
 
     <section>
-        <h2>model</h2>
+        <h2>settings <span class="sub">· model</span></h2>
         <div class="model-selector">
             <label><input type="radio" name="model" value="pocket-tts" checked> Pocket TTS (128 MB)</label>
             <label><input type="radio" name="model" value="tada"> TADA-1B (~1.1 GB)</label>
@@ -356,13 +356,6 @@
         </div>
     </section>
 
-    <section id="ipaSection" style="display:none">
-        <h2>phonemes <span class="sub">· IPA</span></h2>
-        <p class="info">KittenTTS uses IPA phonemes. Paste IPA below (espeak integration coming soon).</p>
-        <textarea id="ipaInput" placeholder="hɛloʊ ðɪs ɪz ə tɛst" style="min-height:60px"></textarea>
-        <div id="ipaExamples" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px"></div>
-    </section>
-
     <section>
         <h2>input <span class="sub">· text</span></h2>
         <p class="info">Text stays on this device.</p>
@@ -377,6 +370,13 @@
         </div>
         <div id="stepInfo"></div>
         <div id="tadaProgress"></div>
+    </section>
+
+    <section id="ipaSection" style="display:none">
+        <h2>input <span class="sub">· IPA phonemes</span></h2>
+        <p class="info">KittenTTS uses IPA phonemes. Paste IPA below (espeak integration coming soon).</p>
+        <textarea id="ipaInput" placeholder="hɛloʊ ðɪs ɪz ə tɛst" style="min-height:60px"></textarea>
+        <div id="ipaExamples" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px"></div>
     </section>
 
     <section id="audioSection">
@@ -871,8 +871,20 @@
 
                     const wav = encodeWav(pcm, tts.sampleRate);
                     const blob = new Blob([wav], { type: 'audio/wav' });
-                    audioPlayer.src = URL.createObjectURL(blob);
+                    const url = URL.createObjectURL(blob);
+                    audioPlayer.src = url;
                     audioSection.style.display = 'block';
+
+                    // Autoplay via AudioContext
+                    const kittenSampleRate = tts.sampleRate || 24000;
+                    const kittenCtx = new AudioContext({ sampleRate: kittenSampleRate });
+                    const buf = kittenCtx.createBuffer(1, pcm.length, kittenSampleRate);
+                    buf.copyToChannel(pcm, 0);
+                    const src = kittenCtx.createBufferSource();
+                    src.buffer = buf;
+                    src.connect(kittenCtx.destination);
+                    src.start();
+
                     const usedIpa = ipaInput.value.trim();
                     if (usedIpa) {
                         ipaDisplay.textContent = 'IPA: ' + usedIpa;
@@ -983,21 +995,15 @@
             }
         }
 
-        // Init flow: auto-load if cached, otherwise show download button
-        tts = makePocketClient();
-        updateUIForModel('pocket-tts');
-        const cached = await isModelCached();
-        if (cached) {
-            updateStatus('loading', 'Loading from cache...');
+        // Download button handler (shared across all models)
+        downloadBtn.addEventListener('click', async () => {
+            downloadBtn.disabled = true;
             await initClient();
-        } else {
-            updateStatus('', 'Model not downloaded');
-            downloadBtn.style.display = '';
-            downloadBtn.addEventListener('click', async () => {
-                downloadBtn.disabled = true;
-                await initClient();
-            });
-        }
+        });
+
+        // Init flow: defer pocket-tts load to avoid noisy console errors on page load
+        // Use switchModel so all models go through the same code path
+        await switchModel('pocket-tts');
 
         generateBtn.addEventListener('click', () => {
             const text = textInput.value.trim();
