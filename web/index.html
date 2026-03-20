@@ -274,6 +274,22 @@
             margin-top: 4px;
         }
 
+        .ipa-chip {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            padding: 3px 8px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--muted);
+            cursor: pointer;
+            border-radius: 12px;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        .ipa-chip:hover {
+            border-color: var(--text);
+            color: var(--text);
+        }
+
         footer {
             border-top: 1px solid var(--border);
             padding-top: 24px;
@@ -344,6 +360,7 @@
         <h2>phonemes <span class="sub">· IPA</span></h2>
         <p class="info">KittenTTS uses IPA phonemes. Paste IPA below (espeak integration coming soon).</p>
         <textarea id="ipaInput" placeholder="hɛloʊ ðɪs ɪz ə tɛst" style="min-height:60px"></textarea>
+        <div id="ipaExamples" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px"></div>
     </section>
 
     <section>
@@ -365,6 +382,7 @@
     <section id="audioSection">
         <h2>output <span class="sub">· audio wav file</span></h2>
         <audio id="audioPlayer" controls></audio>
+        <p id="ipaDisplay" style="display:none;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--faint);margin-top:8px;word-break:break-all"></p>
     </section>
 
     <footer>
@@ -395,6 +413,8 @@
         const ipaInput = document.getElementById('ipaInput');
         const speedSlider = document.getElementById('speedSlider');
         const speedValue = document.getElementById('speedValue');
+        const ipaDisplay = document.getElementById('ipaDisplay');
+        const ipaExamples = document.getElementById('ipaExamples');
 
         const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
         const KITTEN_VOICES = ['bella', 'jasper', 'luna', 'bruno', 'rosie', 'hugo', 'kiki', 'leo'];
@@ -480,6 +500,26 @@
                 btn.classList.add('active');
             });
             kittenVoiceGrid.appendChild(btn);
+        }
+
+        // ---- IPA example chips ----
+        const IPA_EXAMPLES = [
+            { text: 'Hello world', ipa: 'həlˈəʊ wˈɜːld' },
+            { text: 'The quick brown fox jumps over the lazy dog.', ipa: 'ðə kwˈɪk bɹˈaʊn fˈɒks dʒˈʌmps ˌəʊvə ðə lˈeɪzi dˈɒɡ.' },
+            { text: 'Good morning, how are you?', ipa: 'ɡˈʊd mˈɔːnɪŋ, hˌaʊ ɑːɹ jˈuː?' },
+            { text: 'I love programming', ipa: 'aɪ lˈʌv pɹˈəʊɡɹæmɪŋ' },
+            { text: 'Technology is amazing', ipa: 'tɛknˈɒlədʒi ɪz ɐmˈeɪzɪŋ' },
+        ];
+        for (const ex of IPA_EXAMPLES) {
+            const chip = document.createElement('button');
+            chip.className = 'ipa-chip';
+            chip.textContent = ex.text;
+            chip.title = ex.ipa;
+            chip.addEventListener('click', () => {
+                ipaInput.value = ex.ipa;
+                textInput.value = ex.text;
+            });
+            ipaExamples.appendChild(chip);
         }
 
         // Detect local dev server (not deployed to GitHub Pages)
@@ -833,6 +873,13 @@
                     const blob = new Blob([wav], { type: 'audio/wav' });
                     audioPlayer.src = URL.createObjectURL(blob);
                     audioSection.style.display = 'block';
+                    const usedIpa = ipaInput.value.trim();
+                    if (usedIpa) {
+                        ipaDisplay.textContent = 'IPA: ' + usedIpa;
+                        ipaDisplay.style.display = '';
+                    } else {
+                        ipaDisplay.style.display = 'none';
+                    }
                 }
             });
         }
@@ -845,6 +892,7 @@
             tadaProgress.textContent = '';
             stepInfo.textContent = '';
             audioSection.style.display = 'none';
+            ipaDisplay.style.display = 'none';
         }
 
         async function switchModel(model) {
