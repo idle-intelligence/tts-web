@@ -24,6 +24,14 @@ fn instance_norm(x: &Tensor) -> Result<Tensor> {
     Ok(x.broadcast_sub(&mean)?.broadcast_div(&(var + eps)?.sqrt()?)?)
 }
 
+fn debug_stats(name: &str, t: &Tensor) {
+    let data = t.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+    let min = data.iter().copied().fold(f32::INFINITY, f32::min);
+    let max = data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let nans = data.iter().filter(|x| x.is_nan()).count();
+    eprintln!("[GEN] {name}: shape={:?} min={min:.4} max={max:.4} nans={nans}", t.shape());
+}
+
 // ── AdaIN ─────────────────────────────────────────────────────────────────────
 // Reuses the same pattern as predictor.rs: optional affine instance norm.
 // norm.weight/norm.bias may or may not be present; fc always present.
@@ -354,8 +362,12 @@ impl HarmonicSource {
         };
         let phase = Tensor::cat(&phase_slices, 2)?; // [batch, n_h, T]
 
+        debug_stats("harmonic_source: phase (after accumulation)", &phase);
+
         // sin of accumulated phase
         let harmonics_sin = phase.sin()?; // [batch, n_h, T]
+
+        debug_stats("harmonic_source: harmonics_sin (after sin)", &harmonics_sin);
 
         // linear combination: [batch, T, n_h] @ [1, n_h, 1] → [batch, T, 1] → [batch, 1, T]
         let hs_t = harmonics_sin.transpose(1, 2)?.contiguous()?; // [batch, T, n_h]
@@ -364,7 +376,11 @@ impl HarmonicSource {
         let out = hs_t.matmul(&w.contiguous()?)?; // [batch, T, 1]
         let b = self.l_linear_b.reshape((1, 1, 1))?;
         let out = out.broadcast_add(&b)?; // [batch, T, 1]
-        Ok(out.transpose(1, 2)?.contiguous()?) // [batch, 1, T]
+        let out = out.transpose(1, 2)?.contiguous()?; // [batch, 1, T]
+
+        debug_stats("harmonic_source: out (after l_linear combination)", &out);
+
+        Ok(out)
     }
 }
 
@@ -391,9 +407,12 @@ impl Stft {
     // x: [batch, 1, T_audio] → [batch, 22, T_stft]
     // stride=5, kernel=20, padding=5 → T_stft = (T_audio - 20 + 2*5) / 5 + 1
     fn forward_analysis(&self, x: &Tensor) -> Result<Tensor> {
+        debug_stats("stft_forward_analysis: input x", x);
         let real = x.conv1d(&self.weight_fwd_real, 5, 5, 1, 1)?; // [batch, 11, T_stft]
         let imag = x.conv1d(&self.weight_fwd_imag, 5, 5, 1, 1)?;
-        Ok(Tensor::cat(&[real, imag], 1)?) // [batch, 22, T_stft]
+        let out = Tensor::cat(&[real, imag], 1)?; // [batch, 22, T_stft]
+        debug_stats("stft_forward_analysis: output (22ch)", &out);
+        Ok(out)
     }
 
     // x: [batch, 22, T_stft] → [batch, 1, T_audio]
@@ -409,9 +428,17 @@ impl Stft {
         let log_amp = x.i((.., ..n_harm, ..))?.contiguous()?; // [batch, 11, T_stft]
         let phase = x.i((.., n_harm.., ..))?.contiguous()?;
 
+        debug_stats("stft_inverse: log_amp (before exp)", &log_amp);
+
         let amp = log_amp.exp()?;
+
+        debug_stats("stft_inverse: amp (after exp)", &amp);
+
         let sin_p = phase.sin()?;
         let cos_p = phase.cos()?;
+
+        debug_stats("stft_inverse: sin_p", &sin_p);
+        debug_stats("stft_inverse: cos_p", &cos_p);
 
         let real_part = amp.mul(&cos_p)?; // [batch, 11, T_stft]
         let imag_part = amp.mul(&sin_p)?;
@@ -421,6 +448,9 @@ impl Stft {
         // output_len = (T_stft - 1)*5 - 2*5 + 20 = (T_stft-1)*5 + 10
         let wv_real = real_part.conv_transpose1d(&self.weight_bwd_real, 5, 0, 5, 1, 1)?;
         let wv_imag = imag_part.conv_transpose1d(&self.weight_bwd_imag, 5, 0, 5, 1, 1)?;
+
+        debug_stats("stft_inverse: wv_real (after ConvTranspose)", &wv_real);
+        debug_stats("stft_inverse: wv_imag (after ConvTranspose)", &wv_imag);
 
         // waveform = real_component - imag_component (from ONNX trace)
         let waveform = (wv_real - wv_imag)?; // [batch, 1, T_out]
@@ -552,6 +582,9 @@ impl Generator {
         let noise_stft = self.stft.forward_analysis(&harmonic_src)?; // [batch, 22, T_stft]
 
         let mut h = x.clone();
+
+        debug_stats("generator: input h (after leaky_relu will follow)", &h);
+
         for i in 0..self.upsample_rates.len() {
             h = leaky_relu_02(&h)?;
 
@@ -564,24 +597,51 @@ impl Generator {
             let b = self.ups_b[i].reshape((1, self.ups_b[i].dim(0)?, 1))?;
             h = h.broadcast_add(&b)?;
 
+            debug_stats(&format!("generator: after ups[{i}] ConvTranspose"), &h);
+
             // Noise injection
             let noise = self.noise_convs[i].forward(&noise_stft)?;
             // trim/pad noise to match h's time dim
             let noise = match_time(&noise, h.dim(2)?)?;
             let noise = self.noise_res[i].forward(&noise, style)?;
+
+            debug_stats(&format!("generator: noise[{i}] after noise_res"), &noise);
+
             h = (h + noise)?;
+
+            debug_stats(&format!("generator: h after noise injection [{i}]"), &h);
 
             // AdaIN ResBlocks
             let rb0 = i * 2;
             h = self.resblocks[rb0].forward(&h, style)?;
+            debug_stats(&format!("generator: h after resblock[{rb0}]"), &h);
             h = self.resblocks[rb0 + 1].forward(&h, style)?;
+            debug_stats(&format!("generator: h after resblock[{}]", rb0 + 1), &h);
         }
 
         h = leaky_relu_02(&h)?;
         h = self.conv_post.forward(&h)?; // [batch, 22, T_stft]
 
+        debug_stats("generator: h after conv_post (22ch)", &h);
+
+        // Split for inspection
+        let log_amp_slice = h.i((.., ..11usize, ..))?.contiguous()?;
+        debug_stats("generator: log_amplitude slice (before exp)", &log_amp_slice);
+
+        let amp_after_exp = log_amp_slice.exp()?;
+        debug_stats("generator: amp after exp(log_amplitude)", &amp_after_exp);
+
+        let phase_slice = h.i((.., 11usize.., ..))?.contiguous()?;
+        let sin_phase = phase_slice.sin()?;
+        let cos_phase = phase_slice.cos()?;
+        debug_stats("generator: sin(phase)", &sin_phase);
+        debug_stats("generator: cos(phase)", &cos_phase);
+
         // STFT inverse synthesis → [batch, 1, T_audio]
         let waveform = self.stft.inverse_synthesis(&h)?;
+
+        debug_stats("generator: final waveform", &waveform);
+
         Ok(waveform)
     }
 }

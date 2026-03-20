@@ -63,7 +63,8 @@ impl KittenModel {
         // f0/n_amp        [1, 1, T]   — from predictor F0/N branches
         let waveform = self.decoder.forward(&shared_lstm_out, &asr_features, &f0, &n_amp, style)?;
 
-        // 7. Trim last 5000 samples and return as Vec<f32>
+        // 7. Tanh clamp (ONNX model applies tanh as final step) + trim last 5000 samples
+        let waveform = waveform.tanh()?;
         let samples = waveform.i((0, 0, ..))?; // [num_samples]
         let n = samples.dim(0)?;
         let trim = n.saturating_sub(5000);
