@@ -6,9 +6,13 @@ use crate::config::KittenConfig;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn leaky_relu_02(x: &Tensor) -> Result<Tensor> {
-    let neg = (x * 0.2_f64)?;
+fn leaky_relu(x: &Tensor, alpha: f64) -> Result<Tensor> {
+    let neg = (x * alpha)?;
     Ok(x.maximum(&neg)?)
+}
+
+fn leaky_relu_02(x: &Tensor) -> Result<Tensor> {
+    leaky_relu(x, 0.2)
 }
 
 /// InstanceNorm1d: per-channel normalisation over the time dimension.
@@ -632,8 +636,10 @@ impl Generator {
 
         debug_stats("generator: input h (after leaky_relu will follow)", &h);
 
+        // ONNX uses alpha=0.1 before ups.0 and ups.1 (not 0.2)
+        let gen_lrelu_alphas = [0.1, 0.1];
         for i in 0..self.upsample_rates.len() {
-            h = leaky_relu_02(&h)?;
+            h = leaky_relu(&h, gen_lrelu_alphas[i])?;
 
             // Noise injection: compute BEFORE upsample (StyleTTS 2 order)
             let noise = self.noise_convs[i].forward(&noise_stft)?;
@@ -691,7 +697,8 @@ impl Generator {
             }
         }
 
-        h = leaky_relu_02(&h)?;
+        // ONNX uses alpha=0.01 before conv_post (much less negative leakage)
+        h = leaky_relu(&h, 0.01)?;
         h = self.conv_post.forward(&h)?; // [batch, 22, T_stft]
 
         debug_stats("generator: h after conv_post (22ch)", &h);
