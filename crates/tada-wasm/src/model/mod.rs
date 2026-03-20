@@ -959,7 +959,7 @@ pub fn load_burn_vibevoice<R: Read + Seek>(
     };
 
     let cfg = TadaConfig::tada_1b();
-    let head_dim = 1024usize; // prediction_head hidden dim
+    let head_dim = 2048usize; // prediction_head hidden dim (same as LLM hidden_size)
     let _hidden_size = cfg.llama.hidden_size; // 2048 — kept for documentation
     let total_latent_dim = cfg.total_latent_dim(); // 528
     let acoustic_dim = cfg.acoustic_dim; // 512
