@@ -29,7 +29,8 @@ fn debug_stats(name: &str, t: &Tensor) {
     let min = data.iter().copied().fold(f32::INFINITY, f32::min);
     let max = data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let nans = data.iter().filter(|x| x.is_nan()).count();
-    eprintln!("[GEN] {name}: shape={:?} min={min:.4} max={max:.4} nans={nans}", t.shape());
+    let first5: Vec<f32> = data.iter().copied().take(5).collect();
+    eprintln!("[GEN] {name}: shape={:?} min={min:.6} max={max:.6} nans={nans} first5={first5:.6?}", t.shape());
 }
 
 // ── AdaIN ─────────────────────────────────────────────────────────────────────
@@ -108,7 +109,8 @@ impl EncodeBlock {
         let h = self.norm2.forward(&h, style)?;
         let h = leaky_relu_02(&h)?;
         let h = self.conv2.forward(&h)?;
-        Ok((skip + h)?)
+        // ONNX applies scalar 1/√2 to the residual sum output
+        Ok(((skip + h)? * (1.0_f64 / std::f64::consts::SQRT_2))?)
     }
 }
 
@@ -189,7 +191,8 @@ impl DecodeBlock {
             let h = self.norm2.forward(&h, style)?;
             let h = leaky_relu_02(&h)?;
             let h = self.conv2.forward(&h)?;
-            Ok((skip + h)?)
+            // ONNX applies scalar 1/√2 to the residual sum output
+            Ok(((skip + h)? * (1.0_f64 / std::f64::consts::SQRT_2))?)
         } else {
             // Standard decode block (decode.0,1,2)
             let skip = x.conv1d(&self.conv1x1_w, 0, 1, 1, 1)?; // [batch, 256, T]
@@ -199,7 +202,8 @@ impl DecodeBlock {
             let h = self.norm2.forward(&h, style)?;
             let h = leaky_relu_02(&h)?;
             let h = self.conv2.forward(&h)?;
-            Ok((skip + h)?)
+            // ONNX applies scalar 1/√2 to the residual sum output
+            Ok(((skip + h)? * (1.0_f64 / std::f64::consts::SQRT_2))?)
         }
     }
 }
@@ -300,6 +304,15 @@ fn snake(x: &Tensor, alpha: &Tensor) -> Result<Tensor> {
     // divide by alpha, broadcast
     let result = (x + sin2.broadcast_div(alpha)?)?;
     Ok(result)
+}
+
+/// Element-wise atan2(y, x) computed on CPU via f32 stdlib.
+fn tensor_atan2(y: &Tensor, x: &Tensor) -> Result<Tensor> {
+    let shape = y.shape().clone();
+    let yd = y.flatten_all()?.to_vec1::<f32>()?;
+    let xd = x.flatten_all()?.to_vec1::<f32>()?;
+    let out: Vec<f32> = yd.iter().zip(xd.iter()).map(|(&yv, &xv)| yv.atan2(xv)).collect();
+    Ok(Tensor::from_vec(out, shape, y.device())?.to_dtype(y.dtype())?)
 }
 
 // ── Harmonic Source ────────────────────────────────────────────────────────────
@@ -405,12 +418,28 @@ impl Stft {
     }
 
     // x: [batch, 1, T_audio] → [batch, 22, T_stft]
-    // stride=5, kernel=20, padding=5 → T_stft = (T_audio - 20 + 2*5) / 5 + 1
+    // ONNX: edge-pad by 10, conv with pad=0, then polar form (log_amp, phase)
     fn forward_analysis(&self, x: &Tensor) -> Result<Tensor> {
         debug_stats("stft_forward_analysis: input x", x);
-        let real = x.conv1d(&self.weight_fwd_real, 5, 5, 1, 1)?; // [batch, 11, T_stft]
-        let imag = x.conv1d(&self.weight_fwd_imag, 5, 5, 1, 1)?;
-        let out = Tensor::cat(&[real, imag], 1)?; // [batch, 22, T_stft]
+        let t = x.dim(2)?;
+        let first = x.i((.., .., 0..1))?.contiguous()?; // [batch, 1, 1]
+        let last = x.i((.., .., t - 1..t))?.contiguous()?;
+        let pad_left = first.broadcast_as((x.dim(0)?, 1, 10))?.contiguous()?;
+        let pad_right = last.broadcast_as((x.dim(0)?, 1, 10))?.contiguous()?;
+        let padded = Tensor::cat(&[&pad_left, x, &pad_right], 2)?; // [batch, 1, T+20]
+
+        // Conv1d with no padding (pad=0), stride=5
+        let real = padded.conv1d(&self.weight_fwd_real, 0, 5, 1, 1)?; // [batch, 11, T_stft]
+        let imag = padded.conv1d(&self.weight_fwd_imag, 0, 5, 1, 1)?;
+
+        // Convert to polar: log_amp = log(sqrt(real² + imag²) + eps), phase = atan2(imag, real)
+        let eps = 1e-7_f64;
+        let mag = ((real.powf(2.0)? + imag.powf(2.0)?)? + eps)?.sqrt()?;
+        let log_amp = mag.log()?;
+        // atan2(imag, real) computed element-wise via f32 stdlib (no NaN edge cases)
+        let phase = tensor_atan2(&imag, &real)?;
+
+        let out = Tensor::cat(&[log_amp, phase], 1)?; // [batch, 22, T_stft]
         debug_stats("stft_forward_analysis: output (22ch)", &out);
         Ok(out)
     }
@@ -426,7 +455,7 @@ impl Stft {
         let _ = batch;
 
         let log_amp = x.i((.., ..n_harm, ..))?.contiguous()?; // [batch, 11, T_stft]
-        let phase = x.i((.., n_harm.., ..))?.contiguous()?;
+        let raw_phase = x.i((.., n_harm.., ..))?.contiguous()?;
 
         debug_stats("stft_inverse: log_amp (before exp)", &log_amp);
 
@@ -434,8 +463,10 @@ impl Stft {
 
         debug_stats("stft_inverse: amp (after exp)", &amp);
 
-        let sin_p = phase.sin()?;
-        let cos_p = phase.cos()?;
+        // ONNX: sin(raw_phase) first, then sin/cos of THAT
+        let phase1 = raw_phase.sin()?;    // first sin
+        let sin_p = phase1.sin()?;        // sin(sin(raw_phase))
+        let cos_p = phase1.cos()?;        // cos(sin(raw_phase))
 
         debug_stats("stft_inverse: sin_p", &sin_p);
         debug_stats("stft_inverse: cos_p", &cos_p);
@@ -443,11 +474,9 @@ impl Stft {
         let real_part = amp.mul(&cos_p)?; // [batch, 11, T_stft]
         let imag_part = amp.mul(&sin_p)?;
 
-        // ConvTranspose1d: [batch, 11, T_stft] → [batch, 1, T_audio]
-        // weight: [11, 1, 20], stride=5, padding=5
-        // output_len = (T_stft - 1)*5 - 2*5 + 20 = (T_stft-1)*5 + 10
-        let wv_real = real_part.conv_transpose1d(&self.weight_bwd_real, 5, 0, 5, 1, 1)?;
-        let wv_imag = imag_part.conv_transpose1d(&self.weight_bwd_imag, 5, 0, 5, 1, 1)?;
+        // ConvTranspose1d: NO padding (pads=[0,0] in ONNX)
+        let wv_real = real_part.conv_transpose1d(&self.weight_bwd_real, 0, 0, 5, 1, 1)?;
+        let wv_imag = imag_part.conv_transpose1d(&self.weight_bwd_imag, 0, 0, 5, 1, 1)?;
 
         debug_stats("stft_inverse: wv_real (after ConvTranspose)", &wv_real);
         debug_stats("stft_inverse: wv_imag (after ConvTranspose)", &wv_imag);
@@ -455,11 +484,12 @@ impl Stft {
         // waveform = real_component - imag_component (from ONNX trace)
         let waveform = (wv_real - wv_imag)?; // [batch, 1, T_out]
 
-        // Trim trailing 20 samples (STFT boundary artifact)
+        // Trim 10 from each end (matching edge-padding added in forward_analysis)
         let t_out = waveform.dim(2)?;
-        let trim = t_out.saturating_sub(20);
-        if trim > 0 {
-            Ok(waveform.i((.., .., ..trim))?.contiguous()?)
+        let start = 10.min(t_out);
+        let end = t_out.saturating_sub(10);
+        if end > start {
+            Ok(waveform.i((.., .., start..end))?.contiguous()?)
         } else {
             Ok(waveform)
         }
@@ -611,12 +641,13 @@ impl Generator {
 
             debug_stats(&format!("generator: h after noise injection [{i}]"), &h);
 
-            // AdaIN ResBlocks
+            // AdaIN ResBlocks: parallel (averaged), not sequential
             let rb0 = i * 2;
-            h = self.resblocks[rb0].forward(&h, style)?;
-            debug_stats(&format!("generator: h after resblock[{rb0}]"), &h);
-            h = self.resblocks[rb0 + 1].forward(&h, style)?;
-            debug_stats(&format!("generator: h after resblock[{}]", rb0 + 1), &h);
+            let rb_in = h.clone();
+            let rb0_out = self.resblocks[rb0].forward(&rb_in, style)?;
+            let rb1_out = self.resblocks[rb0 + 1].forward(&rb_in, style)?;
+            h = ((rb0_out + rb1_out)? / 2.0)?;
+            debug_stats(&format!("generator: h after resblocks[{rb0}+{}] (parallel avg)", rb0 + 1), &h);
         }
 
         h = leaky_relu_02(&h)?;
@@ -734,9 +765,10 @@ impl Decoder {
         let lstm_aligned = match_time(shared_lstm_out, t)?;
         let enc_in = Tensor::cat(&[&lstm_aligned, &f0_down, &n_down], 1)?; // [batch, 130, T]
         let mut h = self.encode.forward(&enc_in, &style_half)?; // [batch, 256, T]
+        debug_stats("ENCODE_OUT", &h);
 
         // Four DecodeBlocks
-        for block in self.decode.iter() {
+        for (block_idx, block) in self.decode.iter().enumerate() {
             // Align asr, f0, n to current h time dim (needed for block 3 which doubles T)
             let ht = h.dim(2)?;
             let asr_t = match_time(&asr, ht)?;
@@ -744,6 +776,7 @@ impl Decoder {
             let n_t = match_time(&n_down, ht)?;
             let dec_in = Tensor::cat(&[&h, &asr_t, &f0_t, &n_t], 1)?; // [batch, 322, ht]
             h = block.forward(&dec_in, &style_half)?;
+            debug_stats(&format!("DECODE_{block_idx}_OUT"), &h);
         }
         // After block 3: h is [batch, 256, 2T]
 
