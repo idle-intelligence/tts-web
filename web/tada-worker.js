@@ -128,9 +128,11 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
         }
 
         const numTokens = tokenIds.length;
-        console.log(`[tada-worker] tokens=${numTokens}, prefixLen=${prefixLen}, transitionSteps=${transitionSteps}, voiceLoaded=${!!voiceBytes}`);
-        console.log(`[tada-worker] first 15 token IDs:`, Array.from(tokenIds.slice(0, 15)));
-        postMessage({type: 'gen_start', numTokens});
+        // Content tokens = total minus prefix minus voice text tokens minus EOT padding
+        const voiceTokenCount = voiceBytes ? (numTokens - prefixLen - transitionSteps) : 0; // approximate
+        const contentTokens = numTokens - prefixLen - voiceTokenCount;
+        console.log(`[tada-worker] tokens=${numTokens}, prefixLen=${prefixLen}, voiceTokens≈${voiceTokenCount}, contentTokens≈${contentTokens}`);
+        postMessage({type: 'gen_start', numTokens: contentTokens});
 
         // Start generation with voice prompt (or zero-shot if not loaded)
         engine.startGeneration(
@@ -153,26 +155,31 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
             const info = typeof result === 'string' ? JSON.parse(result) : result;
             step = info.step || step + 1;
 
-            postMessage({
-                type: 'progress',
-                step: info.step,
-                totalTokens: info.total_tokens,
-                isEos: info.is_eos,
-                tokenId: info.token_id,
-            });
+            // Only show progress for content tokens (skip prompt phase)
+            const promptTokens = info.total_tokens - contentTokens;
+            if (info.step >= promptTokens) {
+                const contentStep = info.step - promptTokens;
+                postMessage({
+                    type: 'progress',
+                    step: contentStep,
+                    totalTokens: contentTokens,
+                    isEos: info.is_eos,
+                    tokenId: info.token_id,
+                });
+            }
 
             if (info.is_done) break;
         }
 
         // Decode audio
-        postMessage({type: 'status', text: 'Decoding audio...', ready: true});
+        postMessage({type: 'progress', step: -1, totalTokens: 0, isEos: false, tokenId: 0, decoding: true});
         const pcm = engine.decodeAudio();
 
         if (pcm && pcm.length > 0) {
             postMessage({type: 'audio', samples: pcm, sampleRate: 24000});
         }
 
-        postMessage({type: 'done', totalSteps: step});
+        postMessage({type: 'done', totalSteps: step + 1});
     } catch (e) {
         postMessage({type: 'error', error: e.message || String(e)});
     }

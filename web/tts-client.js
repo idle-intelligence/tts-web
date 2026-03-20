@@ -128,7 +128,7 @@ export class TtsClient {
                 this.onChunk(data.data, data.step);
                 break;
             case 'progress':
-                this.onProgress(data.step, data.totalTokens, data.isEos, data.tokenId);
+                this.onProgress(data.step, data.totalTokens, data.isEos, data.tokenId, data);
                 break;
             case 'audio':
                 // TADA: full audio delivered at once — call onChunk with the complete buffer

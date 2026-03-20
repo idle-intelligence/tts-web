@@ -804,9 +804,11 @@
                     tadaProgress.textContent = `Generating... (${numTokens} input tokens)`;
                     updateStatus('generating', 'Generating...');
                 },
-                onProgress: (step, totalTokens, isEos, tokenId) => {
+                onProgress: (step, totalTokens, isEos, tokenId, extra) => {
                     const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
-                    if (totalTokens > 0) {
+                    if (extra && extra.decoding) {
+                        tadaProgress.textContent = `Decoding audio... (${elapsed}s)`;
+                    } else if (totalTokens > 0) {
                         tadaProgress.textContent = `Generating token ${step + 1}/${totalTokens} (${elapsed}s)`;
                     } else {
                         tadaProgress.textContent = `Generating token ${step + 1}... (${elapsed}s)`;
