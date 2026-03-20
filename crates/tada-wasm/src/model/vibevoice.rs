@@ -10,6 +10,25 @@ use burn::tensor::activation::silu;
 use burn::tensor::Tensor;
 
 use super::F32Linear;
+use crate::gguf::Q8Linear;
+
+// ---------------------------------------------------------------------------
+// VVLinear — wraps either Q8Linear or F32Linear for VibeVoice layers
+// ---------------------------------------------------------------------------
+
+pub enum VVLinear {
+    Q8(Q8Linear),
+    F32(F32Linear),
+}
+
+impl VVLinear {
+    pub fn forward(&self, x: Tensor<Wgpu, 3>) -> Tensor<Wgpu, 3> {
+        match self {
+            Self::Q8(l) => l.forward(x),
+            Self::F32(l) => l.forward(x),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,13 +103,13 @@ impl BurnTimestepEmbedder {
 // ---------------------------------------------------------------------------
 
 pub struct BurnFeedForwardNetwork {
-    gate_proj: F32Linear,
-    up_proj: F32Linear,
-    down_proj: F32Linear,
+    gate_proj: VVLinear,
+    up_proj: VVLinear,
+    down_proj: VVLinear,
 }
 
 impl BurnFeedForwardNetwork {
-    pub fn new(gate_proj: F32Linear, up_proj: F32Linear, down_proj: F32Linear) -> Self {
+    pub fn new(gate_proj: VVLinear, up_proj: VVLinear, down_proj: VVLinear) -> Self {
         Self { gate_proj, up_proj, down_proj }
     }
 
@@ -111,7 +130,7 @@ pub struct BurnHeadLayer {
     /// We apply it manually to avoid the Burn RmsNorm gamma broadcasting issue with 3D input.
     norm_weight: Vec<f32>,
     norm_eps: f32,
-    ada_ln_modulation: F32Linear,
+    ada_ln_modulation: VVLinear,
     head_dim: usize,
     device: WgpuDevice,
 }
@@ -121,7 +140,7 @@ impl BurnHeadLayer {
         ffn: BurnFeedForwardNetwork,
         norm_weight: Vec<f32>,
         norm_eps: f32,
-        ada_ln_modulation: F32Linear,
+        ada_ln_modulation: VVLinear,
         head_dim: usize,
         device: WgpuDevice,
     ) -> Self {
@@ -159,8 +178,8 @@ impl BurnHeadLayer {
 // ---------------------------------------------------------------------------
 
 pub struct BurnFinalLayer {
-    linear: F32Linear,
-    ada_ln_modulation: F32Linear,
+    linear: VVLinear,
+    ada_ln_modulation: VVLinear,
     norm_eps: f32,
     head_dim: usize,
     total_latent_dim: usize,
@@ -169,8 +188,8 @@ pub struct BurnFinalLayer {
 
 impl BurnFinalLayer {
     pub fn new(
-        linear: F32Linear,
-        ada_ln_modulation: F32Linear,
+        linear: VVLinear,
+        ada_ln_modulation: VVLinear,
         norm_eps: f32,
         head_dim: usize,
         total_latent_dim: usize,
@@ -195,8 +214,8 @@ impl BurnFinalLayer {
 // ---------------------------------------------------------------------------
 
 pub struct BurnVibeVoice {
-    noisy_images_proj: F32Linear,
-    cond_proj: F32Linear,
+    noisy_images_proj: VVLinear,
+    cond_proj: VVLinear,
     t_embedder: BurnTimestepEmbedder,
     layers: Vec<BurnHeadLayer>,
     final_layer: BurnFinalLayer,
@@ -208,8 +227,8 @@ pub struct BurnVibeVoice {
 
 impl BurnVibeVoice {
     pub fn new(
-        noisy_images_proj: F32Linear,
-        cond_proj: F32Linear,
+        noisy_images_proj: VVLinear,
+        cond_proj: VVLinear,
         t_embedder: BurnTimestepEmbedder,
         layers: Vec<BurnHeadLayer>,
         final_layer: BurnFinalLayer,

@@ -956,6 +956,7 @@ pub fn load_burn_vibevoice<R: Read + Seek>(
     use tada_core::config::TadaConfig;
     use vibevoice::{
         BurnFeedForwardNetwork, BurnFinalLayer, BurnHeadLayer, BurnTimestepEmbedder, BurnVibeVoice,
+        VVLinear,
     };
 
     let cfg = TadaConfig::tada_1b();
@@ -969,23 +970,27 @@ pub fn load_burn_vibevoice<R: Read + Seek>(
 
     let prefix = "prediction_head";
 
-    // Helper: load a 2D F32Linear from GGUF (any dtype)
-    let load_linear = |reader: &mut gguf::GgufReader<R>, name: &str| -> anyhow::Result<F32Linear> {
+    // Helper: load Q8Linear if Q8_0, else F32Linear (for small t_embedder layers)
+    let load_vv = |reader: &mut gguf::GgufReader<R>, name: &str| -> anyhow::Result<VVLinear> {
+        gguf::load_q8_or_f32_linear(reader, name, device)
+    };
+
+    // Helper: load small F32Linear (stays F32 regardless — for t_embedder)
+    let load_f32 = |reader: &mut gguf::GgufReader<R>, name: &str| -> anyhow::Result<F32Linear> {
         let (data, shape) = gguf::load_f32_weight_any(reader, name)?;
         let w = Tensor::<Wgpu, 2>::from_data(TensorData::new(data, [shape[0], shape[1]]), device);
         Ok(F32Linear::new(w, None))
     };
 
     // noisy_images_proj: [head_dim, total_latent_dim]
-    let noisy_images_proj =
-        load_linear(reader, &format!("{prefix}.noisy_images_proj.weight"))?;
+    let noisy_images_proj = load_vv(reader, &format!("{prefix}.noisy_images_proj.weight"))?;
 
     // cond_proj: [head_dim, hidden_size]
-    let cond_proj = load_linear(reader, &format!("{prefix}.cond_proj.weight"))?;
+    let cond_proj = load_vv(reader, &format!("{prefix}.cond_proj.weight"))?;
 
-    // t_embedder MLP
-    let t_mlp_0 = load_linear(reader, &format!("{prefix}.t_embedder.mlp.0.weight"))?;
-    let t_mlp_2 = load_linear(reader, &format!("{prefix}.t_embedder.mlp.2.weight"))?;
+    // t_embedder MLP — small, stays F32
+    let t_mlp_0 = load_f32(reader, &format!("{prefix}.t_embedder.mlp.0.weight"))?;
+    let t_mlp_2 = load_f32(reader, &format!("{prefix}.t_embedder.mlp.2.weight"))?;
     let t_embedder = BurnTimestepEmbedder::new(t_mlp_0, t_mlp_2, frequency_embedding_size);
 
     // Transformer layers
@@ -993,22 +998,22 @@ pub fn load_burn_vibevoice<R: Read + Seek>(
     for i in 0..num_head_layers {
         let lp = format!("{prefix}.layers.{i}");
 
-        let gate_proj = load_linear(reader, &format!("{lp}.ffn.gate_proj.weight"))?;
-        let up_proj = load_linear(reader, &format!("{lp}.ffn.up_proj.weight"))?;
-        let down_proj = load_linear(reader, &format!("{lp}.ffn.down_proj.weight"))?;
+        let gate_proj = load_vv(reader, &format!("{lp}.ffn.gate_proj.weight"))?;
+        let up_proj = load_vv(reader, &format!("{lp}.ffn.up_proj.weight"))?;
+        let down_proj = load_vv(reader, &format!("{lp}.ffn.down_proj.weight"))?;
         let ffn = BurnFeedForwardNetwork::new(gate_proj, up_proj, down_proj);
 
         let norm_weight = gguf::load_f32_tensor(reader, &format!("{lp}.norm.weight"))?;
 
-        let ada = load_linear(reader, &format!("{lp}.adaLN_modulation.1.weight"))?;
+        let ada = load_vv(reader, &format!("{lp}.adaLN_modulation.1.weight"))?;
 
         layers.push(BurnHeadLayer::new(ffn, norm_weight, eps, ada, head_dim, device.clone()));
     }
 
     // Final layer
     let fl_prefix = format!("{prefix}.final_layer");
-    let final_linear = load_linear(reader, &format!("{fl_prefix}.linear.weight"))?;
-    let final_ada = load_linear(reader, &format!("{fl_prefix}.adaLN_modulation.1.weight"))?;
+    let final_linear = load_vv(reader, &format!("{fl_prefix}.linear.weight"))?;
+    let final_ada = load_vv(reader, &format!("{fl_prefix}.adaLN_modulation.1.weight"))?;
     let final_layer = BurnFinalLayer::new(
         final_linear,
         final_ada,

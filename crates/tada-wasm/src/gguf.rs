@@ -815,6 +815,187 @@ pub fn load_f32_weight_any<R: Read + Seek>(
     Ok((data, [shape[0], shape[1]]))
 }
 
+// ---------------------------------------------------------------------------
+// Q8Tensor -- GPU buffer of Q8_0 blocks
+// ---------------------------------------------------------------------------
+
+/// A Q8_0 quantized weight tensor living on GPU.
+///
+/// The buffer contains raw Q8_0 blocks (34 bytes per block of 32 elements).
+/// The WGSL shader interprets the buffer as `array<u32>`.
+pub struct Q8Tensor {
+    pub(crate) handle: Handle,
+    shape: [usize; 2],
+    num_blocks: usize,
+}
+
+impl Q8Tensor {
+    /// Upload raw Q8_0 bytes to a GPU storage buffer.
+    ///
+    /// Shape is `[N, K]` = `[out_features, in_features]`.
+    /// `raw_bytes` must contain exactly `(N * K / 32) * 34` bytes.
+    pub fn from_q8_bytes(raw_bytes: &[u8], shape: [usize; 2], device: &WgpuDevice) -> Result<Self> {
+        let [n, k] = shape;
+        let num_elements = k * n;
+        ensure!(
+            num_elements % 32 == 0,
+            "Q8_0 requires element count divisible by 32, got {num_elements}"
+        );
+        let num_blocks = num_elements / 32;
+        let expected_bytes = num_blocks * 34;
+        ensure!(
+            raw_bytes.len() == expected_bytes,
+            "Q8_0 byte count mismatch: expected {expected_bytes} for {num_blocks} blocks, got {}",
+            raw_bytes.len()
+        );
+
+        let client = WgpuRuntime::client(device);
+
+        // Pad to 4-byte alignment for array<u32> access in the WGSL shader.
+        let padded = if !raw_bytes.len().is_multiple_of(4) {
+            let pad = 4 - (raw_bytes.len() % 4);
+            let mut buf = raw_bytes.to_vec();
+            buf.resize(raw_bytes.len() + pad, 0);
+            buf
+        } else {
+            raw_bytes.to_vec()
+        };
+        let handle = client.create_from_slice(&padded);
+
+        Ok(Self {
+            handle,
+            shape,
+            num_blocks,
+        })
+    }
+
+    pub fn shape(&self) -> [usize; 2] {
+        self.shape
+    }
+
+    pub fn num_blocks(&self) -> usize {
+        self.num_blocks
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Q8Linear
+// ---------------------------------------------------------------------------
+
+/// A linear layer with Q8_0 quantized weights.
+///
+/// Stores weights as `[out_features, in_features]` in Q8_0 format and an
+/// optional f32 bias. Forward: `x @ weights^T + bias` via fused dequant+matmul.
+pub struct Q8Linear {
+    weights: Q8Tensor,
+    bias: Option<Tensor<Wgpu, 1>>,
+}
+
+impl Q8Linear {
+    pub fn new(weights: Q8Tensor, bias: Option<Tensor<Wgpu, 1>>) -> Self {
+        Self { weights, bias }
+    }
+
+    /// Forward pass: `x @ weights^T + bias`.
+    ///
+    /// `x` shape: `[B, M, K]` where `K = in_features`.
+    /// Returns shape: `[B, M, N]` where `N = out_features`.
+    pub fn forward(&self, x: Tensor<Wgpu, 3>) -> Tensor<Wgpu, 3> {
+        let out = q8_matmul(x, &self.weights);
+        match &self.bias {
+            Some(bias) => out + bias.clone().unsqueeze::<3>(),
+            None => out,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Q8 matmul kernel dispatch
+// ---------------------------------------------------------------------------
+
+struct Q8MatmulNaiveKernel {
+    workgroup_size_x: u32,
+    workgroup_size_y: u32,
+}
+
+impl KernelSource for Q8MatmulNaiveKernel {
+    fn source(&self) -> SourceTemplate {
+        SourceTemplate::new(include_str!("wgsl/shader_q8_0.wgsl"))
+            .register("workgroup_size_x", self.workgroup_size_x.to_string())
+            .register("workgroup_size_y", self.workgroup_size_y.to_string())
+    }
+
+    fn id(&self) -> KernelId {
+        KernelId::new::<Self>().info(self.workgroup_size_x * 1000 + self.workgroup_size_y)
+    }
+}
+
+/// Fused Q8_0 dequant+matmul on GPU.
+///
+/// Computes `output[B, M, N] = input[B, M, K] x weights[N, K]^T`.
+pub fn q8_matmul(input: Tensor<Wgpu, 3>, weights: &Q8Tensor) -> Tensor<Wgpu, 3> {
+    let cube_input: CubeTensor<WgpuRuntime> = input.into_primitive().tensor();
+    let cube_input = into_contiguous(cube_input);
+
+    assert_eq!(cube_input.shape.num_dims(), 3, "Input must be 3D [B, M, K]");
+    let b = cube_input.shape.dims[0];
+    let m = cube_input.shape.dims[1];
+    let k = cube_input.shape.dims[2];
+    let [n, wk] = weights.shape();
+    assert_eq!(
+        k, wk,
+        "K dimension mismatch: input has {k}, weights have {wk}"
+    );
+
+    let client = cube_input.client.clone();
+    let device = cube_input.device.clone();
+    let blocks_per_row = k / 32;
+
+    let output_handle = client.empty(b * m * n * 4);
+
+    let info: [u32; 5] = [
+        b as u32,
+        m as u32,
+        k as u32,
+        n as u32,
+        blocks_per_row as u32,
+    ];
+    let info_bytes: Vec<u8> = info.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let info_handle = client.create_from_slice(&info_bytes);
+
+    let bindings = Bindings::new()
+        .with_buffer(weights.handle.clone().binding())
+        .with_buffer(cube_input.handle.clone().binding())
+        .with_buffer(output_handle.clone().binding())
+        .with_buffer(info_handle.binding());
+
+    let kernel = SourceKernel::new(
+        Q8MatmulNaiveKernel {
+            workgroup_size_x: NAIVE_WG_X,
+            workgroup_size_y: NAIVE_WG_Y,
+        },
+        CubeDim::new_2d(NAIVE_WG_X, NAIVE_WG_Y),
+    );
+    let wg_x = n.div_ceil(NAIVE_WG_X as usize) as u32;
+    let wg_y = (b * m).div_ceil(NAIVE_WG_Y as usize) as u32;
+    client
+        .launch(
+            Box::new(kernel) as Box<dyn CubeTask<AutoCompiler>>,
+            CubeCount::new_2d(wg_x, wg_y),
+            bindings,
+        )
+        .expect("Q8 naive matmul kernel launch failed");
+
+    let output_tensor = CubeTensor::new_contiguous(
+        client,
+        device,
+        burn::prelude::Shape::from(vec![b, m, n]),
+        output_handle,
+        DType::F32,
+    );
+    Tensor::from_primitive(TensorPrimitive::Float(output_tensor))
+}
+
 /// Load a Q4_0 linear layer from GGUF (no bias).
 pub fn load_q4_linear<R: Read + Seek>(
     reader: &mut GgufReader<R>,
@@ -835,6 +1016,60 @@ pub fn load_q4_linear<R: Read + Seek>(
     let q4 = Q4Tensor::from_q4_bytes(&bytes, [shape[0], shape[1]], device)?;
     Ok(Q4Linear::new(q4, None))
 }
+
+/// Load a Q8_0 linear layer from GGUF (no bias).
+///
+/// Falls back to F32Linear (via `load_f32_weight_any`) when the tensor is F16/F32.
+pub fn load_q8_linear<R: Read + Seek>(
+    reader: &mut GgufReader<R>,
+    name: &str,
+    device: &WgpuDevice,
+) -> Result<Q8Linear> {
+    let info = reader
+        .tensor_info(name)
+        .with_context(|| format!("Tensor '{name}' not found"))?
+        .clone();
+
+    if info.dtype() != GgmlDtype::Q8_0 {
+        bail!("Expected Q8_0 for '{name}', got {:?}", info.dtype());
+    }
+
+    let shape = reverse_gguf_dims(info.shape());
+    let bytes = reader.tensor_data(name)?;
+    let q8 = Q8Tensor::from_q8_bytes(&bytes, [shape[0], shape[1]], device)?;
+    Ok(Q8Linear::new(q8, None))
+}
+
+/// Load a linear layer from GGUF as Q8Linear if Q8_0, otherwise dequant to F32Linear.
+///
+/// Returns `Ok((Some(q8), None))` for Q8_0 or `Ok((None, Some(f32)))` for other dtypes.
+pub fn load_q8_or_f32_linear<R: Read + Seek>(
+    reader: &mut GgufReader<R>,
+    name: &str,
+    device: &WgpuDevice,
+) -> Result<VVLinearLoaded> {
+    use crate::model::vibevoice::VVLinear;
+    use crate::model::F32Linear;
+    use burn::tensor::TensorData;
+
+    let info = reader
+        .tensor_info(name)
+        .with_context(|| format!("Tensor '{name}' not found"))?
+        .clone();
+
+    if info.dtype() == GgmlDtype::Q8_0 {
+        let shape = reverse_gguf_dims(info.shape());
+        let bytes = reader.tensor_data(name)?;
+        let q8 = Q8Tensor::from_q8_bytes(&bytes, [shape[0], shape[1]], device)?;
+        Ok(VVLinear::Q8(Q8Linear::new(q8, None)))
+    } else {
+        let (data, shape) = load_f32_weight_any(reader, name)?;
+        let w = Tensor::<Wgpu, 2>::from_data(TensorData::new(data, [shape[0], shape[1]]), device);
+        Ok(VVLinear::F32(F32Linear::new(w, None)))
+    }
+}
+
+pub type VVLinearLoaded = crate::model::vibevoice::VVLinear;
 
 /// Load an RMS norm weight from GGUF and create a Burn RmsNorm layer.
 pub fn load_rms_norm<R: Read + Seek>(
