@@ -62,6 +62,10 @@ struct Args {
     /// Classifier-free guidance scale for acoustic features (default 1.0 = disabled).
     /// Python reference default is 1.6.
     cfg_scale: f32,
+    /// Top-p (nucleus) sampling threshold (default 0.9, 0.0 = disabled).
+    top_p: f32,
+    /// Repetition penalty (default 1.1, 1.0 = disabled).
+    repetition_penalty: f32,
 }
 
 fn parse_args() -> Args {
@@ -82,6 +86,8 @@ fn parse_args() -> Args {
     let mut debug_dump: Option<String> = None;
     let mut seed = 42u64;
     let mut cfg_scale = 1.0f32;
+    let mut top_p = 0.9f32;
+    let mut repetition_penalty = 1.1f32;
 
     let mut i = 1;
     while i < args.len() {
@@ -145,6 +151,14 @@ fn parse_args() -> Args {
                 i += 1;
                 cfg_scale = args[i].parse().expect("cfg-scale must be f32");
             }
+            "--top-p" => {
+                i += 1;
+                top_p = args[i].parse().expect("top-p must be f32");
+            }
+            "--repetition-penalty" => {
+                i += 1;
+                repetition_penalty = args[i].parse().expect("repetition-penalty must be f32");
+            }
             other => {
                 eprintln!("Unknown arg: {other}");
                 eprintln!("Usage: tada_generate --model <path.gguf> --tokenizer <path.json> --output <path.wav> [--cpu] [--temperature 0.9] [--noise-temp 0.9] [--flow-steps 10] [--max-gen 128] [--text \"Hello world\"] [--voice <path.safetensors>] [--transition-steps 5] [--max-time-before 40] [--debug-dump <dir>] [--seed 42] [--cfg-scale 1.0]");
@@ -170,6 +184,8 @@ fn parse_args() -> Args {
         debug_dump,
         seed,
         cfg_scale,
+        top_p,
+        repetition_penalty,
     }
 }
 
@@ -653,7 +669,9 @@ fn run() -> CResult<()> {
         let mut is_eos = false;
         let mut sampled_id = current_token;
         if step >= prompt_len - 1 {
-            let (token_id, eos) = model.sample_next_token(&hidden, args.temperature, &mut rng)?;
+            let (token_id, eos) = model.sample_next_token(
+                &hidden, args.temperature, args.top_p, args.repetition_penalty, &token_ids, &mut rng,
+            )?;
             sampled_id = token_id;
             is_eos = eos;
             next_token = sampled_id;

@@ -576,60 +576,117 @@ impl TadaModel {
 
     /// Sample the next text token from the LLM hidden state.
     ///
-    /// - `hidden`: `[1, 1, hidden_size]` from `forward_step`
-    /// - `temperature`: sampling temperature (1.0 = no scaling)
-    /// - `rng`: RNG for stochastic sampling (Gumbel-max trick)
+    /// Matches Python's sampling pipeline:
+    /// 1. Repetition penalty (penalize tokens already in input_ids)
+    /// 2. Temperature scaling
+    /// 3. Top-p (nucleus) filtering
+    /// 4. Multinomial sampling
     ///
-    /// Returns `(token_id, is_eos)` where `is_eos` is true if the token
-    /// is EOS (128001) or EOT (128009).
+    /// - `hidden`: `[1, 1, hidden_size]` from `forward_step`
+    /// - `temperature`: sampling temperature (Python default: 0.6)
+    /// - `top_p`: nucleus sampling threshold (Python default: 0.9, 0.0 = disabled)
+    /// - `repetition_penalty`: penalty for repeated tokens (Python default: 1.1, 1.0 = disabled)
+    /// - `input_ids`: tokens generated so far (for repetition penalty)
+    /// - `rng`: RNG for stochastic sampling
+    ///
+    /// Returns `(token_id, is_eos)`.
     pub fn sample_next_token(
         &self,
         hidden: &Tensor,
         temperature: f32,
+        top_p: f32,
+        repetition_penalty: f32,
+        input_ids: &[u32],
         rng: &mut dyn Rng,
     ) -> Result<(u32, bool)> {
         // Compute logits: [1, 1, vocab_size]
         let logits = self.llama.lm_head(hidden)?;
 
-        // Take last position: [1, vocab_size]
-        let logits = logits.i((.., logits.dim(1)? - 1, ..))?;
-
-        // Temperature scaling
-        let logits = if (temperature - 1.0).abs() > 1e-6 {
-            (logits / temperature as f64)?
-        } else {
-            logits
-        };
-
-        // Gumbel-max trick: argmax(logits + gumbel_noise) = multinomial sample
-        // gumbel_noise = -log(-log(uniform(0,1)))
-        // We use the normal RNG to generate uniform samples via the CDF
-        let logits_vec = logits.squeeze(0)?.to_vec1::<f32>()?;
+        // Take last position → [vocab_size]
+        let mut logits_vec = logits
+            .i((.., logits.dim(1)? - 1, ..))?
+            .squeeze(0)?
+            .to_vec1::<f32>()?;
         let vocab_size = logits_vec.len();
-        let mut gumbel_logits = Vec::with_capacity(vocab_size);
-        for &l in &logits_vec {
-            // Convert normal sample to uniform via probit function approximation
-            let u: f32 = loop {
-                // Use normal sample → clamp to (0,1) range via sigmoid
-                let n = rng.sample_normal();
-                let u = 1.0 / (1.0 + (-n).exp());
-                if u > 0.0 && u < 1.0 {
-                    break u;
+
+        // 1. Repetition penalty: penalize tokens already in input_ids
+        if (repetition_penalty - 1.0).abs() > 1e-6 {
+            for &id in input_ids {
+                if (id as usize) < vocab_size {
+                    let score = logits_vec[id as usize];
+                    logits_vec[id as usize] = if score < 0.0 {
+                        score * repetition_penalty
+                    } else {
+                        score / repetition_penalty
+                    };
                 }
-            };
-            let gumbel = -((-u.ln()).ln());
-            gumbel_logits.push(l + gumbel);
+            }
         }
 
-        let token_id = gumbel_logits
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(i, _)| i as u32)
-            .unwrap_or(0);
+        // 2. Temperature scaling
+        if (temperature - 1.0).abs() > 1e-6 && temperature > 0.0 {
+            for l in logits_vec.iter_mut() {
+                *l /= temperature;
+            }
+        }
+
+        // 3. Top-p (nucleus) filtering
+        if top_p > 0.0 && top_p < 1.0 {
+            // Sort indices by logit value descending
+            let mut indices: Vec<usize> = (0..vocab_size).collect();
+            indices.sort_by(|&a, &b| logits_vec[b].partial_cmp(&logits_vec[a]).unwrap_or(std::cmp::Ordering::Equal));
+
+            // Compute softmax of sorted logits
+            let max_logit = logits_vec[indices[0]];
+            let mut sorted_probs: Vec<f32> = indices.iter().map(|&i| (logits_vec[i] - max_logit).exp()).collect();
+            let sum: f32 = sorted_probs.iter().sum();
+            for p in sorted_probs.iter_mut() {
+                *p /= sum;
+            }
+
+            // Find cutoff: cumulative prob >= top_p
+            let mut cumsum = 0.0f32;
+            for (rank, &prob) in sorted_probs.iter().enumerate() {
+                cumsum += prob;
+                if cumsum >= top_p {
+                    // Mask out all tokens after this rank
+                    for &idx in &indices[rank + 1..] {
+                        logits_vec[idx] = f32::NEG_INFINITY;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // 4. Multinomial sampling (softmax → cumulative → sample)
+        let max_logit = logits_vec.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let mut probs: Vec<f32> = logits_vec.iter().map(|&l| (l - max_logit).exp()).collect();
+        let sum: f32 = probs.iter().sum();
+        if sum > 0.0 {
+            for p in probs.iter_mut() {
+                *p /= sum;
+            }
+        }
+
+        // Sample from the distribution
+        let u: f32 = loop {
+            let n = rng.sample_normal();
+            let u = 1.0 / (1.0 + (-n).exp());
+            if u > 0.0 && u < 1.0 {
+                break u;
+            }
+        };
+        let mut cumsum = 0.0f32;
+        let mut token_id = 0u32;
+        for (i, &p) in probs.iter().enumerate() {
+            cumsum += p;
+            if cumsum >= u {
+                token_id = i as u32;
+                break;
+            }
+        }
 
         let is_eos = token_id == EOS_TOKEN_ID || token_id == EOT_TOKEN_ID;
-
         Ok((token_id, is_eos))
     }
 
