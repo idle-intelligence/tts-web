@@ -124,12 +124,15 @@ fn scheduled_cfg(base_scale: f32, t: f32) -> f32 {
 ///
 /// When `acoustic_cfg_scale > 1.0`, classifier-free guidance is applied:
 /// the head is run twice per step (once with the real condition, once with
-/// zeros), and the velocities are combined with a cosine-scheduled scale.
+/// the negative condition), and the velocities are combined with a cosine-scheduled scale.
 /// Duration features (last 16 dims) always use scale 1.0.
 ///
 /// # Arguments
 /// - `speech` — initial noisy acoustic latent, shape `[B, acoustic_dim]`
 /// - `cond` — conditioning from the LLM backbone, shape `[B, hidden_size]`
+/// - `neg_cond` — negative condition for CFG. Should be the LLM hidden state
+///   from a forward pass with zero acoustic features (not literal zeros).
+///   If None and CFG is enabled, falls back to zeros.
 /// - `head` — the VibeVoice diffusion prediction head
 /// - `num_steps` — number of Euler steps (e.g. 32)
 /// - `time_schedule` — one of "uniform", "cosine", "logsnr"
@@ -138,6 +141,7 @@ fn scheduled_cfg(base_scale: f32, t: f32) -> f32 {
 pub fn solve_flow_matching(
     speech: &Tensor,
     cond: &Tensor,
+    neg_cond: Option<&Tensor>,
     head: &VibeVoiceDiffusionHead,
     num_steps: usize,
     time_schedule: &str,
@@ -150,9 +154,16 @@ pub fn solve_flow_matching(
 
     let use_cfg = (acoustic_cfg_scale - 1.0).abs() > 1e-6;
 
-    // Pre-build zero condition tensor for CFG negative pass (same shape as cond).
+    // Use provided neg_cond, or fall back to zeros if not provided.
+    let zeros_fallback;
     let cond_neg = if use_cfg {
-        Some(Tensor::zeros_like(cond)?)
+        match neg_cond {
+            Some(nc) => Some(nc),
+            None => {
+                zeros_fallback = Tensor::zeros_like(cond)?;
+                Some(&zeros_fallback)
+            }
+        }
     } else {
         None
     };

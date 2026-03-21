@@ -391,6 +391,7 @@ impl HybridTadaModel {
 
                 let (acoustic, time_before, time_after) = self.candle_model.generate_acoustic(
                     &hidden_candle,
+                    None,  // neg_hidden: TODO compute for proper CFG
                     state.noise_temp,
                     &mut state.rng,
                     state.num_flow_steps,

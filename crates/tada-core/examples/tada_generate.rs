@@ -21,7 +21,7 @@
 ///
 /// Writes a Float32 PCM WAV at 24000 Hz (mono).
 
-use candle_core::{Device, Result as CResult, Tensor};
+use candle_core::{DType, Device, Result as CResult, Tensor};
 use tada_core::audio_check::{check_generation, AudioStats};
 use tada_core::config::TadaConfig;
 use tada_core::tada_model::{AcousticDebugInfo, Rng, TadaModel, VoicePrompt};
@@ -601,9 +601,32 @@ fn run() -> CResult<()> {
         // Generate acoustics after shift_acoustic steps, but NOT during EOS countdown
         // (post-EOS hidden states are conditioned on EOT tokens and decode to noise)
         if step >= shift_acoustic && eos_countdown.is_none() {
+            // For CFG: compute negative condition (LLM hidden state with zero acoustics).
+            // Python runs a doubled batch [real, zeros] through the LLM. We build
+            // neg embeddings with zero acoustic features — same text token but no
+            // voice conditioning. The neg_embeds go through the SAME LLM and KV cache
+            // (we pop the neg entry from the cache afterwards to avoid corruption).
+            let neg_hidden = if (args.cfg_scale - 1.0).abs() > 1e-6 {
+                let zero_acoustic = Tensor::zeros((1, 1, cfg.acoustic_dim), DType::F32, &device)?;
+                let zero_mask = Tensor::zeros((1, 1), DType::U32, &device)?;
+                let zero_tb = Tensor::zeros((1, 1), DType::U32, &device)?;
+                let zero_ta = Tensor::zeros((1, 1), DType::U32, &device)?;
+                let neg_embeds = model.build_input_embeds(
+                    &token_tensor, &zero_acoustic, &zero_mask, &zero_tb, &zero_ta,
+                )?;
+                // Run through LLM (advances position + adds to KV cache)
+                let neg_h = model.forward_step(&neg_embeds)?;
+                // Undo: roll back position and pop the last KV cache entry
+                model.undo_last_step();
+                Some(neg_h)
+            } else {
+                None
+            };
+
             let capture = debug_dump_path.is_some();
             let (acou, tb, ta, mut dbg) = model.generate_acoustic_debug(
                 &hidden,
+                neg_hidden.as_ref(),
                 args.noise_temp,
                 &mut rng,
                 args.flow_steps,

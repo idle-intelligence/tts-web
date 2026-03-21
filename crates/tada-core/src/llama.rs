@@ -108,6 +108,21 @@ impl KvCache {
         self.v = None;
     }
 
+    /// Pop the last entry from the KV cache (undo one append).
+    fn pop_last(&mut self) -> Result<()> {
+        if let (Some(k), Some(v)) = (&self.k, &self.v) {
+            let seq_len = k.dim(2)?;
+            if seq_len <= 1 {
+                self.k = None;
+                self.v = None;
+            } else {
+                self.k = Some(k.narrow(2, 0, seq_len - 1)?);
+                self.v = Some(v.narrow(2, 0, seq_len - 1)?);
+            }
+        }
+        Ok(())
+    }
+
     /// Append new key/value and return the full accumulated tensors.
     fn append(&mut self, k: &Tensor, v: &Tensor) -> Result<(Tensor, Tensor)> {
         let (k_full, v_full) = match (&self.k, &self.v) {
@@ -590,6 +605,13 @@ impl LlamaModel {
     pub fn clear_kv_cache(&mut self) {
         for cache in self.kv_caches.iter_mut() {
             cache.clear();
+        }
+    }
+
+    /// Pop the last entry from all KV caches (undo one forward step).
+    pub fn pop_kv_cache(&mut self) {
+        for cache in self.kv_caches.iter_mut() {
+            let _ = cache.pop_last();
         }
     }
 }

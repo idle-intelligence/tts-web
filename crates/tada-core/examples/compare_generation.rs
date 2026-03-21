@@ -322,6 +322,7 @@ fn run() -> CResult<()> {
         if step >= shift_acoustic {
             let (acou, tb, ta) = model.generate_acoustic(
                 &hidden,
+                None,
                 noise_temp,
                 &mut rng,
                 flow_steps,

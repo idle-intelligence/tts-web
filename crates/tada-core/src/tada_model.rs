@@ -442,6 +442,14 @@ impl TadaModel {
         self.llama.forward_n_layers(input_embeds, self.position, num_layers)
     }
 
+    /// Undo the last forward_step: decrement position and pop last KV cache entry.
+    /// Used for CFG negative condition: run LLM with zero acoustics, capture hidden,
+    /// then undo so the real forward step's KV cache is correct.
+    pub fn undo_last_step(&mut self) {
+        self.position = self.position.saturating_sub(1);
+        self.llama.pop_kv_cache();
+    }
+
     /// Compute logits from hidden states (for debugging).
     pub fn lm_head_logits(&self, hidden: &Tensor) -> Result<Tensor> {
         self.llama.lm_head(hidden)
@@ -462,13 +470,14 @@ impl TadaModel {
     pub fn generate_acoustic(
         &self,
         hidden: &Tensor,
+        neg_hidden: Option<&Tensor>,
         noise_temp: f32,
         rng: &mut dyn Rng,
         num_steps: usize,
         acoustic_cfg_scale: f32,
     ) -> Result<(Tensor, u32, u32)> {
         let (acoustic, time_before, time_after, _debug) =
-            self.generate_acoustic_debug(hidden, noise_temp, rng, num_steps, acoustic_cfg_scale, false)?;
+            self.generate_acoustic_debug(hidden, neg_hidden, noise_temp, rng, num_steps, acoustic_cfg_scale, false)?;
         Ok((acoustic, time_before, time_after))
     }
 
@@ -482,6 +491,7 @@ impl TadaModel {
     pub fn generate_acoustic_debug(
         &self,
         hidden: &Tensor,
+        neg_hidden: Option<&Tensor>,
         noise_temp: f32,
         rng: &mut dyn Rng,
         num_steps: usize,
@@ -490,6 +500,7 @@ impl TadaModel {
     ) -> Result<(Tensor, u32, u32, Option<AcousticDebugInfo>)> {
         // Squeeze hidden from [1, 1, hidden_size] → [1, hidden_size]
         let cond = hidden.squeeze(1)?;
+        let neg_cond = neg_hidden.map(|h| h.squeeze(1)).transpose()?;
 
         // Sample noise: [1, total_latent_dim]
         let total_dim = self.cfg.total_latent_dim();
@@ -502,6 +513,7 @@ impl TadaModel {
         let result = solve_flow_matching(
             &noise,
             &cond,
+            neg_cond.as_ref(),
             &self.prediction_head,
             num_steps,
             "logsnr",
