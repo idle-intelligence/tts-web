@@ -602,10 +602,9 @@ fn run() -> CResult<()> {
         // (post-EOS hidden states are conditioned on EOT tokens and decode to noise)
         if step >= shift_acoustic && eos_countdown.is_none() {
             // For CFG: compute negative condition (LLM hidden state with zero acoustics).
-            // Python runs a doubled batch [real, zeros] through the LLM. We build
-            // neg embeddings with zero acoustic features — same text token but no
-            // voice conditioning. The neg_embeds go through the SAME LLM and KV cache
-            // (we pop the neg entry from the cache afterwards to avoid corruption).
+            // Python runs a doubled batch [real, zeros] through the LLM. We use a
+            // separate neg KV cache so each path maintains its own history of hidden
+            // states — pos stores real-acoustic conditioning, neg stores zero-acoustic.
             let neg_hidden = if (args.cfg_scale - 1.0).abs() > 1e-6 {
                 let zero_acoustic = Tensor::zeros((1, 1, cfg.acoustic_dim), DType::F32, &device)?;
                 let zero_mask = Tensor::zeros((1, 1), DType::U32, &device)?;
@@ -614,11 +613,7 @@ fn run() -> CResult<()> {
                 let neg_embeds = model.build_input_embeds(
                     &token_tensor, &zero_acoustic, &zero_mask, &zero_tb, &zero_ta,
                 )?;
-                // Run through LLM (advances position + adds to KV cache)
-                let neg_h = model.forward_step(&neg_embeds)?;
-                // Undo: roll back position and pop the last KV cache entry
-                model.undo_last_step();
-                Some(neg_h)
+                Some(model.forward_neg_step(&neg_embeds)?)
             } else {
                 None
             };

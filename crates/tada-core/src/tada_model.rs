@@ -442,12 +442,19 @@ impl TadaModel {
         self.llama.forward_n_layers(input_embeds, self.position, num_layers)
     }
 
-    /// Undo the last forward_step: decrement position and pop last KV cache entry.
-    /// Used for CFG negative condition: run LLM with zero acoustics, capture hidden,
-    /// then undo so the real forward step's KV cache is correct.
-    pub fn undo_last_step(&mut self) {
-        self.position = self.position.saturating_sub(1);
-        self.llama.pop_kv_cache();
+    /// Run one step through the Llama backbone using the negative KV cache.
+    ///
+    /// Used for CFG: the positive path calls `forward_step` (advances position
+    /// and writes to `kv_caches`); the negative path calls this method using the
+    /// position that `forward_step` consumed, writing to `neg_kv_caches` instead.
+    ///
+    /// - `input_embeds`: `[1, 1, hidden_size]` built with zero acoustic features
+    ///
+    /// Returns hidden states `[1, 1, hidden_size]`.
+    pub fn forward_neg_step(&mut self, input_embeds: &Tensor) -> Result<Tensor> {
+        // pos_step already incremented position; use position - 1 for this step.
+        let pos = self.position.saturating_sub(1);
+        self.llama.forward_neg(input_embeds, pos)
     }
 
     /// Compute logits from hidden states (for debugging).
