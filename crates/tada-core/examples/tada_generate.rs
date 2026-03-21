@@ -614,25 +614,25 @@ fn run() -> CResult<()> {
         // Forward step
         let hidden = model.forward_step(&input_embeds)?;
 
+        // CFG: ALWAYS run neg forward to build neg KV cache history (even during prompt).
+        // Python runs the doubled batch on ALL steps, so neg accumulates context.
+        // Without this, the neg KV cache is empty at the first content step, making
+        // CFG guidance meaningless (12 dB louder than Python for whisper voices).
+        let neg_hidden = if (args.cfg_scale - 1.0).abs() > 1e-6 {
+            let zero_acoustic = Tensor::zeros((1, 1, cfg.acoustic_dim), DType::F32, &device)?;
+            let zero_mask = Tensor::zeros((1, 1), DType::U32, &device)?;
+            let zero_tb = Tensor::zeros((1, 1), DType::U32, &device)?;
+            let zero_ta = Tensor::zeros((1, 1), DType::U32, &device)?;
+            let neg_embeds = model.build_input_embeds(
+                &token_tensor, &zero_acoustic, &zero_mask, &zero_tb, &zero_ta,
+            )?;
+            Some(model.forward_neg_step(&neg_embeds)?)
+        } else {
+            None
+        };
+
         // Generate acoustics after shift_acoustic steps, but NOT during EOS countdown
-        // (post-EOS hidden states are conditioned on EOT tokens and decode to noise)
         if step >= shift_acoustic && eos_countdown.is_none() {
-            // For CFG: compute negative condition (LLM hidden state with zero acoustics).
-            // Python runs a doubled batch [real, zeros] through the LLM. We use a
-            // separate neg KV cache so each path maintains its own history of hidden
-            // states — pos stores real-acoustic conditioning, neg stores zero-acoustic.
-            let neg_hidden = if (args.cfg_scale - 1.0).abs() > 1e-6 {
-                let zero_acoustic = Tensor::zeros((1, 1, cfg.acoustic_dim), DType::F32, &device)?;
-                let zero_mask = Tensor::zeros((1, 1), DType::U32, &device)?;
-                let zero_tb = Tensor::zeros((1, 1), DType::U32, &device)?;
-                let zero_ta = Tensor::zeros((1, 1), DType::U32, &device)?;
-                let neg_embeds = model.build_input_embeds(
-                    &token_tensor, &zero_acoustic, &zero_mask, &zero_tb, &zero_ta,
-                )?;
-                Some(model.forward_neg_step(&neg_embeds)?)
-            } else {
-                None
-            };
 
             let capture = debug_dump_path.is_some();
             let (acou, tb, ta, mut dbg) = model.generate_acoustic_debug(
