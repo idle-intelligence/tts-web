@@ -1,0 +1,12 @@
+{
+  "text": "No, but tomorrow in Oak Glen, there's gonna be very low chance of heavy snow, and snow showers are extremely likely on Sunday.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/matrix/ex03_whisper.wav",
+  "token_values_shape": [
+    29,
+    512
+  ],
+  "token_positions_shape": [
+    29
+  ]
+}
