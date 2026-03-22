@@ -20,11 +20,10 @@ Generate speech from text with zero system dependencies:
 git clone https://github.com/idle-intelligence/tts-web.git
 cd tts-web
 
-# Download model weights (~60MB)
+# Download model weights (~60MB) and convert to safetensors
 hf download KittenML/kitten-tts-nano-0.8 --local-dir models/kitten-nano
-
-# Convert ONNX weights to safetensors
-python scripts/convert_kitten_to_safetensors.py
+pip install onnx safetensors numpy
+python scripts/convert_kitten_to_safetensors.py models/kitten-nano
 
 # Build (one-time)
 cargo build --example kitten_generate -p kitten-core --release --features espeak

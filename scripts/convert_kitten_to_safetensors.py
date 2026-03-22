@@ -16,7 +16,13 @@ import onnx
 from onnx import numpy_helper
 from safetensors.numpy import save_file
 
-HF_DIR = Path("/Users/tc/Code/idle-intelligence/hf/kitten-tts-nano-0.8")
+import sys
+
+if len(sys.argv) > 1:
+    HF_DIR = Path(sys.argv[1])
+else:
+    HF_DIR = Path("models/kitten-nano")
+
 ONNX_PATH = HF_DIR / "kitten_tts_nano_v0_8.onnx"
 VOICES_PATH = HF_DIR / "voices.npz"
 CONFIG_PATH = HF_DIR / "config.json"
