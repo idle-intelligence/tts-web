@@ -11,6 +11,8 @@ Browser-native text-to-speech running 100% client-side via Rust/WASM.
 | [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) | ~130MB (Q8_0) | ~97M | Autoregressive + Mimi codec | MIT |
 | [KittenTTS](https://github.com/KittenML/KittenTTS) | ~56MB (F32) | 14M | StyleTTS 2 distilled, single forward pass | Apache 2.0 |
 
+Weights are downloaded from HuggingFace: [Pocket TTS GGUF](https://huggingface.co/idle-intelligence/pocket-tts-gguf), [KittenTTS ONNX](https://huggingface.co/KittenML/kitten-tts-nano-0.8) (converted to safetensors locally).
+
 ## Quick Start — KittenTTS CLI
 
 Generate speech from text with zero system dependencies:
