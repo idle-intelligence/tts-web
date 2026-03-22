@@ -261,13 +261,6 @@
             cursor: pointer;
         }
 
-        #tadaProgress {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 12px;
-            color: var(--faint);
-            margin-top: 8px;
-        }
-
         #audioSection { display: none; }
         audio {
             width: 100%;
@@ -321,7 +314,6 @@
         <h2>settings <span class="sub">· model</span></h2>
         <div class="model-selector">
             <label><input type="radio" name="model" value="pocket-tts" checked> Pocket TTS (128 MB)</label>
-            <label><input type="radio" name="model" value="tada"> TADA-1B (~1.1 GB)</label>
             <label><input type="radio" name="model" value="kitten"> KittenTTS (~45 MB)</label>
         </div>
     </section>
@@ -370,7 +362,6 @@
             </div>
         </div>
         <div id="stepInfo"></div>
-        <div id="tadaProgress"></div>
     </section>
 
     <section id="audioSection">
@@ -398,7 +389,6 @@
         const tempValue = document.getElementById('tempValue');
         const tempSliderGroup = document.getElementById('tempSliderGroup');
         const stepInfo = document.getElementById('stepInfo');
-        const tadaProgress = document.getElementById('tadaProgress');
         const audioSection = document.getElementById('audioSection');
         const audioPlayer = document.getElementById('audioPlayer');
         const voiceSection = document.getElementById('voiceSection');
@@ -546,22 +536,12 @@
             } catch { return false; }
         }
 
-        const TADA_CACHE = 'tada-model-v1';
-        async function isTadaCached() {
-            if (isLocal) return true;
-            try {
-                const cache = await caches.open(TADA_CACHE);
-                const url = 'https://huggingface.co/idle-intelligence/tada-gguf/resolve/main/tada-1b-q4_0.gguf';
-                return !!(await cache.match(url));
-            } catch { return false; }
-        }
-
         const KITTEN_MODEL_URL = isLocal
             ? `${location.origin}/kitten-model.safetensors`
-            : 'https://huggingface.co/idle-intelligence/kitten-tts/resolve/main/kitten-model.safetensors';
+            : 'https://huggingface.co/idle-intelligence/kitten-tts-nano-safetensors/resolve/main/kitten-nano.safetensors';
         const KITTEN_VOICES_URL = isLocal
             ? `${location.origin}/kitten-voices.safetensors`
-            : 'https://huggingface.co/idle-intelligence/kitten-tts/resolve/main/kitten-voices.safetensors';
+            : 'https://huggingface.co/idle-intelligence/kitten-tts-nano-safetensors/resolve/main/kitten-voices.safetensors';
         const KITTEN_WASM_BASE = isLocal
             ? `${location.origin}/kitten-pkg`
             : './kitten-pkg';
@@ -747,84 +727,6 @@
             });
         }
 
-        // ---- TADA client ----
-        function makeTadaClient() {
-            return new TtsClient({
-                modelType: 'tada',
-                baseUrl: isLocal ? location.origin : '',
-                wasmBaseUrl: isLocal ? (location.origin + '/tada-pkg') : undefined,
-                workerUrl: './tada-worker.js',
-                onStatus: (text, ready, progress) => {
-                    if (ready) {
-                        updateStatus('ready', text);
-                        generateBtn.disabled = false;
-                        progressBar.classList.remove('visible');
-                        progressInfo.textContent = '';
-                        downloadBtn.style.display = 'none';
-                    } else {
-                        updateStatus('loading', text);
-                        if (typeof progress === 'number') {
-                            progressBar.classList.add('visible');
-                            progressFill.style.width = (progress * 100) + '%';
-                            progressInfo.textContent = text;
-                        }
-                    }
-                },
-                onError: (err) => {
-                    updateStatus('error', 'Error: ' + err.message);
-                    generating = false;
-                    generateBtn.disabled = false;
-                    stepInfo.textContent = '';
-                    tadaProgress.textContent = '';
-                    console.error(err);
-                },
-                onGenStart: (numTokens) => {
-                    allChunks = [];
-                    genStartTime = performance.now();
-                    audioSection.style.display = 'none';
-                    stepInfo.textContent = '';
-                    tadaProgress.textContent = `Generating... (${numTokens} input tokens)`;
-                    updateStatus('generating', 'Generating...');
-                },
-                onProgress: (step, totalTokens, isEos, tokenId) => {
-                    const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
-                    if (totalTokens > 0) {
-                        tadaProgress.textContent = `Generating token ${step}/${totalTokens} (${elapsed}s)`;
-                    } else {
-                        tadaProgress.textContent = `Generating token ${step}... (${elapsed}s)`;
-                    }
-                },
-                onChunk: (data, step) => {
-                    // TADA delivers full audio at once via the 'audio' message
-                    const chunk = data instanceof Float32Array ? data : new Float32Array(data);
-                    allChunks.push(chunk);
-                },
-                onDone: (totalSteps) => {
-                    const totalTime = ((performance.now() - genStartTime) / 1000).toFixed(2);
-                    generating = false;
-                    generateBtn.disabled = false;
-                    tadaProgress.textContent = '';
-                    updateStatus('ready', 'Ready');
-
-                    const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
-                    if (totalLength === 0) {
-                        stepInfo.textContent = `Done in ${totalTime}s — no audio produced`;
-                        return;
-                    }
-                    const pcm = new Float32Array(totalLength);
-                    let offset = 0;
-                    for (const chunk of allChunks) { pcm.set(chunk, offset); offset += chunk.length; }
-                    const audioDur = (totalLength / tts.sampleRate).toFixed(2);
-                    stepInfo.textContent = `${audioDur}s audio in ${totalTime}s — ${totalSteps} steps`;
-
-                    const wav = encodeWav(pcm, tts.sampleRate);
-                    const blob = new Blob([wav], { type: 'audio/wav' });
-                    audioPlayer.src = URL.createObjectURL(blob);
-                    audioSection.style.display = 'block';
-                }
-            });
-        }
-
         // ---- Kitten client ----
         function makeKittenClient() {
             return new TtsClient({
@@ -854,7 +756,6 @@
                     generating = false;
                     generateBtn.disabled = false;
                     stepInfo.textContent = '';
-                    tadaProgress.textContent = '';
                     console.error(err);
                 },
                 onPhonemized: (ipa) => {
@@ -921,7 +822,6 @@
             kittenVoiceSection.style.display = model === 'kitten' ? '' : 'none';
 
             tempSliderGroup.style.display = model === 'kitten' ? 'none' : '';
-            tadaProgress.textContent = '';
             stepInfo.textContent = '';
             audioSection.style.display = 'none';
             ipaDisplay.style.display = 'none';
@@ -957,18 +857,7 @@
 
             updateUIForModel(model);
 
-            if (model === 'tada') {
-                tts = makeTadaClient();
-                const cached = await isTadaCached();
-                if (cached) {
-                    updateStatus('loading', 'Loading TADA...');
-                    await initClient();
-                } else {
-                    updateStatus('', 'TADA model not downloaded (~1.1 GB)');
-                    downloadBtn.style.display = '';
-                    downloadBtn.disabled = false;
-                }
-            } else if (model === 'kitten') {
+            if (model === 'kitten') {
                 tts = makeKittenClient();
                 const cached = await isKittenCached();
                 if (cached) {
@@ -1059,12 +948,7 @@
             generating = true;
             generateBtn.disabled = true;
             if (currentModel === 'pocket-tts') setVoiceBtnsEnabled(false);
-            const opts = currentModel === 'tada' ? {
-                noiseTemp: 0.9,
-                numFlowSteps: 10,
-                cfgScale: 1.0,
-            } : {};
-            tts.generate(text, parseFloat(tempSlider.value), opts);
+            tts.generate(text, parseFloat(tempSlider.value));
         });
 
         function encodeWav(samples, sampleRate) {
