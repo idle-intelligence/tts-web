@@ -11,7 +11,7 @@ Browser-native text-to-speech running 100% client-side via Rust/WASM.
 | [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) | ~130MB (Q8_0) | ~97M | Autoregressive + Mimi codec | MIT |
 | [KittenTTS](https://github.com/KittenML/KittenTTS) | ~56MB (F32) | 14M | StyleTTS 2 distilled, single forward pass | Apache 2.0 |
 
-Weights are downloaded from HuggingFace: [Pocket TTS GGUF](https://huggingface.co/idle-intelligence/pocket-tts-gguf), [KittenTTS ONNX](https://huggingface.co/KittenML/kitten-tts-nano-0.8) (converted to safetensors locally).
+Weights are on HuggingFace: [Pocket TTS GGUF](https://huggingface.co/idle-intelligence/pocket-tts-gguf), [KittenTTS safetensors](https://huggingface.co/idle-intelligence/kitten-tts).
 
 ## Quick Start — KittenTTS CLI
 
@@ -22,10 +22,8 @@ Generate speech from text with zero system dependencies:
 git clone https://github.com/idle-intelligence/tts-web.git
 cd tts-web
 
-# Download model weights (~60MB) and convert to safetensors
-hf download KittenML/kitten-tts-nano-0.8 --local-dir models/kitten-nano
-pip install onnx safetensors numpy
-python scripts/convert_kitten_to_safetensors.py models/kitten-nano
+# Download model weights (~60MB)
+hf download idle-intelligence/kitten-tts --local-dir models/kitten-nano
 
 # Build (one-time)
 cargo build --example kitten_generate -p kitten-core --release --features espeak
