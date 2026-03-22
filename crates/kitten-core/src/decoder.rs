@@ -370,8 +370,8 @@ impl HarmonicSource {
             .reshape((1, self.n_harmonics, 1))?;
 
         // f0_exp: [batch, n_harmonics, T]
-        let f0_exp = f0.broadcast_as((batch, self.n_harmonics, t))?;
-        let h_mult_exp = h_mult.broadcast_as((batch, self.n_harmonics, t))?;
+        let _f0_exp = f0.broadcast_as((batch, self.n_harmonics, t))?;
+        let _h_mult_exp = h_mult.broadcast_as((batch, self.n_harmonics, t))?;
 
         // Compute phase and sin in plain Rust (avoids 30K tensor ops for cumsum).
         // phase_inc[b, h, t] = 2π * k * f0[t] / sr, then cumsum over t.
@@ -758,7 +758,7 @@ impl Decoder {
         let mut h = self.encode.forward(&enc_in, &style_half)?; // [batch, 256, T]
 
         // Four DecodeBlocks
-        for (block_idx, block) in self.decode.iter().enumerate() {
+        for (_block_idx, block) in self.decode.iter().enumerate() {
             // Align asr, f0, n to current h time dim (needed for block 3 which doubles T)
             let ht = h.dim(2)?;
             let asr_t = match_time(&asr, ht)?;
