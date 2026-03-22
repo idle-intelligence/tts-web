@@ -400,7 +400,8 @@
         // kittenPhrases removed
 
         const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
-        const KITTEN_VOICES = ['bella', 'jasper', 'luna', 'bruno', 'rosie', 'hugo', 'kiki', 'leo'];
+        // Must be alphabetical — matches WASM voice index order (sorted in load_voices)
+        const KITTEN_VOICES = ['bella', 'bruno', 'hugo', 'jasper', 'kiki', 'leo', 'luna', 'rosie'];
         const KITTEN_SPEED_PRIORS = {
             bella: 0.8, jasper: 0.8, luna: 0.8, bruno: 0.8,
             rosie: 0.8, hugo: 0.9, kiki: 0.8, leo: 0.8,
