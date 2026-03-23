@@ -108,9 +108,11 @@ web/
 
 RTF = generation time / audio duration (lower = faster). WASM speed = audio duration / wall time (higher = faster).
 
-## Building from Source
+## Building WASM from Source
 
-This project uses patched versions of two dependencies via `[patch]` in `Cargo.toml`. You need these sibling repos checked out locally:
+The KittenTTS CLI (Quick Start above) builds standalone with no extra repos needed.
+
+For WASM builds (Pocket TTS, browser demo), the workspace uses patched dependencies via `[patch]` in `Cargo.toml`. You need these sibling repos checked out locally:
 
 ```
 parent/
