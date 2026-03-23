@@ -13,3 +13,4 @@ rand_distr = "0.5"
 [dev-dependencies]
 safetensors = "0.4"
 half = "2"
+sentencepiece = "0.11"

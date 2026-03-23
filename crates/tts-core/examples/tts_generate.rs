@@ -9,8 +9,10 @@
 ///
 /// Writes a Float32 PCM WAV at 24000 Hz (mono).
 
+use std::time::Instant;
 use candle_core::{Device, Result as CResult, Tensor};
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};
+use sentencepiece::SentencePieceProcessor;
 use tts_core::flow_lm::{FlowLMState, Rng};
 use tts_core::tts_model::{TTSState, prepare_text_prompt};
 
@@ -23,6 +25,8 @@ struct Args {
     voice_path: Option<String>,
     output_path: String,
     temperature: f32,
+    text: String,
+    tokenizer_path: String,
 }
 
 fn parse_args() -> Args {
@@ -31,6 +35,8 @@ fn parse_args() -> Args {
     let mut voice_path = None;
     let mut output_path = None;
     let mut temperature = 0.7f32;
+    let mut text = String::from("Hello, this is a test of the text to speech system.");
+    let mut tokenizer_path = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -51,6 +57,14 @@ fn parse_args() -> Args {
                 i += 1;
                 temperature = args[i].parse().expect("temperature must be f32");
             }
+            "--text" => {
+                i += 1;
+                text = args[i].clone();
+            }
+            "--tokenizer" => {
+                i += 1;
+                tokenizer_path = Some(args[i].clone());
+            }
             other => {
                 eprintln!("Unknown arg: {other}");
                 std::process::exit(1);
@@ -64,6 +78,8 @@ fn parse_args() -> Args {
         voice_path,
         output_path: output_path.expect("--output required"),
         temperature,
+        text,
+        tokenizer_path: tokenizer_path.expect("--tokenizer required"),
     }
 }
 
@@ -245,15 +261,18 @@ fn run() -> CResult<()> {
 
     // --- Prepare text and token IDs ---
     eprintln!("\n[3] Preparing text...");
-    let raw_text = "Hello, this is a test of the text to speech system.";
+    let raw_text = &args.text;
     let (prepared_text, frames_after_eos) = prepare_text_prompt(raw_text);
     eprintln!("  raw: {raw_text:?}");
     eprintln!("  prepared: {prepared_text:?}");
-    eprintln!("  frames_after_eos: {frames_after_eos}");
 
-    // Real token IDs from sentencepiece encoding of the prepared text
-    // Obtained by running: python3 -c "import sentencepiece as spm; sp=spm.SentencePieceProcessor(); sp.Load('tokenizer.model'); print(sp.EncodeAsIds('Hello, this is a test of the text to speech system.'))"
-    let token_ids: Vec<u32> = vec![2994, 262, 285, 277, 267, 1115, 272, 265, 2009, 266, 260, 3476, 260, 848, 263];
+    let sp = SentencePieceProcessor::open(&args.tokenizer_path)
+        .expect("Failed to load sentencepiece tokenizer");
+    let token_ids: Vec<u32> = sp.encode(&prepared_text)
+        .expect("Failed to tokenize")
+        .into_iter()
+        .map(|p| p.id as u32)
+        .collect();
     eprintln!("  token_ids ({} tokens): {:?}", token_ids.len(), token_ids);
 
     // --- Run prompt_text ---
@@ -276,6 +295,7 @@ fn run() -> CResult<()> {
     // Use same max_frames formula as wasm binding
     let max_frames = ((token_ids.len() as f64 / 3.0 + 2.0) * 12.5).ceil() as usize;
     eprintln!("\n[5] Generating audio ({max_frames} max frames, frames_after_eos={frames_after_eos})...");
+    let gen_start = Instant::now();
 
     let mut audio_chunks: Vec<f32> = Vec::new();
     let mut eos_countdown: Option<usize> = None;
@@ -323,6 +343,10 @@ fn run() -> CResult<()> {
     eprintln!("  total_steps: {total_steps}");
     eprintln!("  total_samples: {}", audio_chunks.len());
     eprintln!("  total_duration: {:.2}s", total_seconds);
+    let gen_elapsed = gen_start.elapsed().as_secs_f64();
+    let audio_duration = audio_chunks.len() as f64 / 24000.0;
+    let rtf = gen_elapsed / audio_duration;
+    eprintln!("  gen_time: {gen_elapsed:.2}s, RTF: {rtf:.3}");
     log_tensor_stats("final_audio", &audio_chunks);
 
     // --- Write WAV ---
