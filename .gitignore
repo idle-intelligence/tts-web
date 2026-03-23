@@ -13,3 +13,5 @@ __pycache__/
 QUANTIZATION*.md
 CANDLE_QMATMUL_BRIEF.md
 samples/
+plans/
+docs/old/
