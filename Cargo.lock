@@ -591,6 +591,7 @@ dependencies = [
 [[package]]
 name = "candle-core"
 version = "0.9.2"
+source = "git+https://github.com/ilnmtlbnm/candle.git?branch=wasm-simd-opt#2d38b5e199d1c63ef9645ba0973858f94aa9c325"
 dependencies = [
  "accelerate-src",
  "byteorder",
@@ -619,6 +620,7 @@ dependencies = [
 [[package]]
 name = "candle-metal-kernels"
 version = "0.9.2"
+source = "git+https://github.com/ilnmtlbnm/candle.git?branch=wasm-simd-opt#2d38b5e199d1c63ef9645ba0973858f94aa9c325"
 dependencies = [
  "half",
  "objc2",
@@ -632,6 +634,7 @@ dependencies = [
 [[package]]
 name = "candle-nn"
 version = "0.9.2"
+source = "git+https://github.com/ilnmtlbnm/candle.git?branch=wasm-simd-opt#2d38b5e199d1c63ef9645ba0973858f94aa9c325"
 dependencies = [
  "accelerate-src",
  "candle-core",
@@ -649,6 +652,7 @@ dependencies = [
 [[package]]
 name = "candle-ug"
 version = "0.9.2"
+source = "git+https://github.com/ilnmtlbnm/candle.git?branch=wasm-simd-opt#2d38b5e199d1c63ef9645ba0973858f94aa9c325"
 dependencies = [
  "ug",
  "ug-metal",
@@ -2963,6 +2967,7 @@ dependencies = [
 [[package]]
 name = "mimi-rs"
 version = "0.1.0"
+source = "git+https://github.com/idle-intelligence/mimi-rs.git#ccea44a3d4b7271ebda6c4838f73b93385221cc2"
 dependencies = [
  "candle-core",
  "candle-nn",

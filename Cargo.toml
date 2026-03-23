@@ -22,13 +22,10 @@ tracing = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 byteorder = "1.5"
 
-[patch."https://github.com/idle-intelligence/mimi-rs.git"]
-mimi-rs = { path = "../mimi-rs" }
-
 # Patch cubecl-wgpu to cap workgroup size for WebGPU's 256 invocation limit
 [patch.crates-io]
-candle-core = { path = "../../candle/candle-core" }
-candle-nn = { path = "../../candle/candle-nn" }
+candle-core = { git = "https://github.com/ilnmtlbnm/candle.git", branch = "wasm-simd-opt" }
+candle-nn = { git = "https://github.com/ilnmtlbnm/candle.git", branch = "wasm-simd-opt" }
 cubecl-wgpu = { path = "patches/cubecl-wgpu-0.9.0" }
 
 [profile.release]
