@@ -107,3 +107,17 @@ web/
 | KittenTTS | 0.24 | 1.81x realtime |
 
 RTF = generation time / audio duration (lower = faster). WASM speed = audio duration / wall time (higher = faster).
+
+## Building from Source
+
+This project uses patched versions of two dependencies via `[patch]` in `Cargo.toml`. You need these sibling repos checked out locally:
+
+```
+parent/
+  candle/         # git clone https://github.com/ilnmtlbnm/candle
+  mimi-rs/        # git clone https://github.com/idle-intelligence/mimi-rs
+  tts-web/        # this repo
+```
+
+- **[candle](https://github.com/ilnmtlbnm/candle)** — fork with optimized WASM SIMD quantized matmul
+- **[mimi-rs](https://github.com/idle-intelligence/mimi-rs)** — shared Mimi audio codec (encoder + decoder + streaming transformer)
