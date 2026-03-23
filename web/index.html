@@ -341,11 +341,6 @@
     <section id="kittenVoiceSection" style="display:none">
         <h2>voice <span class="sub">· kitten</span></h2>
         <div class="voice-grid" id="kittenVoiceGrid"></div>
-        <div class="slider-group" style="margin-top:12px">
-            <label for="speedSlider">Speed</label>
-            <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.05" value="1.0">
-            <span id="speedValue">1.00</span>
-        </div>
     </section>
 
     <section>
@@ -355,6 +350,11 @@
         <!-- phrase chips removed -->
         <div class="controls">
             <button id="generateBtn" class="primary" disabled>Generate</button>
+            <div class="slider-group" id="speedSliderGroup" style="display:none">
+                <label for="speedSlider">Speed</label>
+                <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.05" value="1.0">
+                <span id="speedValue">1.00</span>
+            </div>
             <div class="slider-group" id="tempSliderGroup">
                 <label for="tempSlider">Temperature</label>
                 <input type="range" id="tempSlider" min="0.1" max="1.5" step="0.05" value="0.7">
@@ -396,6 +396,7 @@
         const kittenVoiceGrid = document.getElementById('kittenVoiceGrid');
         const speedSlider = document.getElementById('speedSlider');
         const speedValue = document.getElementById('speedValue');
+        const speedSliderGroup = document.getElementById('speedSliderGroup');
         const ipaDisplay = document.getElementById('ipaDisplay');
         // kittenPhrases removed
 
@@ -823,6 +824,7 @@
             kittenVoiceSection.style.display = model === 'kitten' ? '' : 'none';
 
             tempSliderGroup.style.display = model === 'kitten' ? 'none' : '';
+            speedSliderGroup.style.display = model === 'kitten' ? '' : 'none';
             stepInfo.textContent = '';
             audioSection.style.display = 'none';
             ipaDisplay.style.display = 'none';
