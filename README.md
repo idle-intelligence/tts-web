@@ -99,11 +99,11 @@ web/
 - **Pocket TTS**: Autoregressive with Mimi codec decoder. Streams audio chunks for real-time playback.
 - **[mimi-rs](https://github.com/idle-intelligence/mimi-rs)**: Shared Mimi audio codec library.
 
-## Performance
+## Performance (WASM, Chrome on M-series Mac)
 
-| | Native (M-series Mac) | WASM (Chrome) |
-|--|--|--|
-| KittenTTS "Hello world" | 0.3x RTF | ~0.9x RTF |
-| Pocket TTS (streaming) | — | ~1.3x RTF |
+| Model | Audio | Wall time | Speed |
+|-------|-------|-----------|-------|
+| Pocket TTS | 3.28s | 1.64s (TTFB 0.41s) | 2.28x realtime |
+| KittenTTS | 3.57s | 1.97s | 1.81x realtime |
 
-RTF = Real-Time Factor (generation time / audio duration). Lower = faster.
+Speed = audio duration / generation time. Higher = faster.
