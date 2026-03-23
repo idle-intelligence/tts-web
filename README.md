@@ -95,7 +95,7 @@ web/
   tts-client.js    # Shared client class
 ```
 
-- **KittenTTS**: Single forward pass (no autoregressive loop). Text → espeak IPA → phoneme IDs → model → 24kHz audio. ~0.3x RTF native, ~0.9x RTF WASM.
+- **KittenTTS**: Single forward pass (no autoregressive loop). Text → espeak IPA → phoneme IDs → model → 24kHz audio. 0.24 RTF native, 1.81x realtime WASM.
 - **Pocket TTS**: Autoregressive with Mimi codec decoder. Streams audio chunks for real-time playback.
 - **[mimi-rs](https://github.com/idle-intelligence/mimi-rs)**: Shared Mimi audio codec library.
 
