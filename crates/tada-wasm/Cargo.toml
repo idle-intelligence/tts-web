@@ -1,0 +1,58 @@
+[package]
+name = "tada-wasm"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[features]
+default = ["wgpu"]
+wgpu = ["burn/wgpu", "burn/template"]
+wasm = [
+    "wgpu",
+    "dep:wgpu",
+    "wasm-bindgen",
+    "wasm-bindgen-futures",
+    "js-sys",
+    "web-sys",
+    "console_error_panic_hook",
+    "getrandom/wasm_js",
+]
+
+[dependencies]
+# TADA core (candle-based VibeVoice + DAC decoder)
+tada-core = { path = "../tada-core" }
+
+# Burn ML framework (for LLM on WebGPU)
+burn = { workspace = true }
+cubecl = { workspace = true }
+
+# Candle (for VibeVoice + decoder on CPU)
+candle-core = "0.9"
+candle-nn = "0.9"
+
+# Core
+anyhow = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+byteorder = { workspace = true }
+
+# RNG
+rand = { version = "0.9", default-features = false, features = ["std_rng"] }
+rand_distr = "0.5"
+
+# Tokenizer
+tokenizers = { version = "0.22", features = ["unstable_wasm"], default-features = false }
+
+# WASM support (optional)
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true }
+console_error_panic_hook = { workspace = true, optional = true }
+getrandom = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }

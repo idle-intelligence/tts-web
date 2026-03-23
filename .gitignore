@@ -1,8 +1,10 @@
 /refs
 /.venv
 *.safetensors
+!voices/*.safetensors
 *.gguf
 tokenizer.model
+tokenizer.json
 /target
 __pycache__/
 *.pyc
@@ -10,3 +12,4 @@ __pycache__/
 /prompts
 QUANTIZATION*.md
 CANDLE_QMATMUL_BRIEF.md
+samples/

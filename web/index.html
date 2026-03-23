@@ -243,10 +243,44 @@
             color: var(--yellow);
         }
 
+        .model-selector {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+        .model-selector label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--text);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .model-selector input[type="radio"] {
+            cursor: pointer;
+        }
+
         #audioSection { display: none; }
         audio {
             width: 100%;
             margin-top: 4px;
+        }
+
+        .ipa-chip {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            padding: 3px 8px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--muted);
+            cursor: pointer;
+            border-radius: 12px;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        .ipa-chip:hover {
+            border-color: var(--text);
+            color: var(--text);
         }
 
         footer {
@@ -268,14 +302,21 @@
         <p class="org"><img src="apple-touch-icon.png" alt="II">idle intelligence</p>
         <h1>tts-web</h1>
         <p class="tagline">
-            <a href="https://github.com/kyutai-labs/pocket-tts">Pocket TTS</a>
-            quantized to Q8_0 (GGUF), running in the browser via WebAssembly using
+            Text-to-speech models running in the browser via WebAssembly using
             <a href="https://github.com/huggingface/candle">Candle</a>
         </p>
         <p class="repo">
             <a href="https://github.com/idle-intelligence/tts-web">github.com/idle-intelligence/tts-web</a>
         </p>
     </header>
+
+    <section>
+        <h2>settings <span class="sub">· model</span></h2>
+        <div class="model-selector">
+            <label><input type="radio" name="model" value="pocket-tts" checked> Pocket TTS (128 MB)</label>
+            <label><input type="radio" name="model" value="kitten"> KittenTTS (~45 MB)</label>
+        </div>
+    </section>
 
     <section>
         <h2>status</h2>
@@ -292,18 +333,29 @@
         </div>
     </section>
 
-    <section>
+    <section id="voiceSection">
         <h2>voice</h2>
         <div class="voice-grid" id="voiceGrid"></div>
+    </section>
+
+    <section id="kittenVoiceSection" style="display:none">
+        <h2>voice <span class="sub">· kitten</span></h2>
+        <div class="voice-grid" id="kittenVoiceGrid"></div>
+        <div class="slider-group" style="margin-top:12px">
+            <label for="speedSlider">Speed</label>
+            <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.05" value="1.0">
+            <span id="speedValue">1.00</span>
+        </div>
     </section>
 
     <section>
         <h2>input <span class="sub">· text</span></h2>
         <p class="info">Text stays on this device.</p>
         <textarea id="textInput" placeholder="Hello, this is a test of the text-to-speech system."></textarea>
+        <!-- phrase chips removed -->
         <div class="controls">
             <button id="generateBtn" class="primary" disabled>Generate</button>
-            <div class="slider-group">
+            <div class="slider-group" id="tempSliderGroup">
                 <label for="tempSlider">Temperature</label>
                 <input type="range" id="tempSlider" min="0.1" max="1.5" step="0.05" value="0.7">
                 <span id="tempValue">0.7</span>
@@ -315,6 +367,7 @@
     <section id="audioSection">
         <h2>output <span class="sub">· audio wav file</span></h2>
         <audio id="audioPlayer" controls></audio>
+        <p id="ipaDisplay" style="display:none;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--faint);margin-top:8px;word-break:break-all"></p>
     </section>
 
     <footer>
@@ -334,11 +387,25 @@
         const textInput = document.getElementById('textInput');
         const tempSlider = document.getElementById('tempSlider');
         const tempValue = document.getElementById('tempValue');
+        const tempSliderGroup = document.getElementById('tempSliderGroup');
         const stepInfo = document.getElementById('stepInfo');
         const audioSection = document.getElementById('audioSection');
         const audioPlayer = document.getElementById('audioPlayer');
+        const voiceSection = document.getElementById('voiceSection');
+        const kittenVoiceSection = document.getElementById('kittenVoiceSection');
+        const kittenVoiceGrid = document.getElementById('kittenVoiceGrid');
+        const speedSlider = document.getElementById('speedSlider');
+        const speedValue = document.getElementById('speedValue');
+        const ipaDisplay = document.getElementById('ipaDisplay');
+        // kittenPhrases removed
 
         const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
+        // Must be alphabetical — matches WASM voice index order (sorted in load_voices)
+        const KITTEN_VOICES = ['bella', 'bruno', 'hugo', 'jasper', 'kiki', 'leo', 'luna', 'rosie'];
+        const KITTEN_SPEED_PRIORS = {
+            bella: 0.8, jasper: 0.8, luna: 0.8, bruno: 0.8,
+            rosie: 0.8, hugo: 0.9, kiki: 0.8, leo: 0.8,
+        };
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
 
         let allChunks = [];
@@ -347,6 +414,11 @@
         let activeVoice = null;
         let loadingVoice = false;
         let isDemoGen = false;
+        let currentModel = 'pocket-tts';
+        let kittenVoiceIdx = 0;
+        let lastIpa = null;
+        let kittenVoiceNames = KITTEN_VOICES;
+        let kittenReady = false;
 
         const BATCH_MS = 500;
         const TARGET_DURATION = 8;
@@ -400,7 +472,56 @@
             tempValue.textContent = parseFloat(tempSlider.value).toFixed(2);
         });
 
-        // Check if model is already cached
+        speedSlider.addEventListener('input', () => {
+            speedValue.textContent = parseFloat(speedSlider.value).toFixed(2);
+        });
+
+        // ---- Kitten voice grid ----
+        for (let i = 0; i < KITTEN_VOICES.length; i++) {
+            const name = KITTEN_VOICES[i];
+            const btn = document.createElement('button');
+            btn.className = 'voice-btn';
+            btn.textContent = name;
+            btn.dataset.voiceIdx = i;
+            btn.addEventListener('click', () => {
+                if (generating) return;
+                kittenVoiceIdx = i;
+                kittenVoiceGrid.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                // Auto-generate when engine is ready
+                if (kittenReady) {
+                    triggerKittenGenerate(true);
+                }
+            });
+            kittenVoiceGrid.appendChild(btn);
+        }
+
+        // Phrase chips removed — text input is freeform, IPA is shown as output
+
+        function triggerKittenGenerate(isDemo) {
+            if (generating) return;
+            const text = textInput.value.trim() || DEMO_TEXT;
+            const ipa = '';
+            lastIpa = null; // onPhonemized will set this when worker returns IPA
+            isDemoGen = isDemo;
+            generating = true;
+            generateBtn.disabled = true;
+            allChunks = [];
+            genStartTime = performance.now();
+            audioSection.style.display = 'none';
+            ipaDisplay.style.display = 'none';
+            stepInfo.textContent = ipa ? 'Synthesizing...' : 'Phonemizing...';
+            updateStatus('generating', ipa ? 'Synthesizing...' : 'Phonemizing...');
+            const prior = KITTEN_SPEED_PRIORS[KITTEN_VOICES[kittenVoiceIdx]] || 0.8;
+            const effectiveSpeed = parseFloat(speedSlider.value) * prior;
+            tts.generate(text, 1.0, {
+                ipa,
+                voiceIdx: kittenVoiceIdx,
+                speed: effectiveSpeed,
+                textLen: text.length,
+            });
+        }
+
         // Detect local dev server (not deployed to GitHub Pages)
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
@@ -413,6 +534,24 @@
             try {
                 const cache = await caches.open(MODEL_CACHE);
                 return !!(await cache.match(MODEL_CHECK_URL));
+            } catch { return false; }
+        }
+
+        const KITTEN_MODEL_URL = isLocal
+            ? `${location.origin}/kitten-model.safetensors`
+            : 'https://huggingface.co/idle-intelligence/kitten-tts-nano-safetensors/resolve/main/kitten-nano.safetensors';
+        const KITTEN_VOICES_URL = isLocal
+            ? `${location.origin}/kitten-voices.safetensors`
+            : 'https://huggingface.co/idle-intelligence/kitten-tts-nano-safetensors/resolve/main/kitten-voices.safetensors';
+        const KITTEN_WASM_BASE = isLocal
+            ? `${location.origin}/kitten-pkg`
+            : './kitten-pkg';
+        const KITTEN_CACHE = 'kitten-model-v1';
+        async function isKittenCached() {
+            if (isLocal) return true;
+            try {
+                const cache = await caches.open(KITTEN_CACHE);
+                return !!(await cache.match(KITTEN_MODEL_URL));
             } catch { return false; }
         }
 
@@ -445,8 +584,10 @@
             tts.loadVoice(name);
         }
 
-        function makeClient() {
+        // ---- Pocket TTS client ----
+        function makePocketClient() {
             return new TtsClient({
+                modelType: 'pocket-tts',
                 workerUrl: './worker.js',
                 ...(isLocal ? {
                     modelUrl: '/pocket-tts-q8_0.gguf',
@@ -587,9 +728,180 @@
             });
         }
 
+        // ---- Kitten client ----
+        function makeKittenClient() {
+            return new TtsClient({
+                modelType: 'kitten',
+                workerUrl: './kitten-worker.js',
+                modelUrl: KITTEN_MODEL_URL,
+                voicesUrl: KITTEN_VOICES_URL,
+                wasmBaseUrl: KITTEN_WASM_BASE,
+                onStatus: (text, ready, progress) => {
+                    if (ready) {
+                        updateStatus('ready', text);
+                        generateBtn.disabled = false;
+                        progressBar.classList.remove('visible');
+                        progressInfo.textContent = '';
+                        downloadBtn.style.display = 'none';
+                    } else {
+                        updateStatus('loading', text);
+                        if (typeof progress === 'number') {
+                            progressBar.classList.add('visible');
+                            progressFill.style.width = (progress * 100) + '%';
+                            progressInfo.textContent = text;
+                        }
+                    }
+                },
+                onError: (err) => {
+                    updateStatus('error', 'Error: ' + err.message);
+                    generating = false;
+                    generateBtn.disabled = false;
+                    stepInfo.textContent = '';
+                    console.error(err);
+                },
+                onPhonemized: (ipa) => {
+                    lastIpa = ipa;
+                },
+                onChunk: (data, step) => {
+                    const chunk = data instanceof Float32Array ? data : new Float32Array(data);
+                    allChunks.push(chunk);
+                },
+                onDone: (totalSteps) => {
+                    const usedIpa = lastIpa;
+                    const totalTime = (performance.now() - genStartTime) / 1000;
+                    generating = false;
+                    generateBtn.disabled = false;
+                    updateStatus('ready', 'Ready');
+
+                    const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
+                    if (totalLength === 0) {
+                        stepInfo.textContent = `Done in ${totalTime.toFixed(2)}s — no audio produced`;
+                        return;
+                    }
+                    const pcm = new Float32Array(totalLength);
+                    let offset = 0;
+                    for (const chunk of allChunks) { pcm.set(chunk, offset); offset += chunk.length; }
+                    const sampleRate = tts.sampleRate || 24000;
+                    const audioDur = totalLength / sampleRate;
+                    const speedup = audioDur / totalTime;
+                    stepInfo.textContent = `${audioDur.toFixed(2)}s audio in ${totalTime.toFixed(2)}s \u2014 ${speedup.toFixed(2)}x realtime`;
+
+                    if (isDemoGen) {
+                        isDemoGen = false;
+                        // Still show audio player for demo
+                        const wav = encodeWav(pcm, sampleRate);
+                        const blob = new Blob([wav], { type: 'audio/wav' });
+                        audioPlayer.src = URL.createObjectURL(blob);
+                        audioSection.style.display = 'block';
+                        audioPlayer.play().catch(() => {});
+                        if (usedIpa) {
+                            ipaDisplay.textContent = 'IPA: ' + usedIpa;
+                            ipaDisplay.style.display = '';
+                        }
+                        return;
+                    }
+
+                    const wav = encodeWav(pcm, sampleRate);
+                    const blob = new Blob([wav], { type: 'audio/wav' });
+                    audioPlayer.src = URL.createObjectURL(blob);
+                    audioSection.style.display = 'block';
+                    audioPlayer.play().catch(() => {});
+
+                    if (usedIpa) {
+                        ipaDisplay.textContent = 'IPA: ' + usedIpa;
+                        ipaDisplay.style.display = '';
+                    } else {
+                        ipaDisplay.style.display = 'none';
+                    }
+                }
+            });
+        }
+
+        // ---- Model switching ----
+        function updateUIForModel(model) {
+            voiceSection.style.display = model === 'pocket-tts' ? '' : 'none';
+            kittenVoiceSection.style.display = model === 'kitten' ? '' : 'none';
+
+            tempSliderGroup.style.display = model === 'kitten' ? 'none' : '';
+            stepInfo.textContent = '';
+            audioSection.style.display = 'none';
+            ipaDisplay.style.display = 'none';
+        }
+
+        async function switchModel(model) {
+            if (model === currentModel && tts) return;
+            currentModel = model;
+
+            // Destroy existing client
+            if (tts) {
+                tts.destroy();
+                tts = null;
+            }
+
+            // Reset state
+            generating = false;
+            activeVoice = null;
+            loadingVoice = false;
+            isDemoGen = false;
+            kittenReady = false;
+            allChunks = [];
+            generateBtn.disabled = true;
+            progressBar.classList.remove('visible');
+            progressInfo.textContent = '';
+
+            // Close audio context for pocket-tts streaming
+            if (audioCtx) {
+                audioCtx.close();
+                audioCtx = null;
+                workletNode = null;
+            }
+
+            updateUIForModel(model);
+
+            if (model === 'kitten') {
+                tts = makeKittenClient();
+                const cached = await isKittenCached();
+                if (cached) {
+                    updateStatus('loading', 'Loading KittenTTS...');
+                    await initClient();
+                } else {
+                    updateStatus('', 'KittenTTS model not downloaded (~45 MB)');
+                    downloadBtn.style.display = '';
+                    downloadBtn.disabled = false;
+                }
+            } else {
+                tts = makePocketClient();
+                const cached = await isModelCached();
+                if (cached) {
+                    updateStatus('loading', 'Loading from cache...');
+                    await initClient();
+                } else {
+                    updateStatus('', 'Model not downloaded');
+                    downloadBtn.style.display = '';
+                    downloadBtn.disabled = false;
+                }
+            }
+        }
+
+        document.querySelectorAll('input[name="model"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                if (generating) {
+                    // Prevent switching while generating
+                    e.target.checked = false;
+                    document.querySelector(`input[name="model"][value="${currentModel}"]`).checked = true;
+                    return;
+                }
+                switchModel(e.target.value);
+            });
+        });
+
         async function initClient() {
             try {
                 await tts.init();
+                if (currentModel === 'kitten') {
+                    kittenReady = true;
+                    updateStatus('ready', 'Select a voice');
+                }
             } catch (err) {
                 updateStatus('error', 'Failed to initialize: ' + err.message);
                 downloadBtn.style.display = '';
@@ -598,28 +910,45 @@
             }
         }
 
-        // Init flow: auto-load if cached, otherwise show download button
-        tts = makeClient();
-        const cached = await isModelCached();
-        if (cached) {
-            updateStatus('loading', 'Loading from cache...');
+        // Download button handler (shared across all models)
+        downloadBtn.addEventListener('click', async () => {
+            downloadBtn.disabled = true;
             await initClient();
-        } else {
-            updateStatus('', 'Model not downloaded');
-            downloadBtn.style.display = '';
-            downloadBtn.addEventListener('click', async () => {
-                downloadBtn.disabled = true;
-                await initClient();
-            });
-        }
+        });
+
+        // Init flow: defer pocket-tts load to avoid noisy console errors on page load
+        // Use switchModel so all models go through the same code path
+        await switchModel('pocket-tts');
 
         generateBtn.addEventListener('click', () => {
             const text = textInput.value.trim();
-            if (!text || generating || !activeVoice) return;
+            if (!text || generating) return;
+            if (currentModel === 'pocket-tts' && !activeVoice) return;
+            if (currentModel === 'kitten') {
+                const ipa = '';
+                isDemoGen = false;
+                generating = true;
+                generateBtn.disabled = true;
+                allChunks = [];
+                genStartTime = performance.now();
+                audioSection.style.display = 'none';
+                ipaDisplay.style.display = 'none';
+                stepInfo.textContent = ipa ? 'Synthesizing...' : 'Phonemizing...';
+                updateStatus('generating', ipa ? 'Synthesizing...' : 'Phonemizing...');
+                const prior = KITTEN_SPEED_PRIORS[KITTEN_VOICES[kittenVoiceIdx]] || 0.8;
+                const effectiveSpeed = parseFloat(speedSlider.value) * prior;
+                tts.generate(text, 1.0, {
+                    ipa,
+                    voiceIdx: kittenVoiceIdx,
+                    speed: effectiveSpeed,
+                    textLen: text.length,
+                });
+                return;
+            }
             isDemoGen = false;
             generating = true;
             generateBtn.disabled = true;
-            setVoiceBtnsEnabled(false);
+            if (currentModel === 'pocket-tts') setVoiceBtnsEnabled(false);
             tts.generate(text, parseFloat(tempSlider.value));
         });
 

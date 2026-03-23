@@ -4,28 +4,92 @@ Browser-native text-to-speech running 100% client-side via Rust/WASM.
 
 [**Try the demo →**](https://idle-intelligence.github.io/tts-web/web/)
 
-> **Disclaimer:** Experimental port. Model from [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) by Kyutai Labs.
+## Models
 
-## Requirements
+| Model | Size | Params | Architecture | License |
+|-------|------|--------|-------------|---------|
+| [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) | ~130MB (Q8_0) | ~97M | Autoregressive + Mimi codec | MIT |
+| [KittenTTS](https://github.com/KittenML/KittenTTS) | ~56MB (F32) | 14M | StyleTTS 2 distilled, single forward pass | Apache 2.0 |
 
-- Modern browser with WebAssembly support
+Weights are on HuggingFace: [Pocket TTS GGUF](https://huggingface.co/idle-intelligence/pocket-tts-gguf), [KittenTTS safetensors](https://huggingface.co/idle-intelligence/kitten-tts-nano-safetensors).
 
-## Quick Start
+## Quick Start — KittenTTS CLI
+
+Generate speech from text with zero system dependencies:
 
 ```bash
-# 1. Build WASM package
-wasm-pack build crates/tts-wasm --target web
+# Clone
+git clone https://github.com/idle-intelligence/tts-web.git
+cd tts-web
 
-# 2. Start dev server
-bun web/serve.mjs
+# Download model weights (~60MB)
+hf download idle-intelligence/kitten-tts-nano-safetensors --local-dir models/kitten-nano
+
+# Build (one-time)
+cargo build --example kitten_generate -p kitten-core --release --features espeak
+
+# Generate speech — no system dependencies needed
+./target/release/examples/kitten_generate \
+  --model models/kitten-nano/kitten-nano.safetensors \
+  --voices models/kitten-nano/kitten-voices.safetensors \
+  --voice jasper \
+  --text "Hello, this is a test of the text-to-speech system." \
+  --output hello.wav
 ```
+
+The `--features espeak` flag bundles a pure-Rust espeak-ng port with English data, so text → IPA phonemization works out of the box. The built binary at `target/release/examples/kitten_generate` is standalone — use it directly without `cargo run`.
+
+8 built-in voices: bella, jasper, luna, bruno, rosie, hugo, kiki, leo.
+
+### Without the espeak feature
+
+If you prefer not to pull the GPL espeak-ng crate, you can use system espeak-ng or pass IPA directly:
+
+```bash
+# Option A: system espeak-ng (brew install espeak-ng)
+cargo run --example kitten_generate -p kitten-core --release -- --text "Hello world"
+
+# Option B: pass IPA directly
+cargo run --example kitten_generate -p kitten-core --release -- --ipa "həlˈəʊ wˈɜːld"
+```
+
+## Quick Start — Browser Demo
+
+```bash
+# Build KittenTTS WASM
+wasm-pack build crates/kitten-wasm --target web --release -- --features wasm --no-default-features
+
+# Start dev server
+node web/serve.mjs --port 8082
+```
+
+Open http://localhost:8082/web/, select KittenTTS, click a voice.
 
 ## Architecture
 
-- **TTS model** (`crates/tts-wasm/`): Pocket TTS compiled to WebAssembly via Candle. Generates speech from text tokens using a voice embedding.
-- **[mimi-rs](https://github.com/idle-intelligence/mimi-rs)**: Shared Rust library for the Mimi audio codec (encoder + decoder + streaming transformer). Used by both tts-web and stt-web.
-- **Web UI** (`web/`): Web Worker orchestrates model loading and generation, streams audio chunks back to the main thread for real-time playback.
+```
+crates/
+  kitten-core/     # Pure candle inference (BERT → text encoder → predictor → decoder)
+  kitten-wasm/     # WASM bindings (2.8MB binary)
+  tts-core/        # Pocket TTS inference
+  tts-wasm/        # Pocket TTS WASM bindings
 
-## Quantization
+web/
+  index.html       # Shared demo UI (model selector)
+  kitten-worker.js # KittenTTS Web Worker
+  worker.js        # Pocket TTS Web Worker
+  tts-client.js    # Shared client class
+```
 
-The model ships as a [GGUF Q8\_0 file](https://huggingface.co/idle-intelligence/pocket-tts-gguf) (~130MB). Weights are loaded directly as Q8\_0 via candle's `QMatMul`, keeping ~97M quantized parameters in memory (~103MB vs ~388MB F32) and reducing memory bandwidth ~4x per inference step.
+- **KittenTTS**: Single forward pass (no autoregressive loop). Text → espeak IPA → phoneme IDs → model → 24kHz audio. ~0.3x RTF native, ~0.9x RTF WASM.
+- **Pocket TTS**: Autoregressive with Mimi codec decoder. Streams audio chunks for real-time playback.
+- **[mimi-rs](https://github.com/idle-intelligence/mimi-rs)**: Shared Mimi audio codec library.
+
+## Performance
+
+| | Native (M-series Mac) | WASM (Chrome) |
+|--|--|--|
+| KittenTTS "Hello world" | 0.3x RTF | ~0.9x RTF |
+| Pocket TTS (streaming) | — | ~1.3x RTF |
+
+RTF = Real-Time Factor (generation time / audio duration). Lower = faster.
