@@ -10,9 +10,8 @@ __pycache__/
 *.pyc
 .DS_Store
 /prompts
-QUANTIZATION*.md
-CANDLE_QMATMUL_BRIEF.md
 samples/
 plans/
 docs/old/
-docs/quantization_strategy.md
+docs/pocket-tts/
+kitten-claude-archive/
