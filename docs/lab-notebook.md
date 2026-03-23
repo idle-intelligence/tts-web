@@ -679,3 +679,157 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 - Mixed model (1.4G, Q8_0 embeddings) failed: Burn EmbeddingStore reads Q8_0 bytes as Q4_0 → garbage times_before [14,14,15,15...]. Only Var-C (Q4_0 embeddings) works with Burn.
 
 **User feedback**: Not yet evaluated.
+
+---
+
+## simd128
+
+**Date**: 2026-03-20
+**Commit**: b5f720a
+**Purpose**: Enable WASM SIMD128 for candle CPU ops (conv1d, matmul) to accelerate the DAC decoder, which was the bottleneck after Burn/wgpu GPU acceleration of the LLM.
+
+**Parameters**:
+- engine: burn+candle
+- device: wgpu+cpu
+- flow_steps: 10
+- CFG: 1.0
+- voice: default (39 tokens)
+- transition_steps: 5
+
+**Chrome trace analysis** (23 steps, threshold 20ms):
+- Total span: 31.2s
+- Warmup (step 0): 3254ms
+- Content steps: 19 steps, avg 90ms compute + 312ms gap = 402ms/step
+- Decode: 5385ms (was 17.8s before SIMD — 3.3x improvement)
+
+**User feedback**: "It does seem faster"
+
+---
+
+## tasks-max-512
+
+**Date**: 2026-03-20
+**Commit**: 13fbab4
+**Purpose**: Increase GPU command batching from default 32 to 512 tasks per submission to reduce the per-step dispatch gaps observed in Chrome traces.
+
+**Parameters**:
+- engine: burn+candle
+- device: wgpu+cpu
+- voice: default (long prompt, 45 steps)
+
+**Chrome trace**: Dispatch gaps dropped 6x (340ms → 55ms per step). Total: 53.1s (45 steps with long voice prompt).
+
+**User feedback**: "it feels faster!"
+
+---
+
+## q8-vv-gpu
+
+**Date**: 2026-03-20
+**Commit**: 6c6011d
+**Purpose**: Run Q8_0 VibeVoice on GPU via custom WGSL shader, instead of candle CPU, to eliminate the VV CPU bottleneck.
+
+**Parameters**:
+- engine: burn+candle
+- device: wgpu+wgpu (both LLM and VV on GPU)
+- model: Var-C VV-Q8 E-Q4
+
+**Results**:
+- Content steps: 551ms/step (vs 595ms CPU = 8% faster)
+- Warmup: 10.6s (VV shader compilation on first run)
+- Decode regressed to 17.8s (SIMD128 decoder not active in this build path)
+
+**User feedback**: Not individually evaluated.
+
+---
+
+## vv-warmup
+
+**Date**: 2026-03-20
+**Commits**: abaad42 (initial), 4dd5a3f (device fix)
+**Purpose**: Pre-compile VV Q8_0 WGSL shaders during model warmup to eliminate the ~13s first-generation compile stall. Warmup runs 10 ODE steps with CFG=1.6 to exercise all shader code paths and variants.
+
+**Results**: First-gen VV compile stall reduced from ~13s to ~4.5s.
+
+**User feedback**: Not individually evaluated.
+
+---
+
+## cfg-negcond-fix
+
+**Date**: 2026-03-20
+**Commits**: e10650f (initial fix), ea9da52 (dual KV cache)
+**Purpose**: Fix the CFG negative condition implementation. Previous code used literal zero tensors as neg_cond; correct approach mirrors Python: run a second LLM forward pass with zero acoustic tokens to get the "unconditioned" hidden state, then use that as neg_cond. Implemented with dual independent KV caches for the positive and negative paths.
+
+**Parameters**:
+- voice: ex04_whisper
+- CFG: 1.6
+- model: Var-C
+
+**Whisper RMS progression**:
+- Literal zeros neg_cond: -12.4dB
+- Single KV cache pop: -20.2dB
+- Dual independent KV caches: -21.2dB
+- Python reference: -34.5dB
+
+**User feedback**: "now it IS whispering... sounds more like gollum than a woman, but it's progress!"
+
+---
+
+## sampling-fix
+
+**Date**: 2026-03-21
+**Commit**: 93eadb5
+**Purpose**: Replace Gumbel-max token sampling with Python-matching approach: top_p=0.9 nucleus sampling + repetition_penalty=1.1 + multinomial sampling.
+
+**Parameters**:
+- engine: burn+candle
+- device: wgpu+wgpu
+
+**Results**: Same RMS for the test seed; should improve quality diversity across varied inputs.
+
+**User feedback**: Not individually evaluated.
+
+---
+
+## neg-kv-all-steps
+
+**Date**: 2026-03-21
+**Commit**: 636a7d8
+**Purpose**: Run neg CFG forward pass on ALL autoregressive steps (not just content steps) so the negative KV cache builds a complete history matching the positive path.
+
+**Parameters**:
+- voice: ex04_whisper
+- CFG: 1.6
+
+**Results**: Whisper RMS -22.1dB vs -21.2dB (previous) — minimal improvement. Gap from Python (-34.5dB) persists.
+
+**User feedback**: Not individually evaluated.
+
+---
+
+## quality-all-variants
+
+**Date**: 2026-03-21
+**Commit**: 636a7d8
+**Purpose**: Full quality comparison of all 11 GGUF quantization variants using Python-matching sampling parameters. Aimed to determine whether the ~12dB whisper RMS gap from Python is a quantization issue or a pipeline issue.
+
+**Parameters**:
+- noise_temp: 0.9
+- text_temp: 0.6
+- CFG: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- seed: 42
+- transition_steps: 5
+
+**Voices**: ex04_whisper, ex01_happy
+
+**Text**: "I'll tell you one thing about the universe, though. The universe is a pretty big place."
+
+**Variants tested**: python-bf16, F32, F16, Q4_0 baseline, Var-A (VV-F16 E-Q8), Var-B (VV-F32 E-Q8), Var-C (VV-Q8 E-Q4), Var-E (VV-F16 E-Q4), Mixed (VV-Q8 E-Q8), Q8 LLM + VV-F16, Q4K + VV-Q8
+
+**Key finding**: Even F32 GGUF is 12dB louder than Python for whisper voice. All Rust variants cluster within 1dB of each other. The gap is a pipeline/CFG implementation difference, not a quantization artifact. Happy voice gap is only 3dB. Acoustic feature stats: Python raw std=1.10, Rust std=0.97 — similar scale, but the decoder magnifies the difference. "None of the quantizations can do whisper correctly" — the root cause is in the pipeline.
+
+**User feedback**: "none of the quantizations can do whisper correctly"
