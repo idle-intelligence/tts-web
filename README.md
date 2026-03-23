@@ -96,14 +96,14 @@ web/
 ```
 
 - **KittenTTS**: Single forward pass (no autoregressive loop). Text → espeak IPA → phoneme IDs → model → 24kHz audio. 0.24 RTF native, 1.81x realtime WASM.
-- **Pocket TTS**: Autoregressive with Mimi codec decoder. Streams audio chunks for real-time playback.
+- **Pocket TTS**: Autoregressive with Mimi codec decoder. Streams audio chunks for real-time playback. 0.23 RTF native, 2.28x realtime WASM.
 - **[mimi-rs](https://github.com/idle-intelligence/mimi-rs)**: Shared Mimi audio codec library.
 
-## Performance (WASM, Chrome on M-series Mac)
+## Performance (M-series Mac)
 
-| Model | Audio | Wall time | Speed |
-|-------|-------|-----------|-------|
-| Pocket TTS | 3.28s | 1.64s (TTFB 0.41s) | 2.28x realtime |
-| KittenTTS | 3.57s | 1.97s | 1.81x realtime |
+| Model | Native RTF | WASM (Chrome) |
+|-------|-----------|---------------|
+| Pocket TTS | 0.23 | 2.28x realtime (TTFB 0.41s) |
+| KittenTTS | 0.24 | 1.81x realtime |
 
-Speed = audio duration / generation time. Higher = faster.
+RTF = generation time / audio duration (lower = faster). WASM speed = audio duration / wall time (higher = faster).
