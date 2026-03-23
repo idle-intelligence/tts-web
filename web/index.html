@@ -545,7 +545,7 @@
             : 'https://huggingface.co/idle-intelligence/kitten-tts-nano-safetensors/resolve/main/kitten-voices.safetensors';
         const KITTEN_WASM_BASE = isLocal
             ? `${location.origin}/kitten-pkg`
-            : './kitten-pkg';
+            : '../kitten-pkg';
         const KITTEN_CACHE = 'kitten-model-v1';
         async function isKittenCached() {
             if (isLocal) return true;
