@@ -53,6 +53,20 @@ cargo run --example kitten_generate -p kitten-core --release -- --text "Hello wo
 cargo run --example kitten_generate -p kitten-core --release -- --ipa "həlˈəʊ wˈɜːld"
 ```
 
+### Using the original KittenTTS ONNX weights
+
+If you prefer to convert the weights yourself instead of using the pre-converted safetensors from HuggingFace:
+
+```bash
+# Download the original ONNX model from KittenML
+hf download KittenML/KittenTTS-nano --local-dir models/kitten-nano
+
+# Convert ONNX → safetensors (requires: pip install onnx safetensors numpy)
+python scripts/kitten/convert_kitten_to_safetensors.py models/kitten-nano
+```
+
+This produces `kitten-nano.safetensors` and `kitten-voices.safetensors` in the same directory.
+
 ## Quick Start — Browser Demo
 
 ```bash
