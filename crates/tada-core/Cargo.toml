@@ -10,7 +10,7 @@ accelerate = ["candle-core/accelerate"]
 [dependencies]
 candle-core = "0.9"
 candle-nn = "0.9"
-mimi-rs = { git = "https://github.com/idle-intelligence/mimi-rs.git" }
+mimi-rs = { git = "https://github.com/idle-intelligence/mimi-rs", branch = "main" }
 rand = "0.9"
 
 [dev-dependencies]
