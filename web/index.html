@@ -442,23 +442,23 @@
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
 
         const TADA_SPEAKERS = [
-            { id: 'ex01', label: '1 \u{1F468}' },
-            { id: 'ex02', label: '2 \u{1F468}' },
-            { id: 'ex03', label: '3 \u{1F469}' },
-            { id: 'ex04', label: '4 \u{1F469}' },
-            { id: 'rickie', label: 'Rickie \u{1F4AC}' },
-            { id: 'jeff', label: 'Jeff \u{26EA}' },
-            { id: 'karen', label: 'Karen \u{1F6CD}' },
-            { id: 'walt', label: 'Walt \u{1F4D6}' },
+            { id: 'ex01', label: 'ex01' },
+            { id: 'ex02', label: 'ex02' },
+            { id: 'ex03', label: 'ex03' },
+            { id: 'ex04', label: 'ex04' },
+            { id: 'rickie', label: 'rickie' },
+            { id: 'jeff', label: 'jeff' },
+            { id: 'karen', label: 'karen' },
+            { id: 'walt', label: 'walt' },
         ];
         const TADA_STYLES = [
-            { id: 'default', label: 'Neutral' },
-            { id: 'happy', label: 'Happy \u{1F60A}' },
-            { id: 'sad', label: 'Sad \u{1F622}' },
-            { id: 'confused', label: 'Confused \u{1F914}' },
-            { id: 'laughing', label: 'Laughing \u{1F602}' },
-            { id: 'whisper', label: 'Whisper \u{1F92B}' },
-            { id: 'enunciated', label: 'Enunciated \u{1F399}' },
+            { id: 'default', label: 'neutral' },
+            { id: 'happy', label: 'happy' },
+            { id: 'sad', label: 'sad' },
+            { id: 'confused', label: 'confused' },
+            { id: 'laughing', label: 'laughing' },
+            { id: 'whisper', label: 'whisper' },
+            { id: 'enunciated', label: 'enunciated' },
         ];
         // Map speaker to voice file path
         function tadaVoiceFile(speaker, style) {
@@ -469,17 +469,6 @@
         }
         let activeTadaSpeaker = null;
         let activeTadaStyle = 'default';
-        const TADA_PHRASES = [
-            'Tyger Tyger, burning bright, In the forests of the night.',
-            'Time is money, who can afford to pay attention?',
-            'There is a pleasure in the pathless woods, There is a rapture on the lonely shore.',
-            'Your smile is like a breath of spring, Your voice is soft like summer rain.',
-            "Do you think your Wu-Tang sword can defeat me? En garde, I'll let you try my Wu-Tang style.",
-            "There's no one around and your phone is dead. Out of the corner of your eye, you spot him...",
-            "I'll tell you one thing about the universe, though. The universe is a pretty big place.",
-        ];
-        let tadaPhraseIndex = 0;
-        // activeTadaSpeaker and activeTadaStyle defined above
         let loadingTadaVoice = false;
 
         let allChunks = [];
@@ -564,7 +553,8 @@
                 btn.classList.add('active');
                 // Auto-generate when engine is ready
                 if (kittenReady) {
-                    triggerKittenGenerate(true);
+                    const isDemo = !textInput.value.trim();
+                    triggerKittenGenerate(isDemo);
                 }
             });
             kittenVoiceGrid.appendChild(btn);
@@ -736,10 +726,6 @@
             tadaStyleGrid.querySelectorAll('.voice-btn').forEach(btn => {
                 btn.style.display = hasStyles ? '' : 'none';
             });
-            // Populate demo text
-            const demoText = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];
-            tadaPhraseIndex++;
-            textInput.value = demoText;
             loadTadaVoice();
         }
 
@@ -749,9 +735,6 @@
             tadaStyleGrid.querySelectorAll('.voice-btn').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.style === id);
             });
-            const demoText = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];
-            tadaPhraseIndex++;
-            textInput.value = demoText;
             loadTadaVoice();
         }
 
@@ -912,30 +895,11 @@
                         updateStatus('ready', text);
                         generateBtn.disabled = false;
                         setTadaVoiceBtnsEnabled(true);
-                        if (!activeTadaSpeaker) {
-                            // First ready — select default speaker + style
-                            activeTadaSpeaker = 'ex03';
-                            activeTadaStyle = 'default';
-                            tadaSpeakerGrid.querySelectorAll('.voice-btn').forEach(btn => {
-                                btn.classList.toggle('active', btn.dataset.speaker === 'ex03');
-                            });
-                            tadaStyleGrid.querySelectorAll('.voice-btn').forEach(btn => {
-                                btn.classList.toggle('active', btn.dataset.style === 'default');
-                            });
-                            textInput.value = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];
-                            tadaPhraseIndex++;
-                        }
                         progressBar.classList.remove('visible');
                         progressInfo.textContent = '';
                         downloadBtn.style.display = 'none';
                     } else {
                         updateStatus('loading', text);
-                        // Show decode status in tadaProgress during generation
-                        if (generating && text.includes('Decoding')) {
-                            const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
-                            tadaProgress.textContent = `Decoding audio... (${elapsed}s)`;
-                            updateStatus('generating', 'Decoding audio...');
-                        }
                         if (typeof progress === 'number') {
                             progressBar.classList.add('visible');
                             progressFill.style.width = (progress * 100) + '%';
@@ -946,9 +910,7 @@
                 onError: (err) => {
                     updateStatus('error', 'Error: ' + err.message);
                     generating = false;
-                    loadingTadaVoice = false;
                     generateBtn.disabled = false;
-                    setTadaVoiceBtnsEnabled(true);
                     stepInfo.textContent = '';
                     console.error(err);
                 },
@@ -981,16 +943,9 @@
 
                     if (isDemoGen) {
                         isDemoGen = false;
-                        // Still show audio player for demo
                         const wav = encodeWav(pcm, sampleRate);
                         const blob = new Blob([wav], { type: 'audio/wav' });
-                        audioPlayer.src = URL.createObjectURL(blob);
-                        audioSection.style.display = 'block';
-                        audioPlayer.play().catch(() => {});
-                        if (usedIpa) {
-                            ipaDisplay.textContent = 'IPA: ' + usedIpa;
-                            ipaDisplay.style.display = '';
-                        }
+                        new Audio(URL.createObjectURL(blob)).play().catch(() => {});
                         return;
                     }
 
@@ -1020,24 +975,21 @@
                 onVoiceLoaded: (name) => {
                     loadingTadaVoice = false;
                     setTadaVoiceBtnsEnabled(true);
+                    // Auto-generate: demo if no user text, otherwise use user text
+                    const userText = textInput.value.trim();
+                    isDemoGen = !userText;
+                    generating = true;
+                    generateBtn.disabled = true;
+                    setTadaVoiceBtnsEnabled(false);
+                    const noiseTemp = parseFloat(noiseSlider.value);
+                    const cfgScale = parseFloat(cfgSlider.value);
+                    tts.generate(userText || DEMO_TEXT, 1.0, { noiseTemp, cfgScale });
                 },
                 onStatus: (text, ready, progress) => {
                     if (ready) {
                         updateStatus('ready', text);
                         generateBtn.disabled = false;
                         setTadaVoiceBtnsEnabled(true);
-                        if (!activeTadaSpeaker) {
-                            activeTadaSpeaker = 'ex03';
-                            activeTadaStyle = 'default';
-                            tadaSpeakerGrid.querySelectorAll('.voice-btn').forEach(btn => {
-                                btn.classList.toggle('active', btn.dataset.speaker === 'ex03');
-                            });
-                            tadaStyleGrid.querySelectorAll('.voice-btn').forEach(btn => {
-                                btn.classList.toggle('active', btn.dataset.style === 'default');
-                            });
-                            textInput.value = TADA_PHRASES[tadaPhraseIndex % TADA_PHRASES.length];
-                            tadaPhraseIndex++;
-                        }
                         progressBar.classList.remove('visible');
                         progressInfo.textContent = '';
                         downloadBtn.style.display = 'none';
@@ -1108,8 +1060,14 @@
 
                     const wav = encodeWav(pcm, tts.sampleRate);
                     const blob = new Blob([wav], { type: 'audio/wav' });
+                    if (isDemoGen) {
+                        isDemoGen = false;
+                        new Audio(URL.createObjectURL(blob)).play().catch(() => {});
+                        return;
+                    }
                     audioPlayer.src = URL.createObjectURL(blob);
                     audioSection.style.display = 'block';
+                    audioPlayer.play().catch(() => {});
                 }
             });
         }

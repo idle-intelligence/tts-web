@@ -192,11 +192,14 @@ try {
             console.log('[kitten] Phonemizer ready.');
         }
 
+        // Set text BEFORE clicking voice — so isDemoGen=false and audio section shows
+        await page.fill('#textInput', 'Hello world.');
+
         // Click the first voice button (bella)
         console.log('[kitten] Selecting voice bella...');
         await page.click('#kittenVoiceGrid .voice-btn:first-child');
 
-        // Wait for audio output (kitten shows audio even for demo gen)
+        // Wait for audio output
         console.log('[kitten] Waiting for audio...');
         await page.waitForFunction(
             () => {
