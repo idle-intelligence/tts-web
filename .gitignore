@@ -15,3 +15,7 @@ plans/
 docs/old/
 docs/pocket-tts/
 kitten-claude-archive/
+# Convergence harness symlinks (point outside repo)
+/convergence/tools
+/convergence/templates
+/convergence/prompts

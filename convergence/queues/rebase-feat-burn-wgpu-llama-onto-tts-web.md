@@ -1,79 +1,107 @@
-STATUS: DRAFT — pending owner review
+STATUS: ACTIVE — started 2026-05-07T19:02:55Z
 
 # rebase-feat-burn-wgpu-llama-onto-tts-web
 
-**Goal:** Rebase feat/burn-wgpu-llama onto tts-web main, merge, and ship a benchmark suite + working local demo. Acceptance: native tada_generate works across voice matrix, WASM builds clean, RTF measurements recorded for all 32 voices, local dev server runs the full demo with working voice selector, no pocket-tts / KittenTTS regression on the frontend. No gh-pages deploy.
+**Goal:** Rebase `feat/burn-wgpu-llama` onto main, merge, and ship a working local demo + RTF benchmark across all 32 TADA voices (6 base in `voices/` + 26 in `voices/matrix/`). Success = a single Playwright run on a freshly-started dev server, all three models (Pocket TTS, KittenTTS, TADA) generate real audio in the browser, AND `docs/tada/results.md` has RTF rows for all 32 voices. No gh-pages deploy.
 
-**Default posture:** Ship a fix, not a doc. Sub-agents are capable — let them implement, rebuild, smoke-test, and commit. Fall back to a documentation-only outcome only when (a) the change needs a judgment call an owner should make, (b) it would regress known-working behavior and we can't verify autonomously, or (c) it's too large for one iteration — land the largest clearly-safe increment and document the rest.
+**Default posture:** Ship the fix. Sub-agents implement, build, smoke-test, commit. Doc-only fallback only when (a) judgment call needs the owner, (b) cannot verify autonomously, (c) too large for one iteration. Walls are not stop signals — document, work around, continue.
 
-Walls are not stop signals: document the wall, attempt a workaround, continue. Documenting is *fallback*, not default.
+## Assumptions
 
-## Assumptions made by mesh
-
-- **Voice count is 26, not 32.** The feature branch's `voices/matrix/` contains 26 `.safetensors` files (ex01–ex04 × 7 styles, minus ex04_happy and ex04_default). No additional voices exist on any branch. Benchmarks will be run against all 26 existing voices; "32 voices" in the goal is aspirational and will be documented as a gap (the 6 missing ex04 entries can be precomputed post-merge as a follow-up). If the owner wants the missing 6 generated as part of this run, this task must be added manually before kickoff.
-- **All three WASM packages must compile clean** (tts-wasm, kitten-wasm, tada-wasm). The goal says "no pocket-tts / KittenTTS regression," which requires compilation to pass, even though only tada-wasm carries new changes.
-- **The benchmark runner will be a Bash script** (not Python) since `tada_generate` is a `cargo run --example` invocation. It will iterate voice files, parse timing from stderr, and append rows to `docs/tada/results.md` and experiment details to `docs/tada/lab-notebook.md`.
-- **`serve.mjs` does not currently serve `voices/`** on main (voices/ was only added on the feature branch). A one-line fix to extend the static file root or add a route will be needed. This is a minor edit, not a new file.
-- **Rebase, not merge-commit.** The feature branch will be rebased onto main and then merged as a fast-forward, matching the precedent set by the kitten branch merge (`7c81706`).
-- **Conflict resolution is the dominant risk.** The 20-commit divergence includes `1b19c26 Switch candle and mimi-rs patches from local paths to git deps`, which likely conflicts with Cargo.toml and Cargo.lock on the feature branch. Phase 1 is dedicated to resolving this before any build work begins.
+- **32 voices = 6 base + 26 matrix.** Base voices in `voices/` (tracked, gitignore exception `!voices/*.safetensors`): `amazement`, `amusement`, `ljspeech`, `ljspeech_long`, `rickie`, `rickie_trimmed`. Matrix in `voices/matrix/` (untracked — gitignore exception is top-level only): 4 speakers × 7 styles = 28 design points, 2 missing (ex04_default, ex04_happy), 26 present. Total target: 32 RTF rows.
+- **Matrix `.safetensors` are local-only by design.** Gitignored by `*.safetensors`; the `!voices/*.safetensors` exception covers only `voices/`, not `voices/matrix/`. The 26 matrix files exist on the dev machine only. Do not change `.gitignore`. Base voices ARE tracked and reproducible from a fresh clone.
+- **Merge commit, not fast-forward.** Kitten precedent `7c81706` is a true merge commit (`Merge: a7c89de 23a2784`). Match it.
+- **Cargo dependency conflict is the dominant rebase risk.** Main moved candle/mimi-rs to git deps (`1b19c26`); the feature branch likely has local-path overrides. Take main's git deps unconditionally.
+- **"No regression"** = the existing models generate real audio in the browser after merge, not button presence in the DOM. Tested by Playwright actually clicking Generate.
+- **Rebase fallback exists.** If rebase becomes intractable (3+ files with non-mechanical conflicts), abort and merge `feat/burn-wgpu-llama` directly into main with conflict resolution on the merge commit. Document choice in commit message.
 
 ## Hard rules
 
 - **Never modify files in `refs/`** — read-only reference material.
 - **Never open PRs on external repos without explicit user authorization.**
-- **Never open the user's personal browser** — use Playwright headless Chromium for any browser testing.
+- **Never open the user's personal browser** — Playwright headless Chromium only.
 - **Never skip hooks (`--no-verify`, etc.)** unless user explicitly asks.
-- **Log EVERY inference run**: both `docs/tada/lab-notebook.md` (experiment details) and `docs/tada/results.md` (data row). No exceptions.
-- **Audio metrics (RMS, peak, flatness) are unreliable** — record RTF timing only; let user listen for quality.
-- **Never delete samples or benchmark data** — user keeps all audio for blog posts.
-- **Benchmark tables = data only** — analysis/strategy goes in separate docs.
-- **Open audio files separately** — one at a time, never batch-open.
-- **Separate benchmarks from analysis** — results.md is pure data rows.
-- **No gh-pages deploy** — explicitly out of scope.
-- **Use sub-agents for all code writing** — lead never does sequential manual edits.
+- **Log every inference run** in `docs/tada/lab-notebook.md` (experiment block) and `docs/tada/results.md` (data row). Skipping a voice on retry because it already succeeded is fine — that is not a new run.
+- **Audio metrics (RMS, peak, flatness) are unreliable** — record RTF only; let user listen for quality.
+- **Never delete samples or benchmark data.**
+- **Benchmark tables = data only.** Analysis goes in separate docs.
+- **No gh-pages deploy.**
+- **Use sub-agents for code writing** — lead never does sequential manual edits.
 
 ## Stop conditions
-- All non-BLOCKED `[x]` → halt with self-review.
+- All non-BLOCKED tasks `[x]` → halt with self-review.
 - Wall-clock > 12h → halt.
 - 3 remeshes across run → halt + `DIVERGENCE.md`.
 
 ## Adding tasks mid-run
-Three triggers only — Discovery (necessary unanticipated work), Split (task is 2+ subproblems → Na/Nb/Nc), Remesh (stuck 2+ steps → output a NEW solution task, max 3 across run).
+Three triggers — Discovery (necessary unanticipated work), Split (task is 2+ subproblems → Na/Nb/Nc), Remesh (stuck 2+ steps → output a NEW solution task, max 3 across run).
 
 ---
 
 ## Tasks
 
-### Phase 1 — Rebase + Conflict Resolution
+### 1. Land the merge with end-to-end sanity (iterate, ~2.5h)
 
-- [ ] **1. Rebase feat/burn-wgpu-llama onto main** (iterate, ~2h). Checkout `feat/burn-wgpu-llama`, rebase onto current `main`. Resolve all conflicts — prioritize main's Cargo dependency changes (`1b19c26`: git deps replacing local paths) over the feature branch's local-path overrides. After rebase, `cargo check -p tada-core --features metal` must succeed on the rebased tip. Commit the resolved rebase as a merge commit to main.
-    **Convergence criteria**: `git log --oneline main | head -1` shows the rebase merge commit; `cargo check -p tada-core --features metal 2>&1 | grep -c '^error'` outputs `0`.
+Checkout `feat/burn-wgpu-llama`, rebase onto current main. Resolve all conflicts in favor of main's git-deps (`1b19c26` and successors). After rebase, on the rebased tip:
+- `cargo check -p tada-core --features metal` exits 0
+- Run `cargo run --example tada_generate -p tada-core --release --features metal -- --voice voices/matrix/ex01_default.safetensors --text "The quick brown fox jumps over the lazy dog." --output /tmp/sanity.wav` — exit 0, output ≥ 50KB.
 
-- [ ] **2. Verify all three crates build** (single-shot, ~30m). Run `cargo build -p tts-core`, `cargo build -p kitten-core --features wasm`, and `cargo check -p tada-core --features metal`. If any fail, delegate conflict/dependency fix to a sub-agent and retry within this task.
-    **Convergence criteria**: All three `cargo build`/`cargo check` invocations exit 0 with no `error[` lines in output.
+Only then merge to main: `git checkout main && git merge --no-ff feat/burn-wgpu-llama`.
 
-### Phase 2 — Native Benchmark Sweep
+If rebase becomes intractable, take the documented fallback: abort rebase, merge feature branch directly into main, resolve conflicts on the merge commit.
 
-- [ ] **3. Write benchmark runner script** (single-shot, ~30m). Create `scripts/tada/benchmark_voice_matrix.sh`. It must: iterate all `.safetensors` files in `voices/matrix/`, run `cargo run --example tada_generate -p tada-core --release --features metal` with default parameters from CLAUDE.md for each voice, capture wall-clock time, compute RTF = generation_time / audio_duration, append one data row to `docs/tada/results.md`, and append one experiment block to `docs/tada/lab-notebook.md`. Audio output files go to `/tmp/tada_bench/`. Script must be idempotent (skip if output file already exists).
-    **Convergence criteria**: `scripts/tada/benchmark_voice_matrix.sh` exists, is executable (`chmod +x`), and `bash -n scripts/tada/benchmark_voice_matrix.sh` exits 0 (syntax check passes).
+**Convergence criteria**: `git log --first-parent main -1 --oneline` shows a merge commit (two parents); `cargo check -p tada-core --features metal` exits 0; `/tmp/sanity.wav` exists and is ≥ 50KB.
 
-- [ ] **4. Run benchmark across all 26 voices and log results** (iterate, ~3h). Execute `scripts/tada/benchmark_voice_matrix.sh`. For each of the 26 voices, a successful audio file must be generated and a row appended to `docs/tada/results.md`. If any voice fails, record the failure in the lab notebook and continue (do not abort the sweep). After completion, commit the updated `docs/tada/results.md` and `docs/tada/lab-notebook.md`.
-    **Convergence criteria**: `wc -l docs/tada/results.md` shows at least 26 new data rows (header + 26 voice rows); `ls /tmp/tada_bench/*.wav | wc -l` outputs at least 20 (allowing up to 6 voice failures before the criterion demands investigation).
+### 2. Build all three WASM packages (single-shot, ~45m)
 
-### Phase 3 — WASM Build + Local Demo
+Run all three on merged main:
+- `wasm-pack build crates/tts-wasm --target web --release`
+- `wasm-pack build crates/kitten-wasm --target web --release -- --features wasm`
+- `wasm-pack build crates/tada-wasm --target web --release -- --features wasm --no-default-features`
 
-- [ ] **5. WASM builds clean for all three packages** (iterate, ~1h). Run `wasm-pack build crates/tts-wasm --target web --release`, `wasm-pack build crates/kitten-wasm --target web --release -- --features wasm`, and `wasm-pack build crates/tada-wasm --target web --release -- --features wasm --no-default-features`. If any fail, delegate the fix to a sub-agent. Repeat until all three exit 0.
-    **Convergence criteria**: All three `wasm-pack build` commands exit 0; `ls crates/tts-wasm/pkg/*.wasm crates/kitten-wasm/pkg/*.wasm crates/tada-wasm/pkg/*.wasm` lists three `.wasm` files.
+If any fails, delegate fix to a sub-agent and retry within this task. Do not silently disable features to make builds pass.
 
-- [ ] **6. Fix dev server to serve voices/ and verify voice selector** (single-shot, ~30m). Inspect `web/serve.mjs` to confirm whether `voices/` is served. If not, add a static route. Then start the dev server (`node web/serve.mjs`), use Playwright headless Chromium to load `http://localhost:8081`, navigate to the TADA tab, and verify the voice selector dropdowns (Speaker + Style grids) are populated and at least one voice option is selectable.
-    **Convergence criteria**: Playwright script exits 0 and reports that both Speaker and Style select elements have `options.length > 1`.
+**Convergence criteria**: All three exit 0; `ls crates/tts-wasm/pkg/*.wasm crates/kitten-wasm/pkg/*.wasm crates/tada-wasm/pkg/*.wasm` lists three `.wasm` files.
 
-- [ ] **7. Smoke test: Pocket TTS and KittenTTS frontend paths** (single-shot, ~30m). Using Playwright headless Chromium on the running dev server, verify: (a) the Pocket TTS tab loads and the Generate button is present and enabled, (b) the KittenTTS tab loads and the Generate button and speed slider are present and enabled. No audio generation needed — UI presence is sufficient for regression check.
-    **Convergence criteria**: Playwright script exits 0 and reports Pocket TTS Generate button present; KittenTTS Generate button + speed slider present.
+### 3. End-to-end demo verification (single-shot, ~1h)
 
-- [ ] **Acceptance check** (iterate, criterion-driven). Independently verify the run's acceptance criterion by direct observation of the goal-as-stated — NOT by re-checking the conjunction of upstream tasks. If this fails while upstream tasks are [x], the decomposition was incomplete; use Discovery / Remesh to address the gap and retry.
-    **Acceptance criterion**: Run `cargo run --example tada_generate -p tada-core --release --features metal -- --voice voices/matrix/ex01_default.safetensors --text "The quick brown fox jumps over the lazy dog." --output /tmp/acceptance_check.wav` on the merged main branch; exit code is 0 and `/tmp/acceptance_check.wav` exists and is non-empty. AND `docs/tada/results.md` contains ≥ 20 rows with non-empty RTF values (grep `'^[0-9]'` on data lines). AND `ls crates/tts-wasm/pkg/*.wasm crates/kitten-wasm/pkg/*.wasm crates/tada-wasm/pkg/*.wasm` lists three files. AND Playwright on `http://localhost:8081` reports Speaker and Style selectors have `options.length > 1`, Pocket TTS Generate button present, KittenTTS Generate button + speed slider present.
+This is the regression test. Probe `web/serve.mjs` first — if it does not already serve `voices/`, add a static route. Otherwise leave it alone.
 
-- [ ] **Global review** (single-shot, adversarial, criterion-blind). Spawn a fresh Agent (sonnet, no prior context) with `/Users/tc/Code/convergence/prompts/global-review.md`. Inputs: RUN_NAME=`rebase-feat-burn-wgpu-llama-onto-tts-web`, REPO_ROOT=`/Users/tc/Code/idle-intelligence/tts-web`, GOAL=run goal as stated above (verbatim), CONV_HOME=`/Users/tc/Code/convergence`. The reviewer reads the goal and the acceptance evidence — never the criterion text — and tries to falsify the run's claimed success. On FAIL: the reviewer appends a Discovery block (re-fix + re-acceptance + re-global-review) to this queue and the loop continues. On PASS: proceed to Self-review.
+Write `scripts/test_demo_e2e.mjs` (Playwright headless Chromium):
+1. Start `node web/serve.mjs` as a child process; tear it down at end.
+2. Load `http://localhost:8081`.
+3. **Pocket TTS**: switch to its tab, fill a short text, click Generate, wait for audio blob (or `<audio>` `src` set), assert ≥ 10KB.
+4. **KittenTTS**: switch tab, click Generate (default text OK), assert audio blob ≥ 10KB.
+5. **TADA**: switch tab, assert speaker selector populated (≥ 4 options) and style selector populated (≥ 7 options), select `ex01_default`, click Generate, assert audio blob ≥ 10KB.
 
-- [ ] **Self-review** (single-shot, ~30m). Spawn a fresh Agent (sonnet, no prior context) with `/Users/tc/Code/convergence/prompts/self-review.md`. Inputs: RUN_NAME=`rebase-feat-burn-wgpu-llama-onto-tts-web`, REPO_ROOT=`/Users/tc/Code/idle-intelligence/tts-web`, COMMIT_PREFIX=`[rebase-feat-burn-wgpu-llama-onto-tts-web]`. Output: `convergence/queues/rebase-feat-burn-wgpu-llama-onto-tts-web-self-review.md`.
+Commit the test script.
+
+**Convergence criteria**: `node scripts/test_demo_e2e.mjs` exits 0 with all three audio assertions passing.
+
+### 4. Benchmark sweep across all 32 voices (iterate, ~2h)
+
+Write `scripts/tada/benchmark_voices.sh` that iterates BOTH `voices/*.safetensors` (6 base) AND `voices/matrix/*.safetensors` (26 matrix) — 32 total. For each, runs `tada_generate` with default CLAUDE.md params, captures wall-clock + audio duration → RTF, appends one row to `docs/tada/results.md` and one experiment block to `docs/tada/lab-notebook.md`. On per-voice failure: log to lab notebook with reproducer command, continue sweep.
+
+Idempotency: skip a voice only if its prior `results.md` row has a non-empty RTF value. Re-run failed voices on retry. Output WAVs go to `/tmp/tada_bench/`.
+
+Commit updated `results.md`, `lab-notebook.md`, and the script.
+
+**Convergence criteria**: `awk -F'|' '/^\| (ex0|amazement|amusement|ljspeech|rickie)/ && $0 ~ /[0-9]\.[0-9]/' docs/tada/results.md | wc -l` outputs ≥ 30, AND every failed voice (if any) has a logged reproducer command in `docs/tada/lab-notebook.md`. (≥ 30 of 32 tolerates 2 transient failures; below that, investigate and re-sweep before passing.)
+
+### 5. Acceptance check (criterion-driven)
+
+Independently verify the goal on merged main:
+1. `node scripts/test_demo_e2e.mjs` exits 0.
+2. `awk -F'|' '/^\| (ex0|amazement|amusement|ljspeech|rickie)/ && $0 ~ /[0-9]\.[0-9]/' docs/tada/results.md | wc -l` outputs ≥ 30.
+
+If either fails while upstream tasks are `[x]`, decomposition was incomplete — Discovery or Remesh.
+
+**Acceptance criterion**: Both checks pass on `main` HEAD.
+
+### 6. Global review (single-shot, adversarial, criterion-blind)
+
+Spawn a fresh Agent (sonnet, no prior context) with `/Users/tc/Code/convergence/prompts/global-review.md`. Inputs: RUN_NAME=`rebase-feat-burn-wgpu-llama-onto-tts-web`, REPO_ROOT=`/Users/tc/Code/idle-intelligence/tts-web`, GOAL=run goal as stated above (verbatim), CONV_HOME=`/Users/tc/Code/convergence`. The reviewer reads the goal and the acceptance evidence — never the criterion text — and tries to falsify the run's claimed success. On FAIL: reviewer appends a Discovery block (re-fix + re-acceptance + re-global-review) to this queue and the loop continues. On PASS: proceed to Self-review.
+
+### 7. Self-review (single-shot, ~30m)
+
+Spawn a fresh Agent (sonnet, no prior context) with `/Users/tc/Code/convergence/prompts/self-review.md`. Inputs: RUN_NAME=`rebase-feat-burn-wgpu-llama-onto-tts-web`, REPO_ROOT=`/Users/tc/Code/idle-intelligence/tts-web`, COMMIT_PREFIX=`[rebase-feat-burn-wgpu-llama-onto-tts-web]`. Output: `convergence/queues/rebase-feat-burn-wgpu-llama-onto-tts-web-self-review.md`.
