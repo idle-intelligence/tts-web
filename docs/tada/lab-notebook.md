@@ -833,3 +833,67 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 **Key finding**: Even F32 GGUF is 12dB louder than Python for whisper voice. All Rust variants cluster within 1dB of each other. The gap is a pipeline/CFG implementation difference, not a quantization artifact. Happy voice gap is only 3dB. Acoustic feature stats: Python raw std=1.10, Rust std=0.97 — similar scale, but the decoder magnifies the difference. "None of the quantizations can do whisper correctly" — the root cause is in the pipeline.
 
 **User feedback**: "none of the quantizations can do whisper correctly"
+
+## 2026-05-07 — voice-matrix-sweep — db4e68c — amazement
+
+**Date**: 2026-05-07
+**Commit**: db4e68c
+**Purpose**: Automated voice sweep — amazement.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: amazement
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.2s total (load 0.8s, gen 6.8s, decode 2.6s)
+- Audio duration: 3.3s
+- RTF: 2.06x
+
+**Output**: /tmp/tada_bench/amazement.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 12 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — db4e68c — ex01_default
+
+**Date**: 2026-05-07
+**Commit**: db4e68c
+**Purpose**: Automated voice sweep — ex01_default.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex01_default
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.2s total (load 0.7s, gen 6.9s, decode 1.6s)
+- Audio duration: 1.9s
+- RTF: 3.63x
+
+**Output**: /tmp/tada_bench/ex01_default.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 10 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---

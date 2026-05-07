@@ -412,3 +412,10 @@ Note: Neg CFG forward run on ALL steps (not just content). Whisper RMS: -22.1dB 
 | quality-all-mixed-happy | candle | metal | Mixed VV-Q8 E-Q8 | 1.4G | universe | — | — | — | — | — | quality_all/mixed_ex01_happy.wav |
 | quality-all-q8llm-happy | candle | metal | Q8 LLM VV-F16 | 2.1G | universe | — | — | — | — | — | quality_all/llmq8_vvf16_ex01_happy.wav |
 | quality-all-mixedk-happy | candle | metal | Q4K VV-Q8 | 1.3G | universe | — | — | — | — | — | quality_all/mixed_k_ex01_happy.wav |
+
+## voice-matrix-sweep
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| voice-sweep-amazement | candle | metal | Var-C VV-Q8 E-Q4 | 1.3G | fox | 0.8 | 6.8 | 2.6 | 3.3 | 2.06x | amazement.wav |
+| voice-sweep-ex01_default | candle | metal | Var-C VV-Q8 E-Q4 | 1.3G | fox | 0.7 | 6.9 | 1.6 | 1.9 | 3.63x | ex01_default.wav |
