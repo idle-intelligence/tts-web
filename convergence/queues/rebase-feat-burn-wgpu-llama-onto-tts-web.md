@@ -52,7 +52,7 @@ If rebase becomes intractable, take the documented fallback: abort rebase, merge
 
 **Convergence criteria**: `git log --first-parent main -1 --oneline` shows a merge commit (two parents); `cargo check -p tada-core --features metal` exits 0; `/tmp/sanity.wav` exists and is ≥ 50KB.
 
-### 2. Build all three WASM packages (single-shot, ~45m)
+### 2. [x] Build all three WASM packages (single-shot, ~45m)
 
 Run all three on merged main:
 - `wasm-pack build crates/tts-wasm --target web --release`
