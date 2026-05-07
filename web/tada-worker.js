@@ -147,6 +147,7 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
         );
 
         // Generation loop
+        const genStart = performance.now();
         let step = 0;
         while (true) {
             const result = await engine.generationStep();
@@ -170,12 +171,24 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
 
             if (info.is_done) break;
         }
+        const genMs = performance.now() - genStart;
 
         // Decode audio
         postMessage({type: 'progress', step: -1, totalTokens: 0, isEos: false, tokenId: 0, decoding: true});
+        const decodeStart = performance.now();
         const pcm = engine.decodeAudio();
+        const decodeMs = performance.now() - decodeStart;
 
         if (pcm && pcm.length > 0) {
+            const audioDurationMs = (pcm.length / 24000) * 1000;
+            const timing = {
+                gen_ms: Math.round(genMs),
+                decode_ms: Math.round(decodeMs),
+                audio_duration_ms: Math.round(audioDurationMs),
+                rtf: (genMs + decodeMs) / audioDurationMs,
+            };
+            self.postMessage({type: 'timing', ...timing});
+            console.log('[tada-timing]', JSON.stringify(timing));
             postMessage({type: 'audio', samples: pcm, sampleRate: 24000});
         }
 

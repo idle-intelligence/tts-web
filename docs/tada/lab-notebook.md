@@ -1857,3 +1857,26 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 **Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 10 frames without hitting EOS — likely degraded model quality   ⚠ Audio sanity checks FAILED: 
 
 ---
+
+## 2026-05-08 — wasm-perf-instrument
+
+**Date**: 2026-05-08
+**Commit**: (see below)
+**Purpose**: Instrument `web/tada-worker.js` to emit timing metrics; audit `tasks_max` source location and SIMD128 opcode presence in the production WASM binary.
+
+**Worker instrumentation**:
+- Added `performance.now()` brackets around the generation loop and `engine.decodeAudio()` call
+- After decode, emits `self.postMessage({type: 'timing', gen_ms, decode_ms, audio_duration_ms, rtf})` and `console.log('[tada-timing]', JSON.stringify({...}))` so both the Playwright test (console scrape) and the page UI (postMessage) can capture timing
+
+**tasks_max audit**:
+- Source: `crates/tada-wasm/src/lib.rs:714`
+- Current value: `tasks_max: 512`
+- Mesh assumption (lib.rs:714) was correct
+
+**SIMD128 audit**:
+- Tool: `wasm-dis` (binaryen, via brew)
+- File: `crates/tada-wasm/pkg/tada_wasm_bg.wasm` (13,710,066 bytes, built 2026-05-07)
+- Opcode count (i32x4|f32x4|v128|i8x16|i16x8|f64x2): **189,650**
+- Conclusion: SIMD128 **ON**
+
+---
