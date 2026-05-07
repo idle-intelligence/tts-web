@@ -452,6 +452,8 @@ pub struct LlamaModel {
     norm: RmsNorm,
     rope: RopeCache,
     kv_caches: Vec<KvCache>,
+    /// Separate KV cache for the CFG negative (zero-acoustic) path.
+    neg_kv_caches: Vec<KvCache>,
 }
 
 impl LlamaModel {
@@ -472,6 +474,7 @@ impl LlamaModel {
         let rope = RopeCache::new(cfg, &gguf.device)?;
 
         let kv_caches = (0..cfg.num_hidden_layers).map(|_| KvCache::new()).collect();
+        let neg_kv_caches = (0..cfg.num_hidden_layers).map(|_| KvCache::new()).collect();
 
         Ok(Self {
             embed_tokens,
@@ -479,6 +482,7 @@ impl LlamaModel {
             norm,
             rope,
             kv_caches,
+            neg_kv_caches,
         })
     }
 
@@ -498,6 +502,7 @@ impl LlamaModel {
             norm,
             rope,
             kv_caches: Vec::new(),
+            neg_kv_caches: Vec::new(),
         })
     }
 
@@ -586,9 +591,34 @@ impl LlamaModel {
         hidden.broadcast_matmul(&embed_w.t()?)
     }
 
+    /// Run the transformer using the negative (zero-acoustic) KV cache.
+    ///
+    /// Uses the same weights as `forward` but writes to `neg_kv_caches` instead
+    /// of `kv_caches`. This allows CFG to maintain independent KV histories for
+    /// the positive (real acoustic) and negative (zero acoustic) paths.
+    ///
+    /// - `input_embeds`: [batch, seq_len, hidden_size]
+    /// - `index_pos`: starting position in the sequence (same as the pos path)
+    ///
+    /// Returns hidden states of shape [batch, seq_len, hidden_size].
+    pub fn forward_neg(&mut self, input_embeds: &Tensor, index_pos: usize) -> Result<Tensor> {
+        let (_b, seq_len, _hidden) = input_embeds.dims3()?;
+        let (cos, sin) = self.rope.get(index_pos, seq_len)?;
+
+        let mut x = input_embeds.clone();
+        for (layer, kv_cache) in self.layers.iter().zip(self.neg_kv_caches.iter_mut()) {
+            x = layer.forward(&x, &cos, &sin, kv_cache)?;
+        }
+
+        self.norm.forward(&x)
+    }
+
     /// Clear all KV caches (call between sequences).
     pub fn clear_kv_cache(&mut self) {
         for cache in self.kv_caches.iter_mut() {
+            cache.clear();
+        }
+        for cache in self.neg_kv_caches.iter_mut() {
             cache.clear();
         }
     }

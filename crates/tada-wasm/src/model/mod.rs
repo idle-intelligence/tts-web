@@ -7,6 +7,7 @@
 pub mod attention;
 pub mod kv_cache;
 pub mod rope;
+pub mod vibevoice;
 
 use burn::backend::wgpu::{Wgpu, WgpuDevice};
 use burn::tensor::Tensor;
@@ -938,4 +939,99 @@ fn load_f32_embedding<R: Read + Seek>(
     let shape = gguf::reverse_gguf_dims(info.shape());
     let dim = shape[1];
     Ok(F32Embedding::from_cpu(data, dim))
+}
+
+/// Load the VibeVoice diffusion head weights from GGUF into Burn/GPU.
+///
+/// Reads `prediction_head.*` tensors. Handles Q8_0, Q4_0, F16, and F32 —
+/// all dequantized to F32 at load time via `load_f32_weight_any`.
+///
+/// This is intentionally separate from `load_tada_llama_gguf` so it can be
+/// called optionally (the candle path is still available as a fallback).
+pub fn load_burn_vibevoice<R: Read + Seek>(
+    reader: &mut gguf::GgufReader<R>,
+    device: &WgpuDevice,
+) -> anyhow::Result<vibevoice::BurnVibeVoice> {
+    use burn::tensor::TensorData;
+    use tada_core::config::TadaConfig;
+    use vibevoice::{
+        BurnFeedForwardNetwork, BurnFinalLayer, BurnHeadLayer, BurnTimestepEmbedder, BurnVibeVoice,
+        VVLinear,
+    };
+
+    let cfg = TadaConfig::tada_1b();
+    let head_dim = 2048usize; // prediction_head hidden dim (same as LLM hidden_size)
+    let _hidden_size = cfg.llama.hidden_size; // 2048 — kept for documentation
+    let total_latent_dim = cfg.total_latent_dim(); // 528
+    let acoustic_dim = cfg.acoustic_dim; // 512
+    let num_head_layers = cfg.head_layers; // 6
+    let frequency_embedding_size = 256usize;
+    let eps = cfg.llama.rms_norm_eps as f32;
+
+    let prefix = "prediction_head";
+
+    // Helper: load Q8Linear if Q8_0, else F32Linear (for small t_embedder layers)
+    let load_vv = |reader: &mut gguf::GgufReader<R>, name: &str| -> anyhow::Result<VVLinear> {
+        gguf::load_q8_or_f32_linear(reader, name, device)
+    };
+
+    // Helper: load small F32Linear (stays F32 regardless — for t_embedder)
+    let load_f32 = |reader: &mut gguf::GgufReader<R>, name: &str| -> anyhow::Result<F32Linear> {
+        let (data, shape) = gguf::load_f32_weight_any(reader, name)?;
+        let w = Tensor::<Wgpu, 2>::from_data(TensorData::new(data, [shape[0], shape[1]]), device);
+        Ok(F32Linear::new(w, None))
+    };
+
+    // noisy_images_proj: [head_dim, total_latent_dim]
+    let noisy_images_proj = load_vv(reader, &format!("{prefix}.noisy_images_proj.weight"))?;
+
+    // cond_proj: [head_dim, hidden_size]
+    let cond_proj = load_vv(reader, &format!("{prefix}.cond_proj.weight"))?;
+
+    // t_embedder MLP — small, stays F32
+    let t_mlp_0 = load_f32(reader, &format!("{prefix}.t_embedder.mlp.0.weight"))?;
+    let t_mlp_2 = load_f32(reader, &format!("{prefix}.t_embedder.mlp.2.weight"))?;
+    let t_embedder = BurnTimestepEmbedder::new(t_mlp_0, t_mlp_2, frequency_embedding_size);
+
+    // Transformer layers
+    let mut layers = Vec::with_capacity(num_head_layers);
+    for i in 0..num_head_layers {
+        let lp = format!("{prefix}.layers.{i}");
+
+        let gate_proj = load_vv(reader, &format!("{lp}.ffn.gate_proj.weight"))?;
+        let up_proj = load_vv(reader, &format!("{lp}.ffn.up_proj.weight"))?;
+        let down_proj = load_vv(reader, &format!("{lp}.ffn.down_proj.weight"))?;
+        let ffn = BurnFeedForwardNetwork::new(gate_proj, up_proj, down_proj);
+
+        let norm_weight = gguf::load_f32_tensor(reader, &format!("{lp}.norm.weight"))?;
+
+        let ada = load_vv(reader, &format!("{lp}.adaLN_modulation.1.weight"))?;
+
+        layers.push(BurnHeadLayer::new(ffn, norm_weight, eps, ada, head_dim, device.clone()));
+    }
+
+    // Final layer
+    let fl_prefix = format!("{prefix}.final_layer");
+    let final_linear = load_vv(reader, &format!("{fl_prefix}.linear.weight"))?;
+    let final_ada = load_vv(reader, &format!("{fl_prefix}.adaLN_modulation.1.weight"))?;
+    let final_layer = BurnFinalLayer::new(
+        final_linear,
+        final_ada,
+        eps,
+        head_dim,
+        total_latent_dim,
+        device.clone(),
+    );
+
+    Ok(BurnVibeVoice::new(
+        noisy_images_proj,
+        cond_proj,
+        t_embedder,
+        layers,
+        final_layer,
+        head_dim,
+        total_latent_dim,
+        acoustic_dim,
+        device.clone(),
+    ))
 }

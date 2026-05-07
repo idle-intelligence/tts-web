@@ -1,0 +1,12 @@
+{
+  "text": "That day when evening came, he said to his disciples, Let us go over to the other side. Leaving the crowds behind, they took him along, just as he was. In the boat. There were also other boats with him. A furious squall came up, and the waves broke over the boat.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/sbcsae_walt.wav",
+  "token_values_shape": [
+    63,
+    512
+  ],
+  "token_positions_shape": [
+    63
+  ]
+}

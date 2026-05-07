@@ -414,6 +414,7 @@ fn run() -> anyhow::Result<()> {
             let t_vibe = Instant::now();
             let (acou, tb, ta) = candle_model.generate_acoustic(
                 &hidden_candle,
+                None,  // neg_hidden: TODO compute for proper CFG
                 args.noise_temp,
                 &mut rng,
                 args.flow_steps,

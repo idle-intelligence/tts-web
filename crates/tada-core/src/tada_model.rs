@@ -299,10 +299,26 @@ impl TadaModel {
     /// Load only VibeVoice + decoder + adapters from GGUF (skip LLM).
     /// Used in hybrid mode where Burn handles the LLM on GPU.
     pub fn load_gguf_no_llm(data: &[u8], cfg: &TadaConfig, device: &Device) -> Result<Self> {
+        Self::load_gguf_no_llm_inner(data, cfg, device, true)
+    }
+
+    /// Load without LLM and without VV (decoder + adapters only).
+    /// Used when Burn handles both LLM and VV on GPU — saves ~400MB WASM memory.
+    pub fn load_gguf_no_llm_no_vv(data: &[u8], cfg: &TadaConfig, device: &Device) -> Result<Self> {
+        Self::load_gguf_no_llm_inner(data, cfg, device, false)
+    }
+
+    fn load_gguf_no_llm_inner(data: &[u8], cfg: &TadaConfig, device: &Device, load_vv: bool) -> Result<Self> {
         let mut gguf = GgufTensors::from_bytes(data, device)?;
 
-        // Skip LlamaModel — Burn handles it
-        let prediction_head = VibeVoiceDiffusionHead::load_gguf(&mut gguf, cfg)?;
+        // Only load VV if not handled by Burn GPU
+        let prediction_head = if load_vv {
+            VibeVoiceDiffusionHead::load_gguf(&mut gguf, cfg)?
+        } else {
+            // Dummy — Burn handles VV on GPU. We still need the struct but it won't be called.
+            // Load with zero-size layers to avoid allocating real weights.
+            VibeVoiceDiffusionHead::load_gguf(&mut gguf, &TadaConfig { head_layers: 0, ..cfg.clone() })?
+        };
         let decoder = Decoder::load_gguf(&mut gguf, "_decoder", &cfg.decoder)?;
 
         let acoustic_proj = gguf.qlinear("acoustic_proj")?;
@@ -426,6 +442,21 @@ impl TadaModel {
         self.llama.forward_n_layers(input_embeds, self.position, num_layers)
     }
 
+    /// Run one step through the Llama backbone using the negative KV cache.
+    ///
+    /// Used for CFG: the positive path calls `forward_step` (advances position
+    /// and writes to `kv_caches`); the negative path calls this method using the
+    /// position that `forward_step` consumed, writing to `neg_kv_caches` instead.
+    ///
+    /// - `input_embeds`: `[1, 1, hidden_size]` built with zero acoustic features
+    ///
+    /// Returns hidden states `[1, 1, hidden_size]`.
+    pub fn forward_neg_step(&mut self, input_embeds: &Tensor) -> Result<Tensor> {
+        // pos_step already incremented position; use position - 1 for this step.
+        let pos = self.position.saturating_sub(1);
+        self.llama.forward_neg(input_embeds, pos)
+    }
+
     /// Compute logits from hidden states (for debugging).
     pub fn lm_head_logits(&self, hidden: &Tensor) -> Result<Tensor> {
         self.llama.lm_head(hidden)
@@ -446,13 +477,14 @@ impl TadaModel {
     pub fn generate_acoustic(
         &self,
         hidden: &Tensor,
+        neg_hidden: Option<&Tensor>,
         noise_temp: f32,
         rng: &mut dyn Rng,
         num_steps: usize,
         acoustic_cfg_scale: f32,
     ) -> Result<(Tensor, u32, u32)> {
         let (acoustic, time_before, time_after, _debug) =
-            self.generate_acoustic_debug(hidden, noise_temp, rng, num_steps, acoustic_cfg_scale, false)?;
+            self.generate_acoustic_debug(hidden, neg_hidden, noise_temp, rng, num_steps, acoustic_cfg_scale, false)?;
         Ok((acoustic, time_before, time_after))
     }
 
@@ -466,6 +498,7 @@ impl TadaModel {
     pub fn generate_acoustic_debug(
         &self,
         hidden: &Tensor,
+        neg_hidden: Option<&Tensor>,
         noise_temp: f32,
         rng: &mut dyn Rng,
         num_steps: usize,
@@ -474,6 +507,7 @@ impl TadaModel {
     ) -> Result<(Tensor, u32, u32, Option<AcousticDebugInfo>)> {
         // Squeeze hidden from [1, 1, hidden_size] → [1, hidden_size]
         let cond = hidden.squeeze(1)?;
+        let neg_cond = neg_hidden.map(|h| h.squeeze(1)).transpose()?;
 
         // Sample noise: [1, total_latent_dim]
         let total_dim = self.cfg.total_latent_dim();
@@ -486,6 +520,7 @@ impl TadaModel {
         let result = solve_flow_matching(
             &noise,
             &cond,
+            neg_cond.as_ref(),
             &self.prediction_head,
             num_steps,
             "logsnr",
@@ -541,60 +576,117 @@ impl TadaModel {
 
     /// Sample the next text token from the LLM hidden state.
     ///
-    /// - `hidden`: `[1, 1, hidden_size]` from `forward_step`
-    /// - `temperature`: sampling temperature (1.0 = no scaling)
-    /// - `rng`: RNG for stochastic sampling (Gumbel-max trick)
+    /// Matches Python's sampling pipeline:
+    /// 1. Repetition penalty (penalize tokens already in input_ids)
+    /// 2. Temperature scaling
+    /// 3. Top-p (nucleus) filtering
+    /// 4. Multinomial sampling
     ///
-    /// Returns `(token_id, is_eos)` where `is_eos` is true if the token
-    /// is EOS (128001) or EOT (128009).
+    /// - `hidden`: `[1, 1, hidden_size]` from `forward_step`
+    /// - `temperature`: sampling temperature (Python default: 0.6)
+    /// - `top_p`: nucleus sampling threshold (Python default: 0.9, 0.0 = disabled)
+    /// - `repetition_penalty`: penalty for repeated tokens (Python default: 1.1, 1.0 = disabled)
+    /// - `input_ids`: tokens generated so far (for repetition penalty)
+    /// - `rng`: RNG for stochastic sampling
+    ///
+    /// Returns `(token_id, is_eos)`.
     pub fn sample_next_token(
         &self,
         hidden: &Tensor,
         temperature: f32,
+        top_p: f32,
+        repetition_penalty: f32,
+        input_ids: &[u32],
         rng: &mut dyn Rng,
     ) -> Result<(u32, bool)> {
         // Compute logits: [1, 1, vocab_size]
         let logits = self.llama.lm_head(hidden)?;
 
-        // Take last position: [1, vocab_size]
-        let logits = logits.i((.., logits.dim(1)? - 1, ..))?;
-
-        // Temperature scaling
-        let logits = if (temperature - 1.0).abs() > 1e-6 {
-            (logits / temperature as f64)?
-        } else {
-            logits
-        };
-
-        // Gumbel-max trick: argmax(logits + gumbel_noise) = multinomial sample
-        // gumbel_noise = -log(-log(uniform(0,1)))
-        // We use the normal RNG to generate uniform samples via the CDF
-        let logits_vec = logits.squeeze(0)?.to_vec1::<f32>()?;
+        // Take last position → [vocab_size]
+        let mut logits_vec = logits
+            .i((.., logits.dim(1)? - 1, ..))?
+            .squeeze(0)?
+            .to_vec1::<f32>()?;
         let vocab_size = logits_vec.len();
-        let mut gumbel_logits = Vec::with_capacity(vocab_size);
-        for &l in &logits_vec {
-            // Convert normal sample to uniform via probit function approximation
-            let u: f32 = loop {
-                // Use normal sample → clamp to (0,1) range via sigmoid
-                let n = rng.sample_normal();
-                let u = 1.0 / (1.0 + (-n).exp());
-                if u > 0.0 && u < 1.0 {
-                    break u;
+
+        // 1. Repetition penalty: penalize tokens already in input_ids
+        if (repetition_penalty - 1.0).abs() > 1e-6 {
+            for &id in input_ids {
+                if (id as usize) < vocab_size {
+                    let score = logits_vec[id as usize];
+                    logits_vec[id as usize] = if score < 0.0 {
+                        score * repetition_penalty
+                    } else {
+                        score / repetition_penalty
+                    };
                 }
-            };
-            let gumbel = -((-u.ln()).ln());
-            gumbel_logits.push(l + gumbel);
+            }
         }
 
-        let token_id = gumbel_logits
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(i, _)| i as u32)
-            .unwrap_or(0);
+        // 2. Temperature scaling
+        if (temperature - 1.0).abs() > 1e-6 && temperature > 0.0 {
+            for l in logits_vec.iter_mut() {
+                *l /= temperature;
+            }
+        }
+
+        // 3. Top-p (nucleus) filtering
+        if top_p > 0.0 && top_p < 1.0 {
+            // Sort indices by logit value descending
+            let mut indices: Vec<usize> = (0..vocab_size).collect();
+            indices.sort_by(|&a, &b| logits_vec[b].partial_cmp(&logits_vec[a]).unwrap_or(std::cmp::Ordering::Equal));
+
+            // Compute softmax of sorted logits
+            let max_logit = logits_vec[indices[0]];
+            let mut sorted_probs: Vec<f32> = indices.iter().map(|&i| (logits_vec[i] - max_logit).exp()).collect();
+            let sum: f32 = sorted_probs.iter().sum();
+            for p in sorted_probs.iter_mut() {
+                *p /= sum;
+            }
+
+            // Find cutoff: cumulative prob >= top_p
+            let mut cumsum = 0.0f32;
+            for (rank, &prob) in sorted_probs.iter().enumerate() {
+                cumsum += prob;
+                if cumsum >= top_p {
+                    // Mask out all tokens after this rank
+                    for &idx in &indices[rank + 1..] {
+                        logits_vec[idx] = f32::NEG_INFINITY;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // 4. Multinomial sampling (softmax → cumulative → sample)
+        let max_logit = logits_vec.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let mut probs: Vec<f32> = logits_vec.iter().map(|&l| (l - max_logit).exp()).collect();
+        let sum: f32 = probs.iter().sum();
+        if sum > 0.0 {
+            for p in probs.iter_mut() {
+                *p /= sum;
+            }
+        }
+
+        // Sample from the distribution
+        let u: f32 = loop {
+            let n = rng.sample_normal();
+            let u = 1.0 / (1.0 + (-n).exp());
+            if u > 0.0 && u < 1.0 {
+                break u;
+            }
+        };
+        let mut cumsum = 0.0f32;
+        let mut token_id = 0u32;
+        for (i, &p) in probs.iter().enumerate() {
+            cumsum += p;
+            if cumsum >= u {
+                token_id = i as u32;
+                break;
+            }
+        }
 
         let is_eos = token_id == EOS_TOKEN_ID || token_id == EOT_TOKEN_ID;
-
         Ok((token_id, is_eos))
     }
 

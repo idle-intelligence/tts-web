@@ -1,0 +1,12 @@
+{
+  "text": "There's an alarm tomorrow at twelve fifteen AM, one Friday at nine AM, and one next Saturday at eight PM.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/matrix/ex02_sad.wav",
+  "token_values_shape": [
+    25,
+    512
+  ],
+  "token_positions_shape": [
+    25
+  ]
+}

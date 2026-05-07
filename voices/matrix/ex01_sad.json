@@ -1,0 +1,12 @@
+{
+  "text": "Knock! Knock! Who's there? Lettuce. Lettuce who? Let us in, we are cold out here!",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/matrix/ex01_sad.wav",
+  "token_values_shape": [
+    28,
+    512
+  ],
+  "token_positions_shape": [
+    28
+  ]
+}

@@ -311,3 +311,104 @@ Note: Gen time includes llm=3.1-3.4s + vibe=11.0-11.5s. LLM per-step avg 129-137
 | burn-varC-q4-smile | burn+candle | wgpu+cpu | Var-C VV-Q8 E-Q4 | 1.3G | smile | 0.9 | 6.5 | 2.6 | 4.58 | 1.42x | burn_varC/smile.wav |
 | burn-varC-q4-woods | burn+candle | wgpu+cpu | Var-C VV-Q8 E-Q4 | 1.3G | woods | 0.9 | 7.2 | 1.9 | 3.52 | 2.06x | burn_varC/woods.wav |
 | burn-varC-q4-universe | burn+candle | wgpu+cpu | Var-C VV-Q8 E-Q4 | 1.3G | universe | 0.9 | 7.5 | 2.2 | 3.92 | 1.92x | burn_varC/universe.wav |
+
+---
+
+## simd128
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| simd128-varc-default | burn+candle | wgpu+cpu | Var-C | 1.3G | — | — | — | 5.4 | — | — | — |
+
+Note: Decode was 17.8s before SIMD128, 5.4s after — 3.3x improvement. Chrome trace: 23 steps, warmup 3254ms, content steps avg 402ms/step (90ms compute + 312ms gap).
+
+---
+
+## tasks-max-512
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| tasks-max-512-varc-default | burn+candle | wgpu+cpu | Var-C | 1.3G | — | — | 53.1 | — | — | — | — |
+
+Note: GPU command batching increased from 32 to 512 tasks/submission. Dispatch gaps dropped 6x (340ms → 55ms per step). 45 steps total with long voice prompt.
+
+---
+
+## q8-vv-gpu
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| q8-vv-gpu-varc-default | burn+candle | wgpu+wgpu | Var-C | 1.3G | — | 10.6 | — | 17.8 | — | — | — |
+
+Note: Content steps 551ms (vs 595ms CPU = 8% faster). Warmup 10.6s for VV shader compilation. Decode regressed to 17.8s (vs 5.4s with CPU VV).
+
+---
+
+## vv-warmup
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| vv-warmup-varc-default | burn+candle | wgpu+wgpu | Var-C | 1.3G | — | — | — | — | — | — | — |
+
+Note: First-gen VV compile stall reduced from ~13s to ~4.5s by pre-compiling shaders during warmup (10 ODE steps + CFG=1.6 to cover all shader variants).
+
+---
+
+## cfg-negcond-fix
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| cfg-negcond-zeros-whisper | burn+candle | wgpu+wgpu | Var-C | 1.3G | ex04_whisper | — | — | — | — | — | — |
+| cfg-negcond-singlepop-whisper | burn+candle | wgpu+wgpu | Var-C | 1.3G | ex04_whisper | — | — | — | — | — | — |
+| cfg-negcond-dualcache-whisper | burn+candle | wgpu+wgpu | Var-C | 1.3G | ex04_whisper | — | — | — | — | — | — |
+
+Note: Whisper RMS: -12.4dB (literal zeros neg_cond) → -20.2dB (single cache pop) → -21.2dB (dual KV cache). Python reference: -34.5dB.
+
+---
+
+## sampling-fix
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| sampling-fix-varc-default | burn+candle | wgpu+wgpu | Var-C | 1.3G | — | — | — | — | — | — | — |
+
+Note: Replaced Gumbel-max with top_p=0.9 + repetition_penalty=1.1 + multinomial sampling to match Python reference. Same RMS for the test seed.
+
+---
+
+## neg-kv-all-steps
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| neg-kv-all-steps-whisper | burn+candle | wgpu+wgpu | Var-C | 1.3G | ex04_whisper | — | — | — | — | — | — |
+
+Note: Neg CFG forward run on ALL steps (not just content). Whisper RMS: -22.1dB vs -21.2dB with previous approach — minimal improvement.
+
+---
+
+## quality-all-variants
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| quality-all-python-whisper | python-bf16 | cpu | BF16 | — | universe | — | — | — | 4.52 | — | quality_all/python_ex04_whisper.wav |
+| quality-all-f32-whisper | candle | metal | F32 | 6.5G | universe | — | — | — | 4.72 | — | quality_all/f32_ex04_whisper.wav |
+| quality-all-f16-whisper | candle | metal | F16 | 3.3G | universe | — | — | — | 4.72 | — | quality_all/f16_ex04_whisper.wav |
+| quality-all-q4-whisper | candle | metal | Q4_0 baseline | 2.6G | universe | — | — | — | 4.16 | — | quality_all/q4_0_ex04_whisper.wav |
+| quality-all-A-whisper | candle | metal | Var-A VV-F16 E-Q8 | 1.9G | universe | — | — | — | 4.16 | — | quality_all/A_vvf16_eq8_ex04_whisper.wav |
+| quality-all-B-whisper | candle | metal | Var-B VV-F32 E-Q8 | 2.5G | universe | — | — | — | 4.16 | — | quality_all/B_vvf32_eq8_ex04_whisper.wav |
+| quality-all-C-whisper | candle | metal | Var-C VV-Q8 E-Q4 | 1.3G | universe | — | — | — | 4.16 | — | quality_all/C_vvq8_eq4_ex04_whisper.wav |
+| quality-all-E-whisper | candle | metal | Var-E VV-F16 E-Q4 | 1.6G | universe | — | — | — | 4.16 | — | quality_all/E_vvf16_eq4_ex04_whisper.wav |
+| quality-all-mixed-whisper | candle | metal | Mixed VV-Q8 E-Q8 | 1.4G | universe | — | — | — | 4.16 | — | quality_all/mixed_ex04_whisper.wav |
+| quality-all-q8llm-whisper | candle | metal | Q8 LLM VV-F16 | 2.1G | universe | — | — | — | 4.72 | — | quality_all/llmq8_vvf16_ex04_whisper.wav |
+| quality-all-mixedk-whisper | candle | metal | Q4K VV-Q8 | 1.3G | universe | — | — | — | 4.08 | — | quality_all/mixed_k_ex04_whisper.wav |
+| quality-all-python-happy | python-bf16 | cpu | BF16 | — | universe | — | — | — | — | — | quality_all/python_ex01_happy.wav |
+| quality-all-f32-happy | candle | metal | F32 | 6.5G | universe | — | — | — | — | — | quality_all/f32_ex01_happy.wav |
+| quality-all-f16-happy | candle | metal | F16 | 3.3G | universe | — | — | — | — | — | quality_all/f16_ex01_happy.wav |
+| quality-all-q4-happy | candle | metal | Q4_0 baseline | 2.6G | universe | — | — | — | — | — | quality_all/q4_0_ex01_happy.wav |
+| quality-all-A-happy | candle | metal | Var-A VV-F16 E-Q8 | 1.9G | universe | — | — | — | — | — | quality_all/A_vvf16_eq8_ex01_happy.wav |
+| quality-all-B-happy | candle | metal | Var-B VV-F32 E-Q8 | 2.5G | universe | — | — | — | — | — | quality_all/B_vvf32_eq8_ex01_happy.wav |
+| quality-all-C-happy | candle | metal | Var-C VV-Q8 E-Q4 | 1.3G | universe | — | — | — | — | — | quality_all/C_vvq8_eq4_ex01_happy.wav |
+| quality-all-E-happy | candle | metal | Var-E VV-F16 E-Q4 | 1.6G | universe | — | — | — | — | — | quality_all/E_vvf16_eq4_ex01_happy.wav |
+| quality-all-mixed-happy | candle | metal | Mixed VV-Q8 E-Q8 | 1.4G | universe | — | — | — | — | — | quality_all/mixed_ex01_happy.wav |
+| quality-all-q8llm-happy | candle | metal | Q8 LLM VV-F16 | 2.1G | universe | — | — | — | — | — | quality_all/llmq8_vvf16_ex01_happy.wav |
+| quality-all-mixedk-happy | candle | metal | Q4K VV-Q8 | 1.3G | universe | — | — | — | — | — | quality_all/mixed_k_ex01_happy.wav |

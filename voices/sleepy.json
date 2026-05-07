@@ -1,0 +1,12 @@
+{
+  "text": "And here's another idea. Perrault found one with head buried in the grub box. In partnership with Daylight, the pair raided the San Jose Interurban.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/emov_sleepy.wav",
+  "token_values_shape": [
+    32,
+    512
+  ],
+  "token_positions_shape": [
+    32
+  ]
+}

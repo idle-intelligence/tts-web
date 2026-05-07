@@ -13,6 +13,7 @@ pub mod model;
 use burn::backend::wgpu::{Wgpu, WgpuDevice};
 use burn::tensor::Tensor;
 
+use model::vibevoice::BurnVibeVoice;
 use model::{LayerCaches, TadaLlama};
 use tada_core::config::TadaConfig;
 use tada_core::tada_model::{self, BOS_TOKEN_ID, EOS_TOKEN_ID, EOT_TOKEN_ID, VoicePrompt};
@@ -39,6 +40,13 @@ impl WasmRng {
 }
 
 impl tada_model::Rng for WasmRng {
+    fn sample_normal(&mut self) -> f32 {
+        use rand::Rng;
+        self.inner.sample(self.distr)
+    }
+}
+
+impl model::vibevoice::Rng for WasmRng {
     fn sample_normal(&mut self) -> f32 {
         use rand::Rng;
         self.inner.sample(self.distr)
@@ -92,7 +100,11 @@ struct GenState {
 pub struct HybridTadaModel {
     /// Llama backbone on GPU (Burn/wgpu)
     llama: TadaLlama,
-    /// VibeVoice + decoder on CPU (candle)
+    /// VibeVoice diffusion head on GPU (Burn/wgpu) — optional.
+    /// When present, flow matching runs entirely on GPU and only
+    /// 512 acoustic floats + 2 time values are read back per step.
+    burn_vv: Option<BurnVibeVoice>,
+    /// VibeVoice + decoder on CPU (candle) — always present as fallback.
     candle_model: tada_core::tada_model::TadaModel,
     /// Config
     cfg: TadaConfig,
@@ -131,11 +143,30 @@ impl HybridTadaModel {
         let cursor = std::io::Cursor::new(&buf);
         let mut reader = gguf::GgufReader::open(cursor)?;
         let llama = model::load_tada_llama_gguf(&mut reader, device)?;
+
+        // Try to load VibeVoice into Burn/GPU as well.
+        // This is optional — if it fails (e.g. weights not present or dtype unsupported),
+        // we fall back to the candle CPU path without hard-failing the load.
+        // Try loading BurnVibeVoice with Q8_0 weights on GPU.
+        // F32 was too slow (5s/step), but Q8_0 shader should be ~280ms/step.
+        let burn_vv = match model::load_burn_vibevoice(&mut reader, device) {
+            Ok(vv) => {
+                eprintln!("[tada] BurnVibeVoice loaded (Q8_0 GPU)");
+                Some(vv)
+            }
+            Err(e) => {
+                eprintln!("[tada] BurnVibeVoice skipped (candle CPU fallback): {e}");
+                None
+            }
+        };
         drop(reader);
 
-        // Load VibeVoice + decoder into candle/CPU (borrows same buf, skips LLM)
-        let candle_model =
-            tada_core::tada_model::TadaModel::load_gguf_no_llm(&buf, &cfg, &candle_core::Device::Cpu)?;
+        // Load decoder + adapters into candle/CPU (skip LLM, skip VV if Burn handles it)
+        let candle_model = if burn_vv.is_some() {
+            tada_core::tada_model::TadaModel::load_gguf_no_llm_no_vv(&buf, &cfg, &candle_core::Device::Cpu)?
+        } else {
+            tada_core::tada_model::TadaModel::load_gguf_no_llm(&buf, &cfg, &candle_core::Device::Cpu)?
+        };
 
         // Free the raw GGUF bytes — all tensors are now in GPU/CPU memory
         drop(buf);
@@ -145,6 +176,7 @@ impl HybridTadaModel {
 
         Ok(Self {
             llama,
+            burn_vv,
             candle_model,
             cfg,
             gen_state: None,
@@ -154,31 +186,51 @@ impl HybridTadaModel {
 
     /// Tokenize text with Llama 3 chat template.
     pub fn tokenize(&self, text: &str) -> anyhow::Result<Vec<u32>> {
+        let (ids, _) = self.tokenize_with_voice(text, None)?;
+        Ok(ids)
+    }
+
+    /// Tokenize text with optional voice prompt text prepended.
+    ///
+    /// Returns `(token_ids, prefix_len)` where `prefix_len` is the number of
+    /// tokens before the voice/target text region starts (BOS + header tokens).
+    /// In zero-shot mode (`voice_text = None`) `prefix_len` is unused.
+    pub fn tokenize_with_voice(
+        &self,
+        text: &str,
+        voice_text: Option<&str>,
+    ) -> anyhow::Result<(Vec<u32>, usize)> {
+        let enc = |s: &str| -> anyhow::Result<Vec<u32>> {
+            self.tokenizer
+                .encode(s, false)
+                .map(|e| e.get_ids().to_vec())
+                .map_err(|e| anyhow::anyhow!("{e}"))
+        };
+
         let mut ids = vec![BOS_TOKEN_ID]; // <|begin_of_text|>
         ids.push(128006); // <|start_header_id|>
-
-        let assistant_enc = self
-            .tokenizer
-            .encode("assistant", false)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        ids.extend(assistant_enc.get_ids());
-
+        ids.extend(enc("system")?);
+        ids.push(128007); // <|end_header_id|>
+        ids.push(EOT_TOKEN_ID); // <|eot_id|>
+        ids.push(128006); // <|start_header_id|>
+        ids.extend(enc("assistant")?);
         ids.push(128007); // <|end_header_id|>
 
-        let text_enc = self
-            .tokenizer
-            .encode(format!("\n\n{text}"), false)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        ids.extend(text_enc.get_ids());
+        // prefix_len = everything up to (but not including) voice/text content
+        let prefix_len = ids.len();
 
-        ids.push(EOT_TOKEN_ID); // <|eot_id|>
+        if let Some(vt) = voice_text {
+            ids.extend(enc(vt)?);
+        }
 
-        // Add shift_acoustic EOT tokens (matching tada_generate.rs and Python reference)
+        ids.extend(enc(text)?);
+        ids.push(EOT_TOKEN_ID);
+
         for _ in 0..self.cfg.shift_acoustic {
             ids.push(EOT_TOKEN_ID);
         }
 
-        Ok(ids)
+        Ok((ids, prefix_len))
     }
 
     /// Start a new generation run.
@@ -302,35 +354,62 @@ impl HybridTadaModel {
             &mut state.cache,
         );
 
-        // Read hidden state back to CPU for candle (async for WebGPU mapAsync compat)
-        let hidden_data = hidden_burn.clone().into_data_async().await
-            .map_err(|e| anyhow::anyhow!("GPU readback failed: {e:?}"))?;
-        let hidden_vec: Vec<f32> = hidden_data.to_vec().unwrap();
-        let hidden_size = self.cfg.llama.hidden_size;
+        // Determine if we need VibeVoice this step
+        let need_vibevoice = step >= state.shift_acoustic
+            && state.eos_countdown.is_none()
+            && !(state.voice_prompt.is_some()
+                && (step - state.shift_acoustic) < state.prompt_phase_len);
 
-        let hidden_candle = candle_core::Tensor::from_vec(
-            hidden_vec,
-            (1, 1, hidden_size),
-            &candle_core::Device::Cpu,
-        )?;
+        // Only run VibeVoice when needed.
+        // If BurnVibeVoice is loaded, flow matching runs entirely on GPU —
+        // the hidden state never leaves the GPU until the final 512-float readback.
+        // Otherwise, fall back to the candle CPU path (full ~2KB hidden readback).
+        if need_vibevoice {
+            let (acoustic_vec, time_before, time_after) = if let Some(ref burn_vv) = self.burn_vv {
+                // GPU path: hidden stays on GPU, only result comes back
+                model::vibevoice::solve_flow_matching_burn(
+                    burn_vv,
+                    hidden_burn.clone(),
+                    state.noise_temp,
+                    state.num_flow_steps,
+                    state.cfg_scale,
+                    &mut state.rng,
+                )
+                .await?
+            } else {
+                // CPU fallback: read hidden back, run candle VV
+                let hidden_data = hidden_burn.clone().into_data_async().await
+                    .map_err(|e| anyhow::anyhow!("GPU readback failed: {e:?}"))?;
+                let hidden_vec: Vec<f32> = hidden_data.to_vec().unwrap();
+                let hidden_size = self.cfg.llama.hidden_size;
 
-        // If past the acoustic shift, run flow matching (candle/CPU).
-        // Skip during EOS countdown — post-EOS hidden states are conditioned on
-        // EOT tokens and decode to noise/parasite voice.
-        if step >= state.shift_acoustic && state.eos_countdown.is_none() {
-            let (acoustic, time_before, time_after) = self.candle_model.generate_acoustic(
-                &hidden_candle,
-                state.noise_temp,
-                &mut state.rng,
-                state.num_flow_steps,
-                state.cfg_scale,
-            )?;
+                let hidden_candle = candle_core::Tensor::from_vec(
+                    hidden_vec,
+                    (1, 1, hidden_size),
+                    &candle_core::Device::Cpu,
+                )?;
 
-            state
-                .acoustics
-                .push(acoustic.squeeze(0)?.to_vec1::<f32>()?);
+                let (acoustic, time_before, time_after) = self.candle_model.generate_acoustic(
+                    &hidden_candle,
+                    None,  // neg_hidden: TODO compute for proper CFG
+                    state.noise_temp,
+                    &mut state.rng,
+                    state.num_flow_steps,
+                    state.cfg_scale,
+                )?;
+
+                let av = acoustic.squeeze(0)?.to_vec1::<f32>()?;
+                (av, time_before, time_after)
+            };
+
+            state.acoustics.push(acoustic_vec);
             state.times_before.push(time_before);
             state.times_after.push(time_after);
+        } else if step >= state.shift_acoustic {
+            // Prompt phase or EOS: push dummy values (will be stripped)
+            state.acoustics.push(vec![0.0; self.cfg.acoustic_dim]);
+            state.times_before.push(0);
+            state.times_after.push(0);
         }
 
         // Sample next token after prompt
@@ -629,7 +708,13 @@ pub mod web {
             backend: info.backend,
         };
 
-        let wgpu_device = init_device(setup, RuntimeOptions::default());
+        // Increase task batching: default is 32, but our LLM has ~50 dispatches per step.
+        // Batching all ops into fewer GPU submissions reduces dispatch overhead significantly.
+        let options = RuntimeOptions {
+            tasks_max: 512,
+            ..RuntimeOptions::default()
+        };
+        let wgpu_device = init_device(setup, options);
         WGPU_DEVICE.set(wgpu_device).ok();
     }
 
@@ -692,6 +777,59 @@ pub mod web {
             Ok(())
         }
 
+        /// Run warmup passes to pre-compile GPU shader pipelines.
+        /// Call after loadModel to avoid ~3s warmup on first generation.
+        #[wasm_bindgen]
+        pub async fn warmup(&mut self) -> Result<(), JsError> {
+            let model = self.model_mut()?;
+            wasm_log("[tada] GPU warmup: running dummy forward passes...");
+
+            let acoustic = vec![0.0f32; model.cfg.acoustic_dim];
+            let mut cache = model.llama.create_cache(16);
+
+            // Run 5 forward passes to compile all WGSL shader variants
+            for i in 0..5u32 {
+                let hidden = model.llama.forward_step(
+                    128000 + i, // dummy token
+                    &acoustic,
+                    0,
+                    0,
+                    0,
+                    &mut cache,
+                );
+                // Force GPU execution by reading back (async)
+                let _ = hidden.into_data_async().await;
+            }
+
+            // Reset cache but keep GPU buffer allocations
+            cache.reset_keep_buffers();
+
+            // Warm up VV Q8_0 shaders too (if BurnVibeVoice is loaded)
+            if let Some(ref burn_vv) = model.burn_vv {
+                wasm_log("[tada] GPU warmup: VV Q8_0 shaders...");
+                let hidden_size = model.cfg.llama.hidden_size;
+                let device = WGPU_DEVICE.get().cloned().unwrap_or_else(WgpuDevice::default);
+                let dummy_hidden = burn::tensor::Tensor::<Wgpu, 3>::zeros(
+                    [1, 1, hidden_size],
+                    &device,
+                );
+                // Run full VV forward with CFG to compile ALL Q8 shader variants
+                let mut rng = crate::WasmRng::new();
+                let result = model::vibevoice::solve_flow_matching_burn(
+                    burn_vv,
+                    dummy_hidden.clone(),
+                    0.9,
+                    10,   // full 10 ODE steps
+                    1.6,  // with CFG (runs VV twice — compiles both paths)
+                    &mut rng,
+                ).await;
+                let _ = result;
+            }
+
+            wasm_log("[tada] GPU warmup complete");
+            Ok(())
+        }
+
         fn model(&self) -> Result<&HybridTadaModel, JsError> {
             self.inner.as_ref().ok_or_else(|| JsError::new("Model not loaded. Call loadModel first."))
         }
@@ -706,6 +844,33 @@ pub mod web {
             let ids = self.model()?.tokenize(text)
                 .map_err(|e| JsError::new(&e.to_string()))?;
             Ok(js_sys::Uint32Array::from(ids.as_slice()))
+        }
+
+        /// Tokenize text with an optional voice prompt text prepended.
+        ///
+        /// Returns a JS object `{ tokenIds: Uint32Array, prefixLen: number }`.
+        /// `voiceText` should be the transcript of the voice prompt audio.
+        /// Pass `null` or `undefined` for zero-shot mode (equivalent to `tokenize`).
+        #[wasm_bindgen(js_name = tokenizeWithVoice)]
+        pub fn tokenize_with_voice(
+            &self,
+            text: &str,
+            voice_text: Option<String>,
+        ) -> Result<JsValue, JsError> {
+            let (ids, prefix_len) = self
+                .model()?
+                .tokenize_with_voice(text, voice_text.as_deref())
+                .map_err(|e| JsError::new(&e.to_string()))?;
+
+            let obj = js_sys::Object::new();
+            js_sys::Reflect::set(
+                &obj,
+                &"tokenIds".into(),
+                &js_sys::Uint32Array::from(ids.as_slice()),
+            )
+            .unwrap();
+            js_sys::Reflect::set(&obj, &"prefixLen".into(), &(prefix_len as u32).into()).unwrap();
+            Ok(obj.into())
         }
 
         /// Start generation from token IDs.

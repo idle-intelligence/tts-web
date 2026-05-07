@@ -5,6 +5,8 @@ const CACHE_NAME = 'tada-model-v2';
 
 let wasm = null;
 let engine = null;
+let voiceBytes = null;
+let voiceText = null;
 
 // Cached fetch with progress reporting
 async function cachedFetch(url, label) {
@@ -78,6 +80,25 @@ async function handleLoad(baseUrl, wasmBaseUrl) {
         postMessage({type: 'status', text: 'Initializing model...', ready: false});
         engine.loadModel(tokenizerData);
 
+        // GPU warmup: pre-compile shader pipelines to avoid stall on first gen
+        postMessage({type: 'status', text: 'Reticulating splines...', ready: false});
+        await engine.warmup();
+
+        // Load default voice prompt
+        postMessage({type: 'status', text: 'Loading voice prompt...', ready: false});
+        try {
+            const [voiceStBytes, voiceJsonResp] = await Promise.all([
+                fetch(baseUrl + '/voices/default.safetensors').then(r => r.arrayBuffer()),
+                fetch(baseUrl + '/voices/default.json').then(r => r.json()),
+            ]);
+            voiceBytes = new Uint8Array(voiceStBytes);
+            voiceText = voiceJsonResp.text;
+        } catch (voiceErr) {
+            console.warn('[tada-worker] voice prompt load failed (zero-shot fallback):', voiceErr);
+            voiceBytes = null;
+            voiceText = null;
+        }
+
         postMessage({type: 'status', text: 'Ready', ready: true});
         postMessage({type: 'loaded'});
     } catch (e) {
@@ -93,21 +114,36 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
     }
 
     try {
-        // Tokenize
-        const tokenIds = engine.tokenize(text);
-        const numTokens = tokenIds.length;
-        postMessage({type: 'gen_start', numTokens});
+        // Tokenize — use voice text if available for correct alignment
+        let tokenIds, prefixLen, transitionSteps;
+        if (voiceBytes && voiceText) {
+            const result = engine.tokenizeWithVoice(text, voiceText);
+            tokenIds = result.tokenIds;
+            prefixLen = result.prefixLen;
+            transitionSteps = 5; // ljspeech_long has 32 tokens, trim 5, keep 27
+        } else {
+            tokenIds = engine.tokenize(text);
+            prefixLen = 0;
+            transitionSteps = 0;
+        }
 
-        // Start generation (no voice prompt for now — null, 0, 0)
+        const numTokens = tokenIds.length;
+        // Content tokens = total minus prefix minus voice text tokens minus EOT padding
+        const voiceTokenCount = voiceBytes ? (numTokens - prefixLen - transitionSteps) : 0; // approximate
+        const contentTokens = numTokens - prefixLen - voiceTokenCount;
+        console.log(`[tada-worker] tokens=${numTokens}, prefixLen=${prefixLen}, voiceTokens≈${voiceTokenCount}, contentTokens≈${contentTokens}`);
+        postMessage({type: 'gen_start', numTokens: contentTokens});
+
+        // Start generation with voice prompt (or zero-shot if not loaded)
         engine.startGeneration(
             tokenIds,
             temperature,
             noiseTemp || 0.9,
             numFlowSteps || 10,
             cfgScale || 1.0,
-            null,  // voice_prompt_bytes
-            0,     // prefix_len
-            0,     // transition_steps
+            voiceBytes || null,
+            prefixLen,
+            transitionSteps,
         );
 
         // Generation loop
@@ -119,27 +155,51 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
             const info = typeof result === 'string' ? JSON.parse(result) : result;
             step = info.step || step + 1;
 
-            postMessage({
-                type: 'progress',
-                step: info.step,
-                totalTokens: info.total_tokens,
-                isEos: info.is_eos,
-                tokenId: info.token_id,
-            });
+            // Only show progress for content tokens (skip prompt phase)
+            const promptTokens = info.total_tokens - contentTokens;
+            if (info.step >= promptTokens) {
+                const contentStep = info.step - promptTokens;
+                postMessage({
+                    type: 'progress',
+                    step: contentStep,
+                    totalTokens: contentTokens,
+                    isEos: info.is_eos,
+                    tokenId: info.token_id,
+                });
+            }
 
             if (info.is_done) break;
         }
 
         // Decode audio
-        postMessage({type: 'status', text: 'Decoding audio...', ready: true});
+        postMessage({type: 'progress', step: -1, totalTokens: 0, isEos: false, tokenId: 0, decoding: true});
         const pcm = engine.decodeAudio();
 
         if (pcm && pcm.length > 0) {
             postMessage({type: 'audio', samples: pcm, sampleRate: 24000});
         }
 
-        postMessage({type: 'done', totalSteps: step});
+        postMessage({type: 'done', totalSteps: step + 1});
     } catch (e) {
+        postMessage({type: 'error', error: e.message || String(e)});
+    }
+}
+
+async function handleSetVoice(name, file, baseUrl) {
+    try {
+        postMessage({type: 'status', text: `Loading voice: ${name}...`, ready: false});
+        const voiceUrl = baseUrl + '/voices/' + file + '.safetensors';
+        const jsonUrl = baseUrl + '/voices/' + file + '.json';
+        const [voiceStBytes, voiceJsonResp] = await Promise.all([
+            fetch(voiceUrl).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); }),
+            fetch(jsonUrl).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+        ]);
+        voiceBytes = new Uint8Array(voiceStBytes);
+        voiceText = voiceJsonResp.text;
+        postMessage({type: 'status', text: 'Ready', ready: true});
+        postMessage({type: 'voiceLoaded', name});
+    } catch (e) {
+        console.error('[tada-worker] setVoice error:', e);
         postMessage({type: 'error', error: e.message || String(e)});
     }
 }
@@ -152,6 +212,9 @@ self.onmessage = async (e) => {
             break;
         case 'generate':
             await handleGenerate(msg.text, msg.temperature, msg.noiseTemp, msg.numFlowSteps, msg.cfgScale);
+            break;
+        case 'setVoice':
+            await handleSetVoice(msg.name, msg.file || msg.name, msg.baseUrl);
             break;
         case 'cancel':
             if (engine) engine.cancelGeneration();

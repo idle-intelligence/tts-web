@@ -1,0 +1,12 @@
+{
+  "text": "Or you could be just as *happy* maybe with some other handsome, rich *premed* student, or *prelaw* or *pre-anything*?",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/matrix/ex04_sad.wav",
+  "token_values_shape": [
+    34,
+    512
+  ],
+  "token_positions_shape": [
+    34
+  ]
+}

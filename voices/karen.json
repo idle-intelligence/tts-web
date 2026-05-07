@@ -1,0 +1,12 @@
+{
+  "text": "These kids were- came in, and, I was like, w- we're closing. In a few minutes, they said, well we'll wait until you kick us out. Cause they didn't really want to buy anything, they just wanted to look. And I said, okay, we're closed. Out.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/sbcsae_karen.wav",
+  "token_values_shape": [
+    65,
+    512
+  ],
+  "token_positions_shape": [
+    65
+  ]
+}

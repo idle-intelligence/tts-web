@@ -1,0 +1,12 @@
+{
+  "text": "In Mumbai, Thursday is gonna be cloudy, while Friday will be mostly clear, with a high of twenty eight and a low of both days.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/matrix/ex04_laughing.wav",
+  "token_values_shape": [
+    31,
+    512
+  ],
+  "token_positions_shape": [
+    31
+  ]
+}

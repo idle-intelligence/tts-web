@@ -74,6 +74,11 @@ export class TtsClient {
         this.worker.postMessage({ type: 'load_voice', name });
     }
 
+    setVoice(name, file) {
+        if (!this._ready) throw new Error('Not initialized');
+        this.worker.postMessage({ type: 'setVoice', name, file: file || name, baseUrl: this.baseUrl || location.origin });
+    }
+
     generate(text, temperature = 0.7, options = {}) {
         if (!this._ready) throw new Error('Not initialized');
         if (this.modelType === 'tada') {
@@ -119,6 +124,7 @@ export class TtsClient {
         const { type, ...data } = e.data;
         switch (type) {
             case 'status':
+                if (data.ready) this._ready = true;
                 this.onStatus(data.text, data.ready || false, data.progress);
                 break;
             case 'loaded':
@@ -133,6 +139,9 @@ export class TtsClient {
             case 'voice_loaded':
                 this.onVoiceLoaded(data.name, data.voiceIndex);
                 break;
+            case 'voiceLoaded':
+                this.onVoiceLoaded(data.name);
+                break;
             case 'gen_start':
                 this.onGenStart(data.numTokens);
                 break;
@@ -140,7 +149,7 @@ export class TtsClient {
                 this.onChunk(data.data, data.step);
                 break;
             case 'progress':
-                this.onProgress(data.step, data.totalTokens, data.isEos, data.tokenId);
+                this.onProgress(data.step, data.totalTokens, data.isEos, data.tokenId, data);
                 break;
             case 'audio':
                 // TADA: full audio delivered at once — call onChunk with the complete buffer

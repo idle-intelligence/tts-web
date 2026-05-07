@@ -1,0 +1,12 @@
+{
+  "text": "Take six hours and two minutes off your fourteen hour and twenty seven minute timer, right?",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/matrix/ex04_enunciated.wav",
+  "token_values_shape": [
+    18,
+    512
+  ],
+  "token_positions_shape": [
+    18
+  ]
+}

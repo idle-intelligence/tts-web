@@ -1,0 +1,12 @@
+{
+  "text": "And *that's* the great thing about Energiser ultimate lithium batteries, the number one longest lasting batteries.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/matrix/ex03_laughing.wav",
+  "token_values_shape": [
+    22,
+    512
+  ],
+  "token_positions_shape": [
+    22
+  ]
+}

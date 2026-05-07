@@ -21,7 +21,7 @@
 ///
 /// Writes a Float32 PCM WAV at 24000 Hz (mono).
 
-use candle_core::{Device, Result as CResult, Tensor};
+use candle_core::{DType, Device, Result as CResult, Tensor};
 use tada_core::audio_check::{check_generation, AudioStats};
 use tada_core::config::TadaConfig;
 use tada_core::tada_model::{AcousticDebugInfo, Rng, TadaModel, VoicePrompt};
@@ -62,6 +62,10 @@ struct Args {
     /// Classifier-free guidance scale for acoustic features (default 1.0 = disabled).
     /// Python reference default is 1.6.
     cfg_scale: f32,
+    /// Top-p (nucleus) sampling threshold (default 0.9, 0.0 = disabled).
+    top_p: f32,
+    /// Repetition penalty (default 1.1, 1.0 = disabled).
+    repetition_penalty: f32,
 }
 
 fn parse_args() -> Args {
@@ -82,6 +86,8 @@ fn parse_args() -> Args {
     let mut debug_dump: Option<String> = None;
     let mut seed = 42u64;
     let mut cfg_scale = 1.0f32;
+    let mut top_p = 0.9f32;
+    let mut repetition_penalty = 1.1f32;
 
     let mut i = 1;
     while i < args.len() {
@@ -145,6 +151,14 @@ fn parse_args() -> Args {
                 i += 1;
                 cfg_scale = args[i].parse().expect("cfg-scale must be f32");
             }
+            "--top-p" => {
+                i += 1;
+                top_p = args[i].parse().expect("top-p must be f32");
+            }
+            "--repetition-penalty" => {
+                i += 1;
+                repetition_penalty = args[i].parse().expect("repetition-penalty must be f32");
+            }
             other => {
                 eprintln!("Unknown arg: {other}");
                 eprintln!("Usage: tada_generate --model <path.gguf> --tokenizer <path.json> --output <path.wav> [--cpu] [--temperature 0.9] [--noise-temp 0.9] [--flow-steps 10] [--max-gen 128] [--text \"Hello world\"] [--voice <path.safetensors>] [--transition-steps 5] [--max-time-before 40] [--debug-dump <dir>] [--seed 42] [--cfg-scale 1.0]");
@@ -170,6 +184,8 @@ fn parse_args() -> Args {
         debug_dump,
         seed,
         cfg_scale,
+        top_p,
+        repetition_penalty,
     }
 }
 
@@ -598,12 +614,30 @@ fn run() -> CResult<()> {
         // Forward step
         let hidden = model.forward_step(&input_embeds)?;
 
+        // CFG: ALWAYS run neg forward to build neg KV cache history (even during prompt).
+        // Python runs the doubled batch on ALL steps, so neg accumulates context.
+        // Without this, the neg KV cache is empty at the first content step, making
+        // CFG guidance meaningless (12 dB louder than Python for whisper voices).
+        let neg_hidden = if (args.cfg_scale - 1.0).abs() > 1e-6 {
+            let zero_acoustic = Tensor::zeros((1, 1, cfg.acoustic_dim), DType::F32, &device)?;
+            let zero_mask = Tensor::zeros((1, 1), DType::U32, &device)?;
+            let zero_tb = Tensor::zeros((1, 1), DType::U32, &device)?;
+            let zero_ta = Tensor::zeros((1, 1), DType::U32, &device)?;
+            let neg_embeds = model.build_input_embeds(
+                &token_tensor, &zero_acoustic, &zero_mask, &zero_tb, &zero_ta,
+            )?;
+            Some(model.forward_neg_step(&neg_embeds)?)
+        } else {
+            None
+        };
+
         // Generate acoustics after shift_acoustic steps, but NOT during EOS countdown
-        // (post-EOS hidden states are conditioned on EOT tokens and decode to noise)
         if step >= shift_acoustic && eos_countdown.is_none() {
+
             let capture = debug_dump_path.is_some();
             let (acou, tb, ta, mut dbg) = model.generate_acoustic_debug(
                 &hidden,
+                neg_hidden.as_ref(),
                 args.noise_temp,
                 &mut rng,
                 args.flow_steps,
@@ -635,7 +669,9 @@ fn run() -> CResult<()> {
         let mut is_eos = false;
         let mut sampled_id = current_token;
         if step >= prompt_len - 1 {
-            let (token_id, eos) = model.sample_next_token(&hidden, args.temperature, &mut rng)?;
+            let (token_id, eos) = model.sample_next_token(
+                &hidden, args.temperature, args.top_p, args.repetition_penalty, &token_ids, &mut rng,
+            )?;
             sampled_id = token_id;
             is_eos = eos;
             next_token = sampled_id;

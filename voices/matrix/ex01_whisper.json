@@ -1,0 +1,12 @@
+{
+  "text": "Tomorrow in Victorville, it'll be mostly sunny with temperatures between forty six and fifty six.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/matrix/ex01_whisper.wav",
+  "token_values_shape": [
+    20,
+    512
+  ],
+  "token_positions_shape": [
+    20
+  ]
+}

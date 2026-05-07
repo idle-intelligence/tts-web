@@ -1,0 +1,12 @@
+{
+  "text": "But he asks it, in order that you'll be able to say at last with Peter, Lord, you know everything. You know my heart. And Lord you know that in spite of everything, yes Lord I do love you. Well, the saving love of the Father, and the Son, is also the saving love of the Spirit.",
+  "sample_rate": 24000,
+  "audio_file": "/Users/tc/Code/idle-intelligence/tts-web/refs/tada/tada/samples/sbcsae_jeff.wav",
+  "token_values_shape": [
+    69,
+    512
+  ],
+  "token_positions_shape": [
+    69
+  ]
+}
