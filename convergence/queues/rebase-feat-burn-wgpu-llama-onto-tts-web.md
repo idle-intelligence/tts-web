@@ -86,13 +86,13 @@ Idempotency: skip a voice only if its prior `results.md` row has a non-empty RTF
 
 Commit updated `results.md`, `lab-notebook.md`, and the script.
 
-**Convergence criteria**: `awk -F'|' '/^\| (ex0|amazement|amusement|ljspeech|rickie)/ && $0 ~ /[0-9]\.[0-9]/' docs/tada/results.md | wc -l` outputs ≥ 30, AND every failed voice (if any) has a logged reproducer command in `docs/tada/lab-notebook.md`. (≥ 30 of 32 tolerates 2 transient failures; below that, investigate and re-sweep before passing.)
+**Convergence criteria**: `awk -F'|' '/^\| voice-sweep-/ && $12 ~ /[0-9]+\.[0-9]+x/' docs/tada/results.md | wc -l` outputs ≥ 30, AND every failed voice (if any) has a logged reproducer command in `docs/tada/lab-notebook.md`. (≥ 30 of 32 tolerates 2 transient failures; below that, investigate and re-sweep before passing.)
 
-### 5. Acceptance check (criterion-driven)
+### 5. [x] Acceptance check (criterion-driven)
 
 Independently verify the goal on merged main:
 1. `node scripts/test_demo_e2e.mjs` exits 0.
-2. `awk -F'|' '/^\| (ex0|amazement|amusement|ljspeech|rickie)/ && $0 ~ /[0-9]\.[0-9]/' docs/tada/results.md | wc -l` outputs ≥ 30.
+2. `awk -F'|' '/^\| voice-sweep-/ && $12 ~ /[0-9]+\.[0-9]+x/' docs/tada/results.md | wc -l` outputs ≥ 30.
 
 If either fails while upstream tasks are `[x]`, decomposition was incomplete — Discovery or Remesh.
 
