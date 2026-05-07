@@ -1,4 +1,4 @@
-STATUS: DRAFT — pending owner review
+STATUS: ACTIVE — started 2026-05-07T22:50:28Z
 
 # investigate-tada-wasm-performance-and-sh
 
@@ -51,6 +51,20 @@ From user `CLAUDE.md` (global):
 - `refs/` directories are READ-ONLY — never modify.
 - Never open PRs on external repos without explicit authorization.
 
+## Row ID conventions (this run)
+
+All wasm rows added to `docs/tada/results.md` MUST use these IDs in column 1, exact spelling, so the acceptance grep can pinpoint specific rows:
+- `wasm-baseline` — first measurement on production main HEAD (Task 2)
+- `wasm-cfg16` — CFG enabled (cfg_scale=1.6), production tasks_max (Task 4)
+- `wasm-cfg10` — CFG disabled (cfg_scale=1.0), production tasks_max (Task 4)
+- `wasm-tmax-<N>` — tasks_max sweep where `<N>` is the integer value, e.g. `wasm-tmax-256`, `wasm-tmax-1024` (Task 5)
+- `wasm-simd-on` — only if Task 3 fixed a silent SIMD-off and produced a fresh measurement
+- `wasm-final` — the final chosen config; same row whether perf-win path or tradeoff path
+
+Encode all variant config in the **model column** so rows are self-describing, e.g. `Var-C simd=on cfg=1.6 tasks_max=512`. This means baseline must record observed SIMD state per Task 1's audit.
+
+**Quality verification flag**: any wasm row whose source change involves `cfg_scale` MUST have its lab-notebook entry include `QUALITY: UNVERIFIED — pending user audition` until the user has listened. The convergence loop does NOT remove this flag autonomously.
+
 ## Stop conditions
 - All non-BLOCKED `[x]` → halt with self-review.
 - Wall-clock > 12h → halt.
@@ -65,41 +79,61 @@ Three triggers only — Discovery (necessary unanticipated work), Split (task is
 
 ### Phase 1 — Instrument & Baseline
 
-- [ ] **1. Instrument WASM worker for timing** (single-shot, ~30m). Add `gen_ms`, `decode_ms`, and `audio_duration_ms` timing to `web/tada-worker.js` and surface them via `postMessage` to the page (or log via `console.log`). Confirm the build target is `crates/tada-wasm` and that `tasks_max=512` is the current value in `crates/tada-wasm/src/lib.rs:714`. Verify SIMD128 is active by inspecting the compiled `.wasm` for SIMD opcodes (`wasm-objdump -d` or `wasm2wat`). Commit the instrumentation with message `[investigate-tada-wasm-performance-and-sh] instrument wasm worker for timing`.
-    **Convergence criteria**: `web/tada-worker.js` emits a `postMessage` or `console.log` with keys `gen_ms`, `decode_ms`, `audio_duration_ms` after each inference, AND `wasm-objdump`/`wasm2wat` output on the built `.wasm` confirms SIMD opcodes are present (or explicitly records that they are absent).
+- [ ] **1. Instrument WASM worker + audit SIMD/tasks_max** (single-shot, ~30m). Add `gen_ms`, `decode_ms`, and `audio_duration_ms` timing to `web/tada-worker.js`; surface via `postMessage` AND `console.log` (the latter is what headless capture will read). **Verify the `tasks_max` source location** — grep `crates/tada-wasm/src/` for the constant; the goal claimed `lib.rs:714` but verify before later tasks edit it. Record the actual `<file>:<line>` and current value in lab-notebook. **Audit SIMD128**: run `wasm-objdump -d crates/tada-wasm/pkg/tada_wasm_bg.wasm | grep -cE 'i32x4|f32x4|v128|simd'`. Record the count in lab-notebook (count = 0 means SIMD off; count ≥ 1 means SIMD on). Commit instrumentation; the audit produces only a lab-notebook entry, no source change.
+    **Convergence criteria**: `web/tada-worker.js` emits both `postMessage` and `console.log` containing keys `gen_ms`, `decode_ms`, `audio_duration_ms` after inference. Lab-notebook records (a) the verified `tasks_max` source location as `<file>:<line>` and current value, and (b) the `wasm-objdump` SIMD opcode count.
 
-- [ ] **2. Record baseline wasm RTF row** (single-shot, ~45m). Run TADA in headless Chromium via `scripts/test_demo_e2e.mjs` (with existing Cache stub) for the canonical fox phrase. Capture `gen_ms`, `decode_ms`, `audio_duration_ms` from console output. Compute RTF = (gen_ms + decode_ms) / audio_duration_ms. Append one row to `docs/tada/results.md` with `engine=wasm`, model=Var-C (confirm filename from `tada-worker.js`), all measured fields. Add a lab-notebook entry in `docs/tada/lab-notebook.md`. If headless TADA crashes the machine, document the failure in the lab-notebook, skip this step's convergence criteria, and add a Discovery task for a manual-timing fallback.
-    **Convergence criteria**: `docs/tada/results.md` contains ≥ 1 row with `engine=wasm` and the fox phrase, with numeric values in `gen_ms`, `decode_ms`, `audio_duration_ms`, and `RTF` columns.
+- [ ] **2. Record baseline wasm RTF row** (single-shot, ~45m). Run TADA in headless Chromium via `scripts/test_demo_e2e.mjs` for the canonical fox phrase ("The quick brown fox jumps over the lazy dog."). Capture `gen_ms`, `decode_ms`, `audio_duration_ms` from console output. Compute RTF = (gen_ms + decode_ms) / audio_duration_ms. Append exactly ONE row to `docs/tada/results.md` with ID `wasm-baseline`; encode SIMD state (from Task 1 audit) and config in the model column, e.g. `Var-C simd=on cfg=1.6 tasks_max=512`. Add a lab-notebook entry.
+
+    **Crash fallback (concrete)**: if headless TADA crashes the machine on this attempt, do NOT retry headless. Instead: (a) confirm the dev server is running on port 8081 (start it with `node web/serve.mjs &` if not); (b) print to stdout a clear instruction: "Open http://localhost:8081 in your browser, click the TADA tab, click an `ex01` voice button without typing text, then paste the `gen_ms`, `decode_ms`, `audio_duration_ms` values from the browser console here"; (c) await user-supplied values (the loop will halt on next ScheduleWakeup pending owner reply); (d) once values are provided, write the `wasm-baseline` row using them. Document the headless crash + manual fallback in lab-notebook.
+
+    **Convergence criteria**: `docs/tada/results.md` contains exactly one row with column 1 = `wasm-baseline`. The row's RTF column matches `[0-9]+\.?[0-9]*x`, the four timing/audio columns are numeric, and the model column contains either `simd=on` or `simd=off`.
 
 ### Phase 2 — Diagnose
 
-- [ ] **3. SIMD128 audit and fix if off** (single-shot, ~30m). Based on the wasm-objdump result from Task 1: if SIMD128 opcodes are confirmed present, mark done immediately. If absent, diagnose which crate's `build.rs` is stripping `RUSTFLAGS`, fix it (likely adding `RUSTFLAGS` to `crates/tada-wasm/.cargo/config.toml` explicitly rather than relying on workspace inheritance), rebuild, and confirm SIMD opcodes are now present. Record finding in lab-notebook. Commit any fix.
-    **Convergence criteria**: `wasm-objdump -d` (or `wasm2wat`) on the production `tada_wasm_bg.wasm` shows at least one SIMD instruction (e.g. `i32x4`, `f32x4`, `v128`), OR lab-notebook records "SIMD confirmed present, no fix needed."
+- [ ] **3. SIMD128 fix (conditional)** (single-shot, ~30m). Read Task 1's lab-notebook entry for the SIMD opcode count. **If count ≥ 1**: mark `[x]` immediately with a one-line lab-notebook note `SIMD already on, no fix needed.` — no code change. **If count == 0**: diagnose where `RUSTFLAGS="-C target-feature=+simd128"` is being stripped (likely workspace `.cargo/config.toml` or a dependency's `build.rs`); fix at the right layer (prefer `crates/tada-wasm/.cargo/config.toml` explicit RUSTFLAGS over workspace inheritance); rebuild; rerun `wasm-objdump` to confirm count ≥ 1. Run the fox phrase headless, append a row with ID `wasm-simd-on`. Commit.
+    **Convergence criteria**: Either (a) Task 1's count was ≥ 1 AND lab-notebook contains the literal note `SIMD already on, no fix needed.`; OR (b) `wasm-objdump` count is now ≥ 1 AND `docs/tada/results.md` has a row with column 1 = `wasm-simd-on` with a numeric RTF.
 
-- [ ] **4. CFG A/B measurement** (single-shot, ~60m). Expose `cfg_scale` as a runtime JS parameter in `tada-worker.js` (or hardcode two separate test builds). Run the fox phrase twice: once with `cfg_scale=1.6` (baseline), once with `cfg_scale=1.0` (CFG disabled). Record both as `engine=wasm` rows in `docs/tada/results.md`. Save both output audio files to `/tmp/tada-cfg16-fox.wav` and `/tmp/tada-cfg10-fox.wav` for the user to listen to. Log both in lab-notebook with RTF values. Commit.
-    **Convergence criteria**: `docs/tada/results.md` has 2 rows for the fox phrase with `engine=wasm`, one with `cfg_scale=1.6` and one with `cfg_scale=1.0`, both with numeric RTF values.
+- [ ] **4. CFG A/B measurement** (single-shot, ~60m). First, verify whether `tada-core` (and thus the WASM bindings) accepts a runtime `cfg_scale` parameter — read `crates/tada-core/src/` for the inference entry point. If yes, expose it through `tada-worker.js` as a JS-passable arg and run two inferences. If no, build two WASM artifacts with hardcoded values (slower, ~2 × 2.5min build, acceptable). Run the fox phrase twice: `cfg_scale=1.6` and `cfg_scale=1.0`. Append rows with IDs `wasm-cfg16` and `wasm-cfg10`. Save audio to `/tmp/tada-cfg16-fox.wav` and `/tmp/tada-cfg10-fox.wav` for user audition (do NOT delete — feedback rule). Log both in lab-notebook with RTF values. Commit.
+    **Convergence criteria**: `docs/tada/results.md` has two rows with column 1 = `wasm-cfg16` and `wasm-cfg10` respectively. Both fox phrase, both numeric RTF. Both audio files exist in `/tmp/` ≥ 50KB each.
 
-- [ ] **5. tasks_max sweep** (single-shot, ~45m). Rebuild `crates/tada-wasm` with `tasks_max` values of 256, 512, 1024, and 2048 (edit `crates/tada-wasm/src/lib.rs:714`). For each, run the fox phrase in headless and record RTF in `docs/tada/results.md`. Identify the minimum-RTF value. Log in lab-notebook. Commit the sweep results (keep the best value in the source as the new default, or leave at 512 if no improvement found).
-    **Convergence criteria**: `docs/tada/results.md` has ≥ 4 rows with `engine=wasm` for the fox phrase with different `tasks_max` values (256, 512, 1024, 2048), all with numeric RTF.
+- [ ] **5. tasks_max sweep** (single-shot, ~60m). Rebuild `crates/tada-wasm` with `tasks_max` values from the set {256, 512, 1024, 2048}. Use the verified source location from Task 1 (NOT the assumed `lib.rs:714`). For each rebuild, run the fox phrase in headless and append a row with column 1 = `wasm-tmax-<N>` (literal, e.g. `wasm-tmax-1024`). Identify the minimum-RTF value. Log in lab-notebook. Do NOT commit a default value change in this task — Task 6 makes that decision. **Build failures are tolerated**: if a particular `tasks_max` value fails to build, document the failure and continue with the others, but ≥ 3 distinct values must succeed.
+    **Convergence criteria**: `awk -F'|' '/^\| wasm-tmax-[0-9]+/ {print $1}' docs/tada/results.md | sort -u | wc -l` outputs ≥ 3 (three or more distinct `wasm-tmax-N` IDs, each with numeric RTF).
 
 ### Phase 3 — Improve
 
-- [ ] **6. Land best configuration** (single-shot, ~30m). From Phase 2 findings, select the configuration with best RTF that the user can evaluate for quality. If CFG disable (`cfg_scale=1.0`) wins RTF by ≥30% and audio quality is not obviously degraded (>50KB file, non-silent), set it as a default option in the UI or worker and commit. If tasks_max tuning wins ≥30%, commit the new value. If neither wins 30% alone but together they do, commit both. If no combination reaches 30% RTF reduction, write the tradeoff analysis (configurations tested, RTF values, quality notes) to `docs/tada/lab-notebook.md` and commit the best partial improvement found. Output the final audio file to `/tmp/tada-final-fox.wav`.
-    **Convergence criteria**: Either (a) the chosen configuration is committed to source with its new default value AND final RTF ≤ 0.7 × baseline RTF, OR (b) `docs/tada/lab-notebook.md` contains a tradeoff section listing ≥ 2 configurations with numeric RTF values, naming the chosen point and its rationale, with any quality regression explicitly flagged.
+- [ ] **6. Land final configuration + write final row** (single-shot, ~45m). Read all wasm rows from results.md. Identify the lowest-RTF config (any combination across SIMD fix, CFG, tasks_max). Two paths — pick based on data, not pre-decided mechanism:
+
+    **(a) Perf-win path** — if best RTF ≤ 0.70 × baseline RTF AND the change does NOT touch `cfg_scale`: commit the source change to make that config the production default. Run the fox phrase one more time with the new default; append a row with column 1 = `wasm-final` and the new config encoded in the model column. Output audio to `/tmp/tada-final-fox.wav`.
+
+    **(b) Perf-win path with CFG change** — if best RTF ≤ 0.70 × baseline AND the change touches `cfg_scale`: commit the source change but include `QUALITY: UNVERIFIED — pending user audition` in the lab-notebook entry for `wasm-final`. The audio files from Task 4 (cfg16 vs cfg10) remain in `/tmp/` for user audit. The user may later revert the change after listening; this run does not autonomously verify quality.
+
+    **(c) Tradeoff path** — if no config achieves ≤ 0.70 × baseline: do NOT commit a config change. Append a `wasm-final` row matching the best-RTF measured config (so a comparable row exists; use values from the corresponding experiment row), then write a `## Perf/Quality Tradeoff` section to `docs/tada/lab-notebook.md` containing: (i) the verbatim baseline RTF string copy-pasted from the `wasm-baseline` row of results.md (e.g. `4.50x`); (ii) the verbatim final RTF string copy-pasted from the `wasm-final` row; (iii) at least one other configuration with its RTF for context; (iv) a `Chosen rationale:` line explaining why this is the best point; (v) a `Quality regression:` line — either `Quality regression: none observed.` or `Quality regression: <description>`.
+
+    **Convergence criteria**: `docs/tada/results.md` contains a row with column 1 = `wasm-final`. AND either (a/b) a source commit changes the production default AND `final_rtf / baseline_rtf ≤ 0.70` (extract both RTFs from the matching results.md rows by column 1 ID); OR (c) `docs/tada/lab-notebook.md` contains a section heading `Perf/Quality Tradeoff` whose section body contains BOTH the verbatim baseline RTF string AND the verbatim final RTF string from results.md, AND a line starting with `Quality regression:`.
 
 ### Phase 4 — Validate
 
 - [ ] **7. Native CLI sanity check** (single-shot, ~15m). Run `cargo run --example tada_generate -p tada-core --release --features metal -- --voice voices/matrix/ex01_default.safetensors --text "The quick brown fox jumps over the lazy dog." --output /tmp/post-perf-sanity.wav` from the repo root. Confirm exit 0 and output file ≥ 50KB.
     **Convergence criteria**: `/tmp/post-perf-sanity.wav` exists, size ≥ 50KB, and the command exited 0.
 
-- [ ] **8. Pocket TTS + KittenTTS smoke test** (single-shot, ~20m). Run `scripts/test_demo_e2e.mjs` for the Pocket TTS and KittenTTS demo paths only (skip TADA E2E if it caused machine crashes in prior runs — add a `--skip-tada` flag or inline skip, and document the skip in a comment). Confirm both Pocket TTS and KittenTTS tests pass.
-    **Convergence criteria**: `scripts/test_demo_e2e.mjs` exits 0 for the Pocket TTS and KittenTTS sections, OR the TADA section is explicitly skipped with a documented comment and the other two sections pass.
+- [ ] **8. Pocket TTS + KittenTTS smoke test** (single-shot, ~20m). Run `scripts/test_demo_e2e.mjs`. If TADA caused crashes earlier in this run (or in the prior session per `convergence/notes/`), make TADA skippable. Implementation: add a `SKIP_TADA` env-var check OR a `--skip-tada` CLI flag near the top of the test script; surround the TADA test block with a conditional skip; add a code comment immediately above or inside the TADA block reading exactly `// SKIPPED:` followed by a brief reason and the relevant date (e.g. `// SKIPPED: headless WebGPU + Cache stub crashed machine (2026-05-07 session)`). Pocket TTS and KittenTTS sections must pass.
+    **Convergence criteria**: Either (a) `node scripts/test_demo_e2e.mjs` exits 0 with all three (pocket-tts, kitten, tada) PASS lines; OR (b) `SKIP_TADA=1 node scripts/test_demo_e2e.mjs` (or `node scripts/test_demo_e2e.mjs --skip-tada`) exits 0 with PASS lines for pocket-tts and kitten AND `grep -c '// SKIPPED:' scripts/test_demo_e2e.mjs` ≥ 1.
 
 - [ ] **9. Lab-notebook analysis section** (single-shot, ~20m). Write an analysis section in `docs/tada/lab-notebook.md` that: (a) confirms or refutes the CFG hypothesis with measured RTF numbers from Phase 2, (b) states whether SIMD128 was active or silently disabled, (c) lists the tasks_max optimum found, (d) names the final configuration chosen and its RTF, (e) lists ≥ 2 unblocked follow-ups. Commit.
     **Convergence criteria**: `docs/tada/lab-notebook.md` contains a section with headings or bullet points covering all five points (CFG hypothesis verdict, SIMD status, tasks_max optimum, final config + RTF, follow-up list) with at least one numeric RTF value cited per comparison.
 
 - [ ] **Acceptance check** (iterate, criterion-driven). Independently verify the run's acceptance criterion by direct observation of the goal-as-stated — NOT by re-checking the conjunction of upstream tasks. If this fails while upstream tasks are [x], the decomposition was incomplete; use Discovery / Remesh to address the gap and retry.
-    **Acceptance criterion**: Run the following independent checks in sequence and assert ALL pass: (1) `grep -c "engine=wasm" docs/tada/results.md` returns ≥ 3 (baseline + ≥1 experiment + final config, all fox phrase rows). (2) Compute `final_rtf / baseline_rtf` from the two wasm rows tagged "baseline" and "final" — assert ≤ 0.70 OR assert `docs/tada/lab-notebook.md` contains the string "tradeoff" (case-insensitive) AND at least two numeric RTF values in the same paragraph AND an explicit quality-regression flag ("no regression" or "regression: ..."). (3) `docs/tada/lab-notebook.md` contains "CFG hypothesis" (or "CFG" within 200 chars of "confirmed" or "refuted") AND contains "follow-up" or "next steps". (4) `ls -la /tmp/post-perf-sanity.wav` shows size ≥ 50000 bytes. (5) `scripts/test_demo_e2e.mjs` Pocket TTS and KittenTTS sections pass (TADA section may be skipped with documented comment).
+    **Acceptance criterion**: Run these independent checks in sequence; ALL must pass.
+
+    (1) `awk -F'|' '/^\| wasm-/ {print $1}' docs/tada/results.md | sed 's/ //g' | sort -u | wc -l` outputs ≥ 3 (at least three distinct wasm row IDs from the agreed conventions).
+
+    (2) Locate rows with column 1 exactly `wasm-baseline` and `wasm-final` in results.md. Extract their RTF values (column matching `[0-9]+\.?[0-9]*x`). Assert `final_rtf ≤ 0.70 × baseline_rtf` (compute via shell arithmetic), OR assert ALL of: `docs/tada/lab-notebook.md` contains the literal heading `Perf/Quality Tradeoff` (case-insensitive on `Tradeoff`); within that section, the verbatim baseline RTF string from results.md appears (`grep -F` literal match); within that section, the verbatim final RTF string appears; the section contains a line starting with `Quality regression:`. Identical baseline/final RTFs cause this conjunction to fail (the strings would still both appear, but the values must be cited from distinct rows in results.md — verify by checking they came from different row-1 IDs).
+
+    (3) `docs/tada/lab-notebook.md` contains `CFG hypothesis` (case-insensitive) within 200 characters of either `confirmed` or `refuted`, AND contains either `follow-up` or `next steps` (case-insensitive).
+
+    (4) `ls -la /tmp/post-perf-sanity.wav` shows size ≥ 50000 bytes.
+
+    (5) Either (a) `node scripts/test_demo_e2e.mjs` exits 0 with three PASS lines (pocket-tts, kitten, tada); OR (b) `SKIP_TADA=1 node scripts/test_demo_e2e.mjs` exits 0 with PASS lines for pocket-tts and kitten AND `grep -c '// SKIPPED:' scripts/test_demo_e2e.mjs` ≥ 1 (specifically aligned with Task 8's skip pattern).
 
 - [ ] **Global review** (single-shot, adversarial, criterion-blind). Spawn a fresh Agent (sonnet, no prior context) with `/Users/tc/Code/convergence/prompts/global-review.md`. Inputs: RUN_NAME=`investigate-tada-wasm-performance-and-sh`, REPO_ROOT=`/Users/tc/Code/idle-intelligence/tts-web`, GOAL=run goal as stated above (verbatim), CONV_HOME=`/Users/tc/Code/convergence`. The reviewer reads the goal and the acceptance evidence — never the criterion text — and tries to falsify the run's claimed success. On FAIL: the reviewer appends a Discovery block (re-fix + re-acceptance + re-global-review) to this queue and the loop continues. On PASS: proceed to Self-review.
 
