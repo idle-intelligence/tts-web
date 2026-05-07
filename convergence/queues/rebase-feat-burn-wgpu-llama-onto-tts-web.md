@@ -98,7 +98,7 @@ If either fails while upstream tasks are `[x]`, decomposition was incomplete —
 
 **Acceptance criterion**: Both checks pass on `main` HEAD.
 
-### 6. Global review (single-shot, adversarial, criterion-blind)
+### 6. [x] Global review (single-shot, adversarial, criterion-blind)
 
 Spawn a fresh Agent (sonnet, no prior context) with `/Users/tc/Code/convergence/prompts/global-review.md`. Inputs: RUN_NAME=`rebase-feat-burn-wgpu-llama-onto-tts-web`, REPO_ROOT=`/Users/tc/Code/idle-intelligence/tts-web`, GOAL=run goal as stated above (verbatim), CONV_HOME=`/Users/tc/Code/convergence`. The reviewer reads the goal and the acceptance evidence — never the criterion text — and tries to falsify the run's claimed success. On FAIL: reviewer appends a Discovery block (re-fix + re-acceptance + re-global-review) to this queue and the loop continues. On PASS: proceed to Self-review.
 
