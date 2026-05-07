@@ -24,7 +24,7 @@ SAMPLES_DIR = os.path.join(REPO_ROOT, "samples", "voice_matrix")
 VOICES_DIR = os.path.join(REPO_ROOT, "voices", "matrix")
 WAV_DIR = os.path.join(REPO_ROOT, "refs", "tada", "tada", "samples", "matrix")
 
-STYLES = ["default", "confused", "enunciated", "happy", "laughing", "sad", "whisper"]
+STYLES = ["default", "confused", "enunciated", "happy", "laughing", "sad", "whisper", "fast"]
 SPEAKERS = ["ex01", "ex02", "ex03", "ex04"]
 TEST_TEXT = "I'll tell you one thing about the universe, though. The universe is a pretty big place."
 
@@ -74,7 +74,7 @@ def find_best_clip(speaker, style):
             dur = len(data) / sr
             words = len(text.split()) if text else 0
 
-            if 8.0 <= dur <= 20.0 and words >= 15:
+            if 5.0 <= dur <= 20.0 and words >= 15:
                 return data, sr, text, dur
 
     return None, None, None, None
@@ -103,7 +103,7 @@ def main():
             data, sr, text, dur = find_best_clip(speaker, style)
 
             if data is None:
-                print(f" NOT FOUND (no clip 8-20s)")
+                print(f" NOT FOUND (no clip 5-20s)")
                 results.append({"name": voice_name, "speaker": speaker, "style": style, "status": "not_found"})
                 continue
 
@@ -114,7 +114,7 @@ def main():
 
             # Precompute voice prompt
             cmd = [
-                sys.executable, "scripts/precompute_voice.py",
+                sys.executable, "scripts/tada/precompute_voice.py",
                 "--audio", wav_path,
                 "--text", text,
                 "--output", voice_path,

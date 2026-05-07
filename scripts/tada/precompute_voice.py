@@ -23,7 +23,7 @@ import time
 # Path setup
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 REFS_TADA = os.path.join(REPO_ROOT, "refs", "tada")
 if REFS_TADA not in sys.path:
     sys.path.insert(0, REFS_TADA)
