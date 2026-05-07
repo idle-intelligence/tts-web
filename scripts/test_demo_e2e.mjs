@@ -3,14 +3,12 @@
  * E2E demo test — verifies all three TTS models generate audio in headless Chromium.
  *
  * Usage: node scripts/test_demo_e2e.mjs
- * Exit 0 = Pocket TTS + KittenTTS PASS (real audio ≥ 10KB), TADA DOM wiring verified.
- * Exit 1 = Pocket TTS or KittenTTS FAILed.
+ * Exit 0 = all three models PASS (real audio ≥ 10KB each).
+ * Exit 1 = any model FAILed.
  *
- * TADA note: requires WebGPU (navigator.gpu.requestAdapter → non-null device).
- * Headless Chromium on macOS arm64 exposes navigator.gpu but requestAdapter() returns
- * null, causing the WASM to panic with "No WebGPU adapter found". TADA is tested for
- * DOM wiring only (voice selectors populated ≥ 4 speakers, ≥ 7 styles). Audio
- * generation is skipped with a documented blocker unless WebGPU is actually available.
+ * WebGPU enabled via --enable-unsafe-webgpu --use-angle=metal (macOS Metal backend).
+ * TADA: worker script intercepted via route() to inject a Cache API no-op stub
+ *   (headless Chromium fails to cache 1.3GB GGUF — addInitScript doesn't reach workers).
  */
 
 import { chromium } from '/Users/tc/node_modules/playwright/index.mjs';
@@ -66,7 +64,14 @@ let browser;
 try {
     browser = await chromium.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--enable-unsafe-webgpu',
+            '--use-angle=metal',
+            '--enable-features=Vulkan',
+            '--enable-webgpu-developer-features',
+        ],
     });
 
     // ==========================================
@@ -229,13 +234,41 @@ try {
     // TADA
     // ==========================================
     // TADA uses Burn/wgpu (WebGPU) for the LLM backbone.
-    // navigator.gpu exists in headless Chromium but requestAdapter() returns null,
-    // causing the WASM to panic. We verify DOM wiring (voice selectors) only.
+    // Requires WebGPU adapter (available with --enable-unsafe-webgpu --use-angle=metal).
+    // The 1.3GB GGUF exceeds the headless Chromium Cache API quota and also causes
+    // "Unexpected internal error" on cache.put. Patch caches.open() to return a no-op
+    // cache stub so the download still works but the file is never persisted to the
+    // browser cache (fine for testing — the dev server serves it locally).
     console.log('\n[tada] Starting test (DOM wiring + WebGPU probe)...');
     const tadaStart = Date.now();
     try {
         const ctx = await browser.newContext();
         const page = await ctx.newPage();
+
+        // Patch Cache API inside the worker by intercepting the worker script.
+        // addInitScript() doesn't reach dedicated workers — intercept the JS source
+        // and prepend a stub so cache.put() never runs (headless Chromium fails on
+        // large Cache API writes — the 1.3GB GGUF exceeds the storage quota).
+        const CACHE_PATCH = `
+(function() {
+  const noop = async () => undefined;
+  const stubCache = { match: async () => undefined, put: noop, delete: noop, keys: async () => [], add: noop, addAll: noop };
+  const _origOpen = caches.open.bind(caches);
+  caches.open = async (name) => {
+    if (name && name.startsWith('tada-')) return stubCache;
+    return _origOpen(name);
+  };
+})();
+`;
+        await ctx.route('**/tada-worker.js', async (route) => {
+            const response = await route.fetch();
+            const body = await response.text();
+            console.log('[tada] Worker JS intercepted (' + body.length + ' bytes); injecting cache stub');
+            // Use original response to preserve all headers (MIME type must be text/javascript
+            // for module workers — setting contentType breaks loading in Chromium).
+            route.fulfill({ response, body: CACHE_PATCH + body });
+        });
+        console.log('[tada] Route set — Cache API stub will be injected when worker loads');
 
         const tadaErrors = [];
         page.on('console', m => {
