@@ -63,7 +63,7 @@ If any fails, delegate fix to a sub-agent and retry within this task. Do not sil
 
 **Convergence criteria**: All three exit 0; `ls crates/tts-wasm/pkg/*.wasm crates/kitten-wasm/pkg/*.wasm crates/tada-wasm/pkg/*.wasm` lists three `.wasm` files.
 
-### 3. End-to-end demo verification (single-shot, ~1h)
+### 3. [x] End-to-end demo verification (single-shot, ~1h)
 
 This is the regression test. Probe `web/serve.mjs` first — if it does not already serve `voices/`, add a static route. Otherwise leave it alone.
 
