@@ -53,7 +53,8 @@ else
         "$REPO_ROOT/voices/rickie_trimmed.safetensors"
     )
     # 26 matrix voices (local-only, untracked)
-    mapfile -t MATRIX_VOICES < <(ls "$REPO_ROOT/voices/matrix/"*.safetensors 2>/dev/null || true)
+    MATRIX_VOICES=()
+    while IFS= read -r f; do MATRIX_VOICES+=("$f"); done < <(ls "$REPO_ROOT/voices/matrix/"*.safetensors 2>/dev/null || true)
     VOICE_FILES=("${BASE_VOICES[@]}" "${MATRIX_VOICES[@]}")
 fi
 

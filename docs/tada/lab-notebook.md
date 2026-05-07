@@ -897,3 +897,963 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 **Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 10 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
 
 ---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — amusement
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — amusement.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: amusement
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.5s total (load 0.7s, gen 6.0s, decode 2.8s)
+- Audio duration: 2.9s
+- RTF: 2.07x
+
+**Output**: /tmp/tada_bench/amusement.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 12 frames without hitting EOS — likely degraded model quality   ⚠ Audio sanity checks FAILED: 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ljspeech
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ljspeech.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ljspeech
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 6.6s total (load 0.7s, gen 3.7s, decode 2.2s)
+- Audio duration: 2.6s
+- RTF: 1.42x
+
+**Output**: /tmp/tada_bench/ljspeech.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 12 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ljspeech_long
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ljspeech_long.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ljspeech_long
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.3s total (load 0.7s, gen 7.2s, decode 2.4s)
+- Audio duration: 2.9s
+- RTF: 2.48x
+
+**Output**: /tmp/tada_bench/ljspeech_long.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 12 frames without hitting EOS — likely degraded model quality   ⚠ Audio sanity checks FAILED: 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — rickie
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — rickie.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: rickie
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 17.1s total (load 0.7s, gen 13.3s, decode 3.1s)
+- Audio duration: 3.9s
+- RTF: 3.41x
+
+**Output**: /tmp/tada_bench/rickie.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 12 frames without hitting EOS — likely degraded model quality   ⚠ Audio sanity checks FAILED: 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — rickie_trimmed
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — rickie_trimmed.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: rickie_trimmed
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 16.8s total (load 0.9s, gen 13.1s, decode 2.8s)
+- Audio duration: 3.6s
+- RTF: 3.64x
+
+**Output**: /tmp/tada_bench/rickie_trimmed.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 12 frames without hitting EOS — likely degraded model quality   ⚠ Audio sanity checks FAILED: 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex01_confused
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex01_confused.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex01_confused
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.5s total (load 0.8s, gen 5.5s, decode 4.2s)
+- Audio duration: 5.6s
+- RTF: 0.98x
+
+**Output**: /tmp/tada_bench/ex01_confused.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex01_enunciated
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex01_enunciated.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex01_enunciated
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.3s total (load 0.7s, gen 5.5s, decode 4.1s)
+- Audio duration: 5.4s
+- RTF: 1.02x
+
+**Output**: /tmp/tada_bench/ex01_enunciated.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex01_happy
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex01_happy.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex01_happy
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.9s total (load 0.7s, gen 6.2s, decode 3.0s)
+- Audio duration: 3.9s
+- RTF: 1.59x
+
+**Output**: /tmp/tada_bench/ex01_happy.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 10 frames without hitting EOS — likely degraded model quality   ⚠ Audio sanity checks FAILED: 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex01_laughing
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex01_laughing.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex01_laughing
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.4s total (load 0.7s, gen 6.3s, decode 2.4s)
+- Audio duration: 3.1s
+- RTF: 2.03x
+
+**Output**: /tmp/tada_bench/ex01_laughing.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex01_sad
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex01_sad.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex01_sad
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.8s total (load 0.7s, gen 6.8s, decode 3.3s)
+- Audio duration: 3.7s
+- RTF: 1.84x
+
+**Output**: /tmp/tada_bench/ex01_sad.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 12 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex01_whisper
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex01_whisper.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex01_whisper
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.9s total (load 0.7s, gen 5.5s, decode 3.7s)
+- Audio duration: 4.9s
+- RTF: 1.12x
+
+**Output**: /tmp/tada_bench/ex01_whisper.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ⚠ Audio sanity checks FAILED: 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex02_confused
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex02_confused.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex02_confused
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 11.0s total (load 0.7s, gen 6.2s, decode 4.1s)
+- Audio duration: 5.4s
+- RTF: 1.15x
+
+**Output**: /tmp/tada_bench/ex02_confused.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex02_default
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex02_default.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex02_default
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.7s total (load 0.7s, gen 6.6s, decode 2.4s)
+- Audio duration: 3.2s
+- RTF: 2.06x
+
+**Output**: /tmp/tada_bench/ex02_default.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex02_enunciated
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex02_enunciated.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex02_enunciated
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.0s total (load 0.7s, gen 6.1s, decode 3.2s)
+- Audio duration: 4.2s
+- RTF: 1.45x
+
+**Output**: /tmp/tada_bench/ex02_enunciated.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex02_happy
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex02_happy.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex02_happy
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.7s total (load 0.7s, gen 6.6s, decode 2.4s)
+- Audio duration: 3.2s
+- RTF: 2.06x
+
+**Output**: /tmp/tada_bench/ex02_happy.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex02_laughing
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex02_laughing.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex02_laughing
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.0s total (load 0.7s, gen 6.2s, decode 3.1s)
+- Audio duration: 4.1s
+- RTF: 1.51x
+
+**Output**: /tmp/tada_bench/ex02_laughing.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex02_sad
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex02_sad.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex02_sad
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.6s total (load 0.7s, gen 6.2s, decode 2.7s)
+- Audio duration: 3.6s
+- RTF: 1.72x
+
+**Output**: /tmp/tada_bench/ex02_sad.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex02_whisper
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex02_whisper.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex02_whisper
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.5s total (load 0.7s, gen 7.3s, decode 2.5s)
+- Audio duration: 3.4s
+- RTF: 2.15x
+
+**Output**: /tmp/tada_bench/ex02_whisper.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ⚠ Audio sanity checks FAILED: 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex03_confused
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex03_confused.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex03_confused
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.3s total (load 0.7s, gen 5.7s, decode 2.9s)
+- Audio duration: 3.9s
+- RTF: 1.46x
+
+**Output**: /tmp/tada_bench/ex03_confused.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex03_default
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex03_default.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex03_default
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.3s total (load 0.7s, gen 7.9s, decode 1.7s)
+- Audio duration: 2.0s
+- RTF: 3.95x
+
+**Output**: /tmp/tada_bench/ex03_default.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 10 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex03_enunciated
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex03_enunciated.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex03_enunciated
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.4s total (load 0.7s, gen 5.7s, decode 3.0s)
+- Audio duration: 3.3s
+- RTF: 1.73x
+
+**Output**: /tmp/tada_bench/ex03_enunciated.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex03_happy
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex03_happy.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex03_happy
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.4s total (load 0.7s, gen 7.9s, decode 1.8s)
+- Audio duration: 2.2s
+- RTF: 3.59x
+
+**Output**: /tmp/tada_bench/ex03_happy.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 10 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex03_laughing
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex03_laughing.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex03_laughing
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.2s total (load 0.7s, gen 5.9s, decode 2.6s)
+- Audio duration: 3.1s
+- RTF: 1.90x
+
+**Output**: /tmp/tada_bench/ex03_laughing.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 12 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex03_sad
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex03_sad.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex03_sad
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.8s total (load 0.7s, gen 6.7s, decode 2.4s)
+- Audio duration: 3.1s
+- RTF: 2.16x
+
+**Output**: /tmp/tada_bench/ex03_sad.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex03_whisper
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex03_whisper.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex03_whisper
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.5s total (load 0.7s, gen 6.7s, decode 2.1s)
+- Audio duration: 2.8s
+- RTF: 2.39x
+
+**Output**: /tmp/tada_bench/ex03_whisper.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 11 frames without hitting EOS — likely degraded model quality   ⚠ Audio sanity checks FAILED: 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex04_confused
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex04_confused.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex04_confused
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.4s total (load 0.7s, gen 6.9s, decode 2.8s)
+- Audio duration: 3.5s
+- RTF: 1.97x
+
+**Output**: /tmp/tada_bench/ex04_confused.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 10 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex04_enunciated
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex04_enunciated.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex04_enunciated
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 8.9s total (load 0.7s, gen 5.4s, decode 2.8s)
+- Audio duration: 3.4s
+- RTF: 1.59x
+
+**Output**: /tmp/tada_bench/ex04_enunciated.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 12 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex04_laughing
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex04_laughing.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex04_laughing
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 11.1s total (load 0.7s, gen 6.9s, decode 3.5s)
+- Audio duration: 4.5s
+- RTF: 1.53x
+
+**Output**: /tmp/tada_bench/ex04_laughing.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 10 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex04_sad
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex04_sad.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex04_sad
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 10.8s total (load 0.7s, gen 7.6s, decode 2.5s)
+- Audio duration: 3.1s
+- RTF: 2.45x
+
+**Output**: /tmp/tada_bench/ex04_sad.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 12 frames without hitting EOS — likely degraded model quality   ❌ 1 sanity check(s) failed — output is likely garbage 
+
+---
+
+## 2026-05-07 — voice-matrix-sweep — 290e602 — ex04_whisper
+
+**Date**: 2026-05-07
+**Commit**: 290e602
+**Purpose**: Automated voice sweep — ex04_whisper.
+
+**Parameters**:
+- engine: candle
+- device: metal
+- model: Var-C VV-Q8 E-Q4 (1.3G)
+- voice: ex04_whisper
+- text: "The quick brown fox jumps over the lazy dog."
+- noise_temp: 0.9
+- temperature: 0.6
+- cfg_scale: 1.6
+- flow_steps: 10
+- top_p: 0.9
+- repetition_penalty: 1.1
+- transition_steps: 5
+- seed: 42
+
+**Timings**:
+- Wall-clock: 9.6s total (load 0.7s, gen 6.9s, decode 2.0s)
+- Audio duration: 2.6s
+- RTF: 2.65x
+
+**Output**: /tmp/tada_bench/ex04_whisper.wav
+
+**Notes**:   ⚠ Generation sanity checks FAILED:     - NO_EOS: model generated 10 frames without hitting EOS — likely degraded model quality   ⚠ Audio sanity checks FAILED: 
+
+---
