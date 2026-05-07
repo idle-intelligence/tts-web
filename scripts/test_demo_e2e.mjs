@@ -292,9 +292,12 @@ try {
         await sleep(1000); // DOM update
 
         // Check voice selector population (static JS arrays — no WebGPU needed)
-        const speakerCount = await page.evaluate(() =>
-            document.getElementById('tadaSpeakerGrid')?.querySelectorAll('.voice-btn').length || 0
-        );
+        // Speakers split into two grids: fixed (no styling) + matrix (with styling)
+        const speakerCount = await page.evaluate(() => {
+            const flat = document.getElementById('tadaFlatGrid')?.querySelectorAll('.voice-btn').length || 0;
+            const matrix = document.getElementById('tadaMatrixGrid')?.querySelectorAll('.voice-btn').length || 0;
+            return flat + matrix;
+        });
         const styleCount = await page.evaluate(() =>
             document.getElementById('tadaStyleGrid')?.querySelectorAll('.voice-btn').length || 0
         );

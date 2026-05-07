@@ -219,6 +219,10 @@
             grid-template-columns: repeat(4, 1fr);
             gap: 8px;
         }
+        .voice-grid.inactive {
+            opacity: 0.35;
+            pointer-events: none;
+        }
         .voice-btn {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 13px;
@@ -351,9 +355,11 @@
     </section>
 
     <section id="tadaVoiceSection" style="display:none">
-        <h2>voice <span class="sub">· speaker</span></h2>
-        <div class="voice-grid" id="tadaSpeakerGrid"></div>
-        <h2>style <span class="sub">· emotion</span></h2>
+        <h2>voice <span class="sub">· fixed</span></h2>
+        <div class="voice-grid" id="tadaFlatGrid"></div>
+        <h2 style="margin-top: 1.5em">voice <span class="sub">· matrix</span></h2>
+        <div class="voice-grid" id="tadaMatrixGrid"></div>
+        <h2 style="margin-top: 0.5em">style <span class="sub">· emotion</span></h2>
         <div class="voice-grid" id="tadaStyleGrid"></div>
     </section>
 
@@ -441,15 +447,19 @@
         };
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
 
-        const TADA_SPEAKERS = [
-            { id: 'ex01', label: 'ex01' },
-            { id: 'ex02', label: 'ex02' },
-            { id: 'ex03', label: 'ex03' },
-            { id: 'ex04', label: 'ex04' },
+        // Fixed voices — single safetensors, no style variants
+        const TADA_FLAT_SPEAKERS = [
             { id: 'rickie', label: 'rickie' },
             { id: 'jeff', label: 'jeff' },
             { id: 'karen', label: 'karen' },
             { id: 'walt', label: 'walt' },
+        ];
+        // Matrix speakers — combine with any style below
+        const TADA_MATRIX_SPEAKERS = [
+            { id: 'ex01', label: 'ex01' },
+            { id: 'ex02', label: 'ex02' },
+            { id: 'ex03', label: 'ex03' },
+            { id: 'ex04', label: 'ex04' },
         ];
         const TADA_STYLES = [
             { id: 'default', label: 'neutral' },
@@ -678,20 +688,23 @@
         }
 
         // ---- Voice selectors (TADA): Speaker + Style ----
-        const tadaSpeakerGrid = document.getElementById('tadaSpeakerGrid');
+        const tadaFlatGrid = document.getElementById('tadaFlatGrid');
+        const tadaMatrixGrid = document.getElementById('tadaMatrixGrid');
         const tadaStyleGrid = document.getElementById('tadaStyleGrid');
         const tadaVoiceSection = document.getElementById('tadaVoiceSection');
         const tadaProgress = document.getElementById('tadaProgress');
 
-        for (const spk of TADA_SPEAKERS) {
+        function makeTadaSpeakerBtn(spk) {
             const btn = document.createElement('button');
             btn.className = 'voice-btn';
             btn.textContent = spk.label;
             btn.disabled = true;
             btn.dataset.speaker = spk.id;
             btn.addEventListener('click', () => selectTadaSpeaker(spk.id));
-            tadaSpeakerGrid.appendChild(btn);
+            return btn;
         }
+        for (const spk of TADA_FLAT_SPEAKERS) tadaFlatGrid.appendChild(makeTadaSpeakerBtn(spk));
+        for (const spk of TADA_MATRIX_SPEAKERS) tadaMatrixGrid.appendChild(makeTadaSpeakerBtn(spk));
         for (const sty of TADA_STYLES) {
             const btn = document.createElement('button');
             btn.className = 'voice-btn';
@@ -703,7 +716,8 @@
         }
 
         function setTadaVoiceBtnsEnabled(enabled) {
-            tadaSpeakerGrid.querySelectorAll('.voice-btn').forEach(btn => { btn.disabled = !enabled; });
+            tadaFlatGrid.querySelectorAll('.voice-btn').forEach(btn => { btn.disabled = !enabled; });
+            tadaMatrixGrid.querySelectorAll('.voice-btn').forEach(btn => { btn.disabled = !enabled; });
             tadaStyleGrid.querySelectorAll('.voice-btn').forEach(btn => { btn.disabled = !enabled; });
         }
 
@@ -715,22 +729,29 @@
             tts.setVoice(`${activeTadaSpeaker}_${activeTadaStyle}`, file);
         }
 
+        function isMatrixSpeaker(id) {
+            return TADA_MATRIX_SPEAKERS.some(s => s.id === id);
+        }
+
         function selectTadaSpeaker(id) {
             if (loadingTadaVoice || generating) return;
             activeTadaSpeaker = id;
-            tadaSpeakerGrid.querySelectorAll('.voice-btn').forEach(btn => {
+            tadaFlatGrid.querySelectorAll('.voice-btn').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.speaker === id);
             });
-            // Non-Expresso speakers have no style variants — hide style grid
-            const hasStyles = id.startsWith('ex');
-            tadaStyleGrid.querySelectorAll('.voice-btn').forEach(btn => {
-                btn.style.display = hasStyles ? '' : 'none';
+            tadaMatrixGrid.querySelectorAll('.voice-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.speaker === id);
             });
+            // Style grid stays visible for both kinds; fade it for fixed voices
+            // so it's clear they don't apply.
+            tadaStyleGrid.classList.toggle('inactive', !isMatrixSpeaker(id));
             loadTadaVoice();
         }
 
         function selectTadaStyle(id) {
             if (loadingTadaVoice || generating || !activeTadaSpeaker) return;
+            // Style only applies to matrix speakers; clicks on fixed speakers are no-ops.
+            if (!isMatrixSpeaker(activeTadaSpeaker)) return;
             activeTadaStyle = id;
             tadaStyleGrid.querySelectorAll('.voice-btn').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.style === id);
@@ -1107,9 +1128,13 @@
             isDemoGen = false;
             kittenReady = false;
             // Reset TADA voice button states
-            tadaSpeakerGrid.querySelectorAll('.voice-btn').forEach(btn => {
+            tadaFlatGrid.querySelectorAll('.voice-btn').forEach(btn => {
                 btn.classList.remove('active', 'loading');
             });
+            tadaMatrixGrid.querySelectorAll('.voice-btn').forEach(btn => {
+                btn.classList.remove('active', 'loading');
+            });
+            tadaStyleGrid.classList.remove('inactive');
             tadaStyleGrid.querySelectorAll('.voice-btn').forEach(btn => {
                 btn.classList.remove('active', 'loading');
                 btn.disabled = true;
