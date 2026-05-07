@@ -1880,3 +1880,11 @@ Experiment log. Each block corresponds to an entry in results.md (same experimen
 - Conclusion: SIMD128 **ON**
 
 ---
+
+## Task 3 (SIMD fix conditional) — auto-closed
+
+SIMD already on, no fix needed.
+
+(Task 1's wasm-objdump audit found 189,650 SIMD opcodes; Task 3 was a conditional fix-if-off and is now [x] without code change.)
+
+---
