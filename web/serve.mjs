@@ -8,7 +8,7 @@
  */
 
 import { createServer } from "node:http";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, statSync, appendFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,6 +36,24 @@ const server = createServer((req, res) => {
     // CORS headers
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
+
+    // POST /timings — append JSON line to /tmp/wasm-timings.jsonl
+    if (req.method === "POST" && pathname === "/timings") {
+        let body = "";
+        req.on("data", chunk => { body += chunk; });
+        req.on("end", () => {
+            try {
+                const obj = JSON.parse(body);
+                appendFileSync("/tmp/wasm-timings.jsonl", JSON.stringify(obj) + "\n");
+                res.writeHead(204);
+                res.end();
+            } catch {
+                res.writeHead(400);
+                res.end("Bad JSON");
+            }
+        });
+        return;
+    }
 
     // Route to file
     let filePath;

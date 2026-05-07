@@ -189,6 +189,13 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
             };
             self.postMessage({type: 'timing', ...timing});
             console.log('[tada-timing]', JSON.stringify(timing));
+            try {
+                fetch('/timings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(timing),
+                }).catch(() => {}); // silent — server-side capture is best-effort
+            } catch {}
             postMessage({type: 'audio', samples: pcm, sampleRate: 24000});
         }
 
