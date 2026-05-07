@@ -40,7 +40,7 @@ Three triggers — Discovery (necessary unanticipated work), Split (task is 2+ s
 
 ## Tasks
 
-### 1. Land the merge with end-to-end sanity (iterate, ~2.5h)
+### 1. [x] Land the merge with end-to-end sanity (iterate, ~2.5h)
 
 Checkout `feat/burn-wgpu-llama`, rebase onto current main. Resolve all conflicts in favor of main's git-deps (`1b19c26` and successors). After rebase, on the rebased tip:
 - `cargo check -p tada-core --features metal` exits 0
