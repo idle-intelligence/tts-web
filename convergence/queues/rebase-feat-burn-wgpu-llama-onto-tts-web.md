@@ -78,7 +78,7 @@ Commit the test script.
 
 **Convergence criteria**: `node scripts/test_demo_e2e.mjs` exits 0 with all three audio assertions passing.
 
-### 4. Benchmark sweep across all 32 voices (iterate, ~2h)
+### 4. [x] Benchmark sweep across all 32 voices (iterate, ~2h)
 
 Write `scripts/tada/benchmark_voices.sh` that iterates BOTH `voices/*.safetensors` (6 base) AND `voices/matrix/*.safetensors` (26 matrix) — 32 total. For each, runs `tada_generate` with default CLAUDE.md params, captures wall-clock + audio duration → RTF, appends one row to `docs/tada/results.md` and one experiment block to `docs/tada/lab-notebook.md`. On per-voice failure: log to lab notebook with reproducer command, continue sweep.
 
