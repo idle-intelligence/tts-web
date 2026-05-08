@@ -585,9 +585,13 @@ fn run() -> CResult<()> {
         None
     };
 
+    let profile_steps = std::env::var("TADA_PROFILE_STEPS").map(|v| v == "1").unwrap_or(false);
+    let mut step_ms_vec: Vec<f64> = Vec::new();
+
     let t_gen_start = std::time::Instant::now();
     let mut acoustic_step_idx: usize = 0; // counter for acoustic steps (step >= shift_acoustic)
     for step in 0..total_tokens {
+        let t_step_start = std::time::Instant::now();
         // Get current token
         let current_token = if step < prompt_len {
             token_ids[step]
@@ -775,9 +779,20 @@ fn run() -> CResult<()> {
         if let Some(ref mut countdown) = eos_countdown {
             if *countdown == 0 {
                 eprintln!("  >>> EOS countdown reached 0 at step {step}, stopping");
+                let step_ms = t_step_start.elapsed().as_secs_f64() * 1000.0;
+                step_ms_vec.push(step_ms);
+                if profile_steps {
+                    eprintln!("  [step-timing] step={step} ms={:.1}", step_ms);
+                }
                 break;
             }
             *countdown -= 1;
+        }
+
+        let step_ms = t_step_start.elapsed().as_secs_f64() * 1000.0;
+        step_ms_vec.push(step_ms);
+        if profile_steps {
+            eprintln!("  [step-timing] step={step} ms={:.1}", step_ms);
         }
     }
 
@@ -790,6 +805,17 @@ fn run() -> CResult<()> {
         hit_eos,
         t_gen.as_secs_f64(),
     );
+
+    // Per-step timing summary (always printed, data always available)
+    if !step_ms_vec.is_empty() {
+        let mut sorted = step_ms_vec.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mean = step_ms_vec.iter().sum::<f64>() / step_ms_vec.len() as f64;
+        let median = sorted[sorted.len() / 2];
+        let p95 = sorted[(sorted.len() as f32 * 0.95) as usize];
+        eprintln!("[step-profile] count={} mean={:.1}ms median={:.1}ms p95={:.1}ms total={:.1}ms",
+            step_ms_vec.len(), mean, median, p95, step_ms_vec.iter().sum::<f64>());
+    }
 
     // --- Strip leading frames ---
     // Python: encoded = acoustic_features[..., num_prompt_tokens + num_transition_steps - 1:, :]

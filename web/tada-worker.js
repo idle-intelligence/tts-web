@@ -174,8 +174,15 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
         // Generation loop
         const genStart = performance.now();
         let step = 0;
+        const stepMsArray = [];
         while (true) {
+            const stepStart = performance.now();
             const result = await engine.generationStep();
+            const stepMs = performance.now() - stepStart;
+            stepMsArray.push(Math.round(stepMs * 10) / 10);
+            // Mark for Chrome trace (visible in Performance panel)
+            performance.mark(`tada-step-${stepMsArray.length - 1}`);
+
             if (result === null || result === undefined) break;
 
             const info = typeof result === 'string' ? JSON.parse(result) : result;
@@ -206,11 +213,28 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
 
         if (pcm && pcm.length > 0) {
             const audioDurationMs = (pcm.length / 24000) * 1000;
+            // Per-step summary stats
+            const stepCount = stepMsArray.length;
+            const stepSorted = [...stepMsArray].sort((a, b) => a - b);
+            const stepMean = stepCount > 0 ? stepMsArray.reduce((a, b) => a + b, 0) / stepCount : 0;
+            const stepMedian = stepCount > 0 ? stepSorted[Math.floor(stepCount / 2)] : 0;
+            const stepP95 = stepCount > 0 ? stepSorted[Math.floor(stepCount * 0.95)] : 0;
+            // Per-frame decode: decoder is a single monolithic call (all frames as one tensor).
+            // Frame count derived from audio duration at 50 fps (LLM token rate).
+            const frameCount = Math.round(audioDurationMs / 1000 * 50);
+            const frameMeanMs = frameCount > 0 ? decodeMs / frameCount : 0;
             const timing = {
                 gen_ms: Math.round(genMs),
                 decode_ms: Math.round(decodeMs),
                 audio_duration_ms: Math.round(audioDurationMs),
                 rtf: (genMs + decodeMs) / audioDurationMs,
+                step_count: stepCount,
+                step_mean_ms: Math.round(stepMean * 10) / 10,
+                step_median_ms: stepMedian,
+                step_p95_ms: stepP95,
+                step_ms_array: stepMsArray,
+                frame_count: frameCount,
+                frame_mean_ms: Math.round(frameMeanMs * 10) / 10,
             };
             self.postMessage({type: 'timing', ...timing});
             console.log('[tada-timing]', JSON.stringify(timing));

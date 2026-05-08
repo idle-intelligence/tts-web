@@ -1940,3 +1940,60 @@ SIMD already on, no fix needed.
 - Minimum RTF: 6.55x at tasks_max=1024
 - Speedup vs production (tmax=512): 1.00x = 0.1% improvement at tmax=1024
 - Source restored to tasks_max=512 ✓
+
+---
+
+## 2026-05-08 — wasm-substep-profile-iter1 — (see commit below)
+
+### Per-step gen timing (WASM)
+- step count: 59 (54 content + 5 WASM warmup artifact — last entry 0ms, i.e. done sentinel)
+- mean step_ms: 248.7ms (skewed by bimodal distribution)
+- median: 74.9ms
+- p95: 675.8ms
+- total: 14671ms (matches gen_ms=14673ms ✓)
+- raw first 10: [8.0, 29.8, 7.8, 39.7, 7.2, 51.8, 59.7, 7.9, 67.8, 6.9]
+- raw last 10: [667.9, 665.1, 671.4, 675.8, 663.4, 673.8, 674.9, 663.2, 744.4, 0.0]
+
+3-tier structure revealed by per-step data:
+- Tier 1 — FAST (7-10ms, 18 steps): pre-shift steps (step 0-4) + EOS/prompt-phase LLM-only steps (no VibeVoice dispatch). Average: ~10ms.
+- Tier 2 — MED (60-110ms, 21 steps): LLM + VV with voice guidance (voice-prompted phase, steps 5-38). Average: ~73ms.
+- Tier 3 — SLOW (660-825ms, 19 steps): LLM + VV autoregressive (AR phase, steps 39-57, no voice conditioning). Average: ~681ms.
+
+The 9.3x jump from voice-guided (73ms) to AR VV (681ms) is the dominant signal. AR VibeVoice runs without voice conditioning — the GPU path may be taking a different (slower) shader branch or the CFG doubled-forward without voice input is the bottleneck.
+
+### Per-frame decode timing (WASM)
+- frame count: 160 (derived from audio_duration_ms=3200ms @ 50fps)
+- decode total: 6335ms
+- mean frame_ms: 39.6ms (monolithic — decoder processes all 160 frames as one tensor, no per-frame loop)
+- Note: decoder is a single candle CPU call (expand_durations + local attention 6 layers + DAC CNN 4 strides). No per-frame granularity without Rust instrumentation.
+
+### Native CLI parity (Var-C Metal, TADA_PROFILE_STEPS=1)
+- gen total: 7.0s (7011.9ms measured)
+- step count: 54
+- mean step_ms: 129.8ms
+- median: 127.6ms
+- p95: 137.2ms
+- decode total: 1.6s
+- frame count: ~97 (audio 1.94s @ 50fps = 97 frames)
+- mean frame_ms: 16.5ms (1600ms / 97 frames)
+- Note: native has no pre-shift fast steps visible — Metal device is faster overall so even early steps absorb into ~5-31ms range
+
+Native step distribution:
+- Steps 0-4: 5-31ms (pre-shift, minimal work)
+- Steps 5-38: 121-137ms (full VV steps — both voice-guided and AR look similar on Metal)
+- Steps 39-53: 129-749ms (step 53 spikes to 749ms due to debug logits computation)
+- AR steps 39-52: steady ~130-133ms (compared to WASM AR steps at ~670ms)
+
+### WASM vs native (per-step)
+- gen step_ms ratio (wasm MED / native steady): 73ms / 127ms = 0.57x — WASM voice-guided VV is actually FASTER than native?? 
+  - Explanation: Native 127ms includes full CFG neg path + VV. WASM at 73ms during voice-phase may be using voice conditioning which reduces effective computation.
+  - More importantly: WASM steps 5-38 are FASTER than native 5-38 (73ms vs 127ms). This is unexpected.
+- AR VV step ratio (wasm SLOW / native AR): 670ms / 131ms = 5.1x — THIS is the real bottleneck.
+  - WASM AR VibeVoice (no voice guidance) takes 670ms vs native 131ms = 5.1x overhead.
+- decode frame_ms ratio (wasm / native): 39.6ms / 16.5ms = 2.4x
+- Implication: The 5.1x AR VibeVoice gap accounts for most of the total 6.5x RTF gap. Decode is a secondary (2.4x) contributor. Native uses Metal for VV; WASM uses WebGPU — the AR VV path (solve_flow_matching_burn) is where the GPU gap is widest.
+
+### Iteration 1 status
+- Outputs delivered (3 of 5): per-step gen timings (JS-side), per-frame decode (derived metric), native parity (TADA_PROFILE_STEPS=1 added)
+- Outputs remaining (2 of 5): fresh Chrome trace post-instrumentation + analyze-trace.py output, longest single GPU op identification, ranked hypothesis register
+- Task 5b stays [ ] for next iteration
