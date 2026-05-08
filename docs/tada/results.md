@@ -459,3 +459,13 @@ Note: Neg CFG forward run on ALL steps (not just content). Whisper RMS: -22.1dB 
 | wasm-baseline | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=512 | 1.3G | fox | — | 14.41 | 6.36 | 3.20 | 6.49x | wasm-baseline.wav |
 | wasm-cfg16 | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=512 | 1.3G | fox | — | 14.52 | 6.34 | 3.20 | 6.52x | tada-cfg16-fox.wav |
 | wasm-cfg10 | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.0 tasks_max=512 | 1.3G | fox | — | 8.70 | 4.16 | 2.04 | 6.30x | tada-cfg10-fox.wav |
+
+
+## tasks-max-sweep
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| wasm-tmax-256 | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=256 | 1.3G | fox | — | 15.76 | 6.46 | 3.20 | 6.94x | tada-tmax-256-fox.wav |
+| wasm-tmax-512 | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=512 | 1.3G | fox | — | 14.54 | 6.45 | 3.20 | 6.56x | tada-tmax-512-fox.wav |
+| wasm-tmax-1024 | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=1024 | 1.3G | fox | — | 14.62 | 6.35 | 3.20 | 6.55x | tada-tmax-1024-fox.wav |
+| wasm-tmax-2048 | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=2048 | 1.3G | fox | — | 14.72 | 6.33 | 3.20 | 6.58x | tada-tmax-2048-fox.wav |

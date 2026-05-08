@@ -1929,3 +1929,14 @@ SIMD already on, no fix needed.
 - Speedup: cfg10_rtf / cfg16_rtf = 0.967 (-3.3% change)
 - CFG hypothesis: CONFIRMED — CFG-off is 3.3% faster
 - QUALITY: UNVERIFIED — pending user audition. Both files in /tmp/. User listens before any commit lands cfg=1.0 as production default.
+
+## 2026-05-08 — wasm-tasks-max-sweep — 5e424b1
+- Method: 4 WASM rebuilds with tasks_max ∈ {256, 512, 1024, 2048}; same Playwright session per measurement; cfg=1.6 (production default); fox phrase
+- wasm-tmax-256: gen 15.76s, decode 6.46s, audio 3.20s, RTF 6.94x → tada-tmax-256-fox.wav
+- wasm-tmax-512: gen 14.54s, decode 6.45s, audio 3.20s, RTF 6.56x → tada-tmax-512-fox.wav
+- wasm-tmax-1024: gen 14.62s, decode 6.35s, audio 3.20s, RTF 6.55x → tada-tmax-1024-fox.wav
+- wasm-tmax-2048: gen 14.72s, decode 6.33s, audio 3.20s, RTF 6.58x → tada-tmax-2048-fox.wav
+- Build failures: none
+- Minimum RTF: 6.55x at tasks_max=1024
+- Speedup vs production (tmax=512): 1.00x = 0.1% improvement at tmax=1024
+- Source restored to tasks_max=512 ✓
