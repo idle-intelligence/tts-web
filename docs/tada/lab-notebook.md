@@ -1921,3 +1921,11 @@ SIMD already on, no fix needed.
 - Decode bottleneck on CPU (candle SIMD) is significant — 6.36s for a 3.2s audio clip.
 
 ---
+
+## 2026-05-08 — wasm-cfg-ab — 2e363de
+- Method: Playwright headless TADA-only, fresh session each (cfg slider set before ex01 click)
+- Run A (cfg=1.6): gen 14.52s, decode 6.34s, audio 3.20s, RTF 6.52x → tada-cfg16-fox.wav (153632 bytes)
+- Run B (cfg=1.0): gen 8.70s, decode 4.16s, audio 2.04s, RTF 6.30x → tada-cfg10-fox.wav (97952 bytes)
+- Speedup: cfg10_rtf / cfg16_rtf = 0.967 (-3.3% change)
+- CFG hypothesis: CONFIRMED — CFG-off is 3.3% faster
+- QUALITY: UNVERIFIED — pending user audition. Both files in /tmp/. User listens before any commit lands cfg=1.0 as production default.
