@@ -113,7 +113,7 @@ Three triggers only — Discovery (necessary unanticipated work), Split (task is
 
 ### Phase 4 — Validate
 
-- [ ] **7. Native CLI sanity check** (single-shot, ~15m). Run `cargo run --example tada_generate -p tada-core --release --features metal -- --voice voices/matrix/ex01_default.safetensors --text "The quick brown fox jumps over the lazy dog." --output /tmp/post-perf-sanity.wav` from the repo root. Confirm exit 0 and output file ≥ 50KB.
+- [x] **7. Native CLI sanity check** (single-shot, ~15m). Run `cargo run --example tada_generate -p tada-core --release --features metal -- --model /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-C-vvq8-eq4.gguf --tokenizer /Users/tc/Code/idle-intelligence/hf/Llama-3.2-1B/tokenizer.json --voice voices/matrix/ex01_default.safetensors --text "The quick brown fox jumps over the lazy dog." --output /tmp/post-perf-sanity.wav` from the repo root. Confirm exit 0 and output file ≥ 50KB. (NB: --model and --tokenizer are required; the original mesh command omitted them, criterion 4 has been updated to match.)
     **Convergence criteria**: `/tmp/post-perf-sanity.wav` exists, size ≥ 50KB, and the command exited 0.
 
 - [ ] **8. Pocket TTS + KittenTTS smoke test** (single-shot, ~20m). Run `scripts/test_demo_e2e.mjs`. If TADA caused crashes earlier in this run (or in the prior session per `convergence/notes/`), make TADA skippable. Implementation: add a `SKIP_TADA` env-var check OR a `--skip-tada` CLI flag near the top of the test script; surround the TADA test block with a conditional skip; add a code comment immediately above or inside the TADA block reading exactly `// SKIPPED:` followed by a brief reason and the relevant date (e.g. `// SKIPPED: headless WebGPU + Cache stub crashed machine (2026-05-07 session)`). Pocket TTS and KittenTTS sections must pass.
@@ -131,7 +131,7 @@ Three triggers only — Discovery (necessary unanticipated work), Split (task is
 
     (3) `docs/tada/lab-notebook.md` contains `CFG hypothesis` (case-insensitive) within 200 characters of either `confirmed` or `refuted`, AND contains either `follow-up` or `next steps` (case-insensitive).
 
-    (4) `ls -la /tmp/post-perf-sanity.wav` shows size ≥ 50000 bytes.
+    (4) `cargo run --example tada_generate -p tada-core --release --features metal -- --model /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-C-vvq8-eq4.gguf --tokenizer /Users/tc/Code/idle-intelligence/hf/Llama-3.2-1B/tokenizer.json --voice voices/matrix/ex01_default.safetensors --text "The quick brown fox jumps over the lazy dog." --output /tmp/post-perf-sanity.wav` exits 0 AND `ls -la /tmp/post-perf-sanity.wav` shows size ≥ 50000 bytes.
 
     (5) Either (a) `node scripts/test_demo_e2e.mjs` exits 0 with three PASS lines (pocket-tts, kitten, tada); OR (b) `SKIP_TADA=1 node scripts/test_demo_e2e.mjs` exits 0 with PASS lines for pocket-tts and kitten AND `grep -c '// SKIPPED:' scripts/test_demo_e2e.mjs` ≥ 1 (specifically aligned with Task 8's skip pattern).
 
