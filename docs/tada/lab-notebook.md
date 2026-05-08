@@ -1888,3 +1888,36 @@ SIMD already on, no fix needed.
 (Task 1's wasm-objdump audit found 189,650 SIMD opcodes; Task 3 was a conditional fix-if-off and is now [x] without code change.)
 
 ---
+
+## wasm-baseline
+
+**Date**: 2026-05-08
+**Commit**: (see below)
+**Purpose**: Capture first headless WASM RTF measurement for TADA. Establishes the current wasm performance floor for subsequent optimization tasks (CFG A/B, tasks_max sweep, etc.).
+
+**Method**: Playwright headless Chromium with WebGPU (`--enable-unsafe-webgpu --use-angle=metal`). Cache stub injected into tada-worker.js to bypass the 1.3GB GGUF caching quota. Focused single-model script `scripts/measure_tada_baseline.mjs` — no Pocket TTS or KittenTTS to minimize memory pressure. Server POST `/timings` endpoint wrote result to `/tmp/wasm-timings.jsonl`.
+
+**Parameters**:
+- engine: burn+candle (wgpu LLM + candle CPU VV + candle CPU decoder)
+- device: wgpu+cpu
+- model: Var-C (VV-Q8_0, embed-Q4_0), SIMD128 on, tasks_max=512, cfg_scale=1.6
+- size: 1.3G
+- voice: ex01_default (matrix speaker ex01, default style)
+- text: fox ("The quick brown fox jumps over the lazy dog.")
+- seed: browser default
+
+**Results** (from /tmp/wasm-timings.jsonl):
+- gen_ms: 14406 (14.41s)
+- decode_ms: 6358 (6.36s)
+- audio_duration_ms: 3200 (3.20s)
+- RTF: 6.49x (total wall = gen + decode = 20.77s, audio = 3.20s)
+
+**Observations**:
+- WebGPU functional in headless Chromium with --use-angle=metal on macOS.
+- Model loaded successfully on first headless run (no crash).
+- RTF 6.49x is well above real-time. Breakdown: gen 14.41s (69%), decode 6.36s (31%).
+- Native Var-C metal reference: gen ~2.2s, decode ~2.1s, RTF ~0.80x (postfix-varC-fox row).
+- WASM gen is ~6.5x slower than native candle metal; decode is ~3.0x slower.
+- Decode bottleneck on CPU (candle SIMD) is significant — 6.36s for a 3.2s audio clip.
+
+---

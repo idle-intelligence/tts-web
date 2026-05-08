@@ -449,3 +449,11 @@ Note: Neg CFG forward run on ALL steps (not just content). Whisper RMS: -22.1dB 
 | voice-sweep-ex04_laughing | candle | metal | Var-C VV-Q8 E-Q4 | 1.3G | fox | 0.7 | 6.9 | 3.5 | 4.5 | 1.53x | ex04_laughing.wav |
 | voice-sweep-ex04_sad | candle | metal | Var-C VV-Q8 E-Q4 | 1.3G | fox | 0.7 | 7.6 | 2.5 | 3.1 | 2.45x | ex04_sad.wav |
 | voice-sweep-ex04_whisper | candle | metal | Var-C VV-Q8 E-Q4 | 1.3G | fox | 0.7 | 6.9 | 2.0 | 2.6 | 2.65x | ex04_whisper.wav |
+
+---
+
+## wasm-baseline
+
+| ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
+|----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
+| wasm-baseline-varc-ex01-fox | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=512 | 1.3G | fox | — | 14.41 | 6.36 | 3.20 | 6.49x | wasm-baseline.wav |
