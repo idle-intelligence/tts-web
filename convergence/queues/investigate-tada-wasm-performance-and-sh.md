@@ -103,7 +103,7 @@ Three triggers only — Discovery (necessary unanticipated work), Split (task is
 
 Both original hypotheses (CFG dual-KV-cache, tasks_max batching) showed RTF deltas within measurement noise. We have only top-level totals (gen_ms, decode_ms, audio_duration_ms) — not enough granularity to find the actual bottleneck. Before any "improve" task is meaningful, we need sub-step profiling.
 
-- [ ] **5b. Sub-step profiling: where does WASM time go?** (iterate, ~90m). Goal: produce profiling-grade evidence pinpointing the actual WASM bottleneck. Required outputs:
+- [x] **5b. Sub-step profiling: where does WASM time go?** (iterate, ~90m). Goal: produce profiling-grade evidence pinpointing the actual WASM bottleneck. Required outputs:
     1. **Per-step LLM timing in WASM**: instrument `web/tada-worker.js` (or the underlying `crates/tada-wasm/`) to emit per-LLM-step `gen_step_ms` AND a count of total steps. Helps decompose the 14.5s gen into "N steps × M ms each."
     2. **Per-frame decode timing in WASM**: similar — emit per-decode-frame ms AND total frame count. Helps decompose the 6.4s decode.
     3. **Native CLI parity numbers**: read `crates/tada-core/examples/tada_generate.rs` — does it already log per-step / per-frame? If yes, run it on the fox phrase and capture the same numbers. If no, briefly add equivalent instrumentation (one commit). Goal: WASM-vs-native at the same granularity.

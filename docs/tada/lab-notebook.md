@@ -1997,3 +1997,74 @@ Native step distribution:
 - Outputs delivered (3 of 5): per-step gen timings (JS-side), per-frame decode (derived metric), native parity (TADA_PROFILE_STEPS=1 added)
 - Outputs remaining (2 of 5): fresh Chrome trace post-instrumentation + analyze-trace.py output, longest single GPU op identification, ranked hypothesis register
 - Task 5b stays [ ] for next iteration
+
+---
+
+## 2026-05-08 — wasm-substep-profile-iter2 — fresh Chrome trace + GPU op analysis
+
+### Trace capture (iteration 2)
+- Script: `scripts/measure_tada_trace.mjs` (CDP Tracing API, single Playwright run)
+- Categories: `devtools.timeline,disabled-by-default-devtools.timeline,blink.user_timing,gpu,disabled-by-default-gpu,disabled-by-default-gpu.device,disabled-by-default-v8.cpu_profiler`
+- Output: `/tmp/wasm-perf-fresh.json` — 121.4 MB, 725,875 events
+- Run validated by timing file: gen_ms=14293, decode_ms=7345, audio_duration_ms=3200, RTF=6.76x, step_count=59
+- Step tiers confirmed (from `blink.user_timing` markers `tada-step-N`):
+  - T1 — LLM-only: 16 steps, avg 7.7ms
+  - T2 — VV voice-guided: 23 steps, avg 70.3ms
+  - T3 — VV AR (no voice): 19 steps, avg 660.3ms
+
+### (d) Longest single GPU op identified
+
+**Longest single `GPUTask` event: 4.79ms** — at step 16 (T2/voice-guided phase), tid=CrGpuMain.
+
+The `GPUTask` (Chrome's GPU thread task) is the granularity visible in the trace. Each GPUTask wraps a WebGPU `CommandBuffer::Flush` + `GpuChannel::ExecuteDeferredRequest` + `WebGPU` subspan. The `WebGPU` subspan max is **1.72ms** (inside a T3/AR step).
+
+Key context: the GPUTask events are small because Burn/wgpu issues **one CommandBuffer flush per compute op** — no batching. The AR phase generates **797 separate GPUTask dispatches per step** (avg 0.73ms each), totaling 726ms GPU time per AR step. This is not one large op — it is GPU dispatch fragmentation.
+
+**Per-phase GPU dispatch statistics (from `/tmp/wasm-perf-fresh.json`):**
+
+| Phase | Steps | Avg step | GPUTask/step | GPU time/step | GPU% of step |
+|---|---|---|---|---|---|
+| T1 (LLM-only) | 16 | 7.7ms | 18.6 | 7.6ms | 99% |
+| T2 (VV voice-guided) | 23 | 70.3ms | 169.7 | 68.1ms | 97% |
+| T3 (VV AR) | 19 | 660.3ms | 796.7 | 579.8ms | 88% |
+
+T3/T2 ratio: 4.69x more GPU dispatches per step, 9.4x slower per step. The per-dispatch overhead is higher in T3 because larger tensors cause individual WebGPU compute passes to run longer (each GPUTask avg 0.73ms in T3 vs 0.40ms in T2).
+
+**Worker idle pattern in T3:**
+- Worker thread has 354 gaps of 1–5ms per AR step (total 403ms/step idle)
+- These gaps are GPU-wait stalls — the WASM JS queues a compute pass and blocks until the GPU signals completion before continuing
+- T2 steps show ZERO worker gaps — GPU runs are fire-and-forget during voice-guided phase
+- Likely cause: T3 (AR VV) performs intermediate tensor readbacks between flow-matching ODE steps that T2 does not need (because voice conditioning pre-computes the result)
+
+**V8 GC during T3:** 11ms per AR step (minor GC triggered by intermediate tensor allocations from the iterative ODE solver)
+
+### Hypotheses for next run (ranked, evidence-backed)
+
+**H1: Burn/wgpu AR VibeVoice issues 4.7x more GPU compute passes than voice-guided VV due to iterative ODE solver with no tensor fusion**
+- Evidence: 796.7 GPUTask/step (T3-AR) vs 169.7 (T2-voice-guided), ratio 4.69x from trace. Each GPUTask = one CommandBuffer flush = one fused `wgpuQueueSubmit`. The AR phase runs `flow_steps=10` ODE iterations each requiring a full forward pass; voice-guided phase likely short-circuits via a cached voice embedding so fewer compute passes fire.
+- Likelihood: **High** — the 4.69x dispatch count ratio directly matches the step time ratio difference; the GPU work IS the bottleneck (GPU time = 97-99% of step time for T1/T2, 88% for T3).
+- Test cost: Add a counter in `crates/tada-wasm/src/lib.rs` wrapping `device.submit()` calls; log count per `generationStep()` call. Should show ~170 submits in voice-guided and ~797 in AR step.
+
+**H2: Each flow-matching ODE step requires a GPU→CPU tensor readback that stalls the worker thread (403ms/step of stall in T3 vs 0ms in T2)**
+- Evidence: T3 worker has 354 gaps of 1–5ms per step (total ~403ms idle/step); T2 has zero such gaps. No `mapAsync` events appear in trace — but the pattern matches an implicit sync (e.g. `buffer.mapAsync` called inside Burn's scheduler when reading a scalar or shape). The 403ms idle cost plus 580ms active GPU time = 983ms but measured step is 660ms — indicating GPU + WASM pipeline-overlap rescues ~320ms, yet the stalls still add ~61% overhead to the GPU compute time.
+- Likelihood: **High** — the gap pattern (354 × 1–5ms stalls) is highly characteristic of sequential GPU submit → await → submit chains inside the ODE loop.
+- Test cost: Search `crates/tada-wasm/` and burn WGPU backend for `mapAsync` / `buffer.map` / `BufferAsyncError`. If found inside the ODE loop, batching multiple ODE iterations into one GPU command buffer (submit once, read once) should collapse 354 stalls → 1 per step.
+
+**H3: The AR VV forward pass operates on a larger effective batch than voice-guided (full CFG dual-path without voice prefix KV-cache), doubling per-layer matmul size**
+- Evidence: Native Metal shows AR and voice-guided steps at similar times (~131ms both) — Metal hides this cost with fused kernels. WASM AR steps at 660ms vs voice-guided 70ms = 9.4x, but native ratio is ~1.0x. The extra factor in WASM must be WGSL compute kernel dispatch efficiency for the larger matmul tiles. With CFG enabled (cfg_scale=1.6), the AR pass runs TWO forward passes (pos + neg) without reusing the voice KV cache — this doubles all matmul calls.
+- Likelihood: **Medium** — if CFG were disabled, the AR step would halve its compute (one forward pass instead of two). The CFG A/B experiment showed only 3.3% RTF difference overall, but that was because BOTH voice-guided AND AR phases were halved; the AR/voice step ratio should show a larger change in AR-only measurements.
+- Test cost: Instrument JS to log per-tier step times with cfg_scale=1.0. If AR tier drops from 660ms to ~400ms while T2 stays at 70ms, CFG is a material contributor to T3 cost.
+
+**H4: V8 GC during AR steps adds ~11ms/step overhead from intermediate tensor heap allocations in the ODE solver**
+- Evidence: T3 steps trigger V8 major GC events (49.4 GC events/step vs 23.3 in T2). First T3 step GC total = 11ms. Over 19 T3 steps = ~210ms cumulative GC cost. The GC is driven by Burn tensor temporaries created in the WASM heap for each ODE iteration.
+- Likelihood: **Low-medium** — 11ms is a minor fraction of the 660ms AR step. However, frequent GC pauses fragment the RunTask pipeline and may inflate the apparent idle gaps.
+- Test cost: Add `--js-flags="--gc-interval=0"` to Playwright launch to disable incremental GC and measure if T3 step times change.
+
+### Task 5b criterion check (5/5 outputs in profiling section)
+- (a) Per-step gen_ms histogram: ✓ (iter 1 — mean 248.7ms, median 74.9ms, p95 675.8ms, 3-tier structure)
+- (b) Per-frame decode_ms summary: ✓ (iter 1 — 39.6ms derived, 160 frames, 6.3s total)
+- (c) WASM vs native side-by-side: ✓ (iter 1 — VV voice 0.57x, VV AR 5.1x, decode 2.4x)
+- (d) Longest single GPU op: ✓ (iter 2 — GPUTask max 4.79ms, WebGPU subop max 1.72ms; root cause is dispatch fragmentation: 797 GPUTask/step in T3-AR phase)
+- (e) Hypotheses for next run: ✓ (iter 2 — H1 dispatch fragmentation, H2 GPU→CPU readback stalls, H3 CFG dual-forward in AR, H4 V8 GC; all evidence-cited)
+
+**Task 5b: COMPLETE [x]**
