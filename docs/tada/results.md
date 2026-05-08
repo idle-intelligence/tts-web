@@ -469,3 +469,4 @@ Note: Neg CFG forward run on ALL steps (not just content). Whisper RMS: -22.1dB 
 | wasm-tmax-512 | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=512 | 1.3G | fox | — | 14.54 | 6.45 | 3.20 | 6.56x | tada-tmax-512-fox.wav |
 | wasm-tmax-1024 | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=1024 | 1.3G | fox | — | 14.62 | 6.35 | 3.20 | 6.55x | tada-tmax-1024-fox.wav |
 | wasm-tmax-2048 | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=2048 | 1.3G | fox | — | 14.72 | 6.33 | 3.20 | 6.58x | tada-tmax-2048-fox.wav |
+| wasm-final | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=512 | 1.3G | fox | — | 14.41 | 6.36 | 3.20 | 6.49x | wasm-final.wav |

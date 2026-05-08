@@ -115,7 +115,7 @@ Both original hypotheses (CFG dual-KV-cache, tasks_max batching) showed RTF delt
 
 ### Phase 3 — Improve (or rigorously decide we can't, here)
 
-- [ ] **6. Land final configuration + write final row** (single-shot, ~45m). After 5b, read all wasm rows from results.md and the new profiling evidence. Three paths — pick based on data:
+- [x] **6. Land final configuration + write final row** (single-shot, ~45m). After 5b, read all wasm rows from results.md and the new profiling evidence. Three paths — pick based on data:
 
     **(a) Perf-win path** — if best RTF ≤ 0.70 × baseline RTF AND the change does NOT touch `cfg_scale`: commit the source change to make that config the production default. Run the fox phrase one more time with the new default; append a row with column 1 = `wasm-final` and the new config encoded in the model column. Output audio to `/tmp/tada-final-fox.wav`.
 

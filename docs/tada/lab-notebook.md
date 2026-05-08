@@ -2068,3 +2068,62 @@ T3/T2 ratio: 4.69x more GPU dispatches per step, 9.4x slower per step. The per-d
 - (e) Hypotheses for next run: ✓ (iter 2 — H1 dispatch fragmentation, H2 GPU→CPU readback stalls, H3 CFG dual-forward in AR, H4 V8 GC; all evidence-cited)
 
 **Task 5b: COMPLETE [x]**
+
+## Perf/Quality Tradeoff
+
+After Tasks 4 (CFG A/B) and 5 (tasks_max sweep), no measured configuration achieved the 30% RTF improvement target without quality regression. Final config matches production baseline.
+
+**Configurations measured** (all on canonical fox phrase, ex01 voice):
+
+| Config | RTF | Notes |
+|---|---|---|
+| wasm-baseline (cfg=1.6, tasks_max=512) | **6.49x** | Production default |
+| wasm-cfg10 (cfg=1.0, tasks_max=512) | **6.30x** | -3.3% RTF; audio 36% shorter (likely truncation) |
+| wasm-cfg16 (cfg=1.6, fresh measurement) | **6.52x** | Within noise of baseline |
+| wasm-tmax-256 | **6.94x** | -5.8% regression |
+| wasm-tmax-512 (fresh) | **6.56x** | Within noise of baseline |
+| wasm-tmax-1024 | **6.55x** | -0.2% (winner among same-quality, but noise) |
+| wasm-tmax-2048 | **6.58x** | Within noise |
+| **wasm-final** | **6.49x** | Production unchanged — no measured improvement justified landing |
+
+**Chosen rationale:** None of the tested levers (CFG, tasks_max) moved RTF beyond measurement noise (~3% range). The single non-noise result (wasm-cfg10 at 6.30x = 3% better) came with a quality concern: the cfg=1.0 audio is 36% shorter than cfg=1.6 (3.20s → 2.04s), suggesting earlier EOS or truncation. Per the project's "user listens" rule and the QUALITY: UNVERIFIED flag, autonomously landing cfg=1.0 is not authorized. Therefore wasm-final = wasm-baseline values.
+
+**Quality regression: none observed.** Final config is production-default; no quality change. The cfg=1.0 audio file (`/tmp/tada-cfg10-fox.wav`) remains in /tmp for user audition — IF the user judges quality acceptable post-audit, a future run can land cfg=1.0 as default for ~3% RTF win.
+
+**Verbatim baseline RTF**: `6.49x` (from results.md row `wasm-baseline`).
+**Verbatim final RTF**: `6.49x` (from results.md row `wasm-final`).
+
+## Root cause and follow-up
+
+Task 5b's sub-step profiling (commits 6a08c6c, f7862e0) revealed the actual WASM perf bottleneck — neither CFG nor tasks_max as the original goal-text guessed.
+
+**Root cause: dispatch fragmentation + CPU↔GPU readback stalls in Burn/wgpu's ODE solver autoregressive (AR) path.**
+
+Profiling evidence (from `/tmp/wasm-perf-fresh.json` trace + per-step instrumentation):
+- 3-tier per-step structure in WASM gen: Tier 1 ~10ms (LLM-only, 18 steps), Tier 2 ~73ms (LLM + voice-guided VV, 21 steps), Tier 3 ~681ms (LLM + AR VV, 19 steps).
+- The 19 AR VV steps account for 12.8s of the 14.7s gen budget (87%).
+- AR VV step is **5.1× slower than native Metal** (681ms vs 131ms). Voice-guided VV step is actually 0.57× native (faster!).
+- Per AR step: **797 GPU dispatches** (CommandBuffer flushes) vs 170 in voice-guided phase (4.69× more).
+- Per AR step: **354 worker stalls of 1-5ms each** waiting for GPU readbacks (total 403ms idle/step). Voice-guided phase has **zero** such stalls.
+- Per AR step: 4680 OrderingBarriers vs 1170 in voice-guided phase (4×).
+- The longest single GPU op observable in the trace is only 4.79ms (in voice-guided phase) and 1.72ms (in AR phase). There is NO single dominant GPU op — the cost is fragmentation, not heavy ops.
+
+**Why this happens**: The AR phase of `solve_flow_matching_burn` issues per-iteration GPU dispatches without batched submission, then reads back small intermediate tensors per ODE step. WebGPU's submission model + WASM↔JS↔WebGPU boundary cost compounds: each round-trip eats ~0.7ms-1ms regardless of work content. Voice-guided phase apparently uses a different code path (cached voice-prompt KV?) that avoids this readback loop.
+
+Native Metal doesn't have this issue because (a) Metal's command buffer model auto-fuses adjacent compute passes within a single submission, (b) there's no JS↔WASM↔native-graphics-API boundary cost, (c) the candle CPU VV path keeps tensors host-resident throughout.
+
+### Hypotheses for next run (ranked, evidence-backed)
+
+**H1 (HIGH): AR ODE-solver dispatch fusion** — fuse the 4.69× extra GPU dispatches in AR steps into batched submissions. Likely fix: refactor `solve_flow_matching_burn`'s AR branch to submit a single CommandBuffer per ODE iteration (or per step) instead of per inner op. Test: profile after fusion; expected ~3-4× AR-step speedup → ~3.5x overall RTF. Cost: medium (1-2 day Burn work).
+
+**H2 (HIGH): Eliminate per-iteration CPU↔GPU readbacks** — keep ODE solver intermediate tensors GPU-resident through the iteration; only readback at AR-step boundary. Removes 354 stalls/step × 1-3ms = ~600ms/step. Test: profile after; expected ~2× AR-step speedup. Cost: medium (Burn-side, may need new tensor handle lifecycle).
+
+**H3 (MEDIUM): Decoder GPU port** — decode is candle CPU at 2.4× native. If we move decode to WebGPU (or use a smaller decoder), we recover ~3-4s. Test: prototype decoder on wgpu, measure. Cost: high (decoder rewrite).
+
+**H4 (LOW-MEDIUM): V8 GC pressure during AR steps** — 49.4 GC events/step in T3 vs 23.3 in T2; ~11ms/step overhead from ODE-solver tensor allocations. Mitigation: reuse buffer pool. Smaller win (~2% of AR-step time). Cost: low (worker-side allocation reuse).
+
+### Next-run scope candidate
+
+A focused convergence run on H1 + H2 (combined Burn ODE-solver dispatch refactor) is the highest-leverage next step. Expected outcome: WASM RTF from 6.5x to ~2-3x (still above realtime but within 2-4x of native). H3 (decoder GPU port) is a parallel work stream — could land independently for the secondary bottleneck.
+
+H1 and H2 will likely require upstream changes to Burn (or a fork). Not appropriate for a single tts-web convergence run; needs scoping. Recommend opening that as the next project after this run halts.
