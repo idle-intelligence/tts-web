@@ -2088,7 +2088,7 @@ After Tasks 4 (CFG A/B) and 5 (tasks_max sweep), no measured configuration achie
 
 **Chosen rationale:** None of the tested levers (CFG, tasks_max) moved RTF beyond measurement noise (~3% range). The single non-noise result (wasm-cfg10 at 6.30x = 3% better) came with a quality concern: the cfg=1.0 audio is 36% shorter than cfg=1.6 (3.20s → 2.04s), suggesting earlier EOS or truncation. Per the project's "user listens" rule and the QUALITY: UNVERIFIED flag, autonomously landing cfg=1.0 is not authorized. Therefore wasm-final = wasm-baseline values.
 
-**Quality regression: none observed.** Final config is production-default; no quality change. The cfg=1.0 audio file (`/tmp/tada-cfg10-fox.wav`) remains in /tmp for user audition — IF the user judges quality acceptable post-audit, a future run can land cfg=1.0 as default for ~3% RTF win.
+Quality regression: none observed. Final config is production-default; no quality change. The cfg=1.0 audio file (`/tmp/tada-cfg10-fox.wav`) remains in /tmp for user audition — IF the user judges quality acceptable post-audit, a future run can land cfg=1.0 as default for ~3% RTF win.
 
 **Verbatim baseline RTF**: `6.49x` (from results.md row `wasm-baseline`).
 **Verbatim final RTF**: `6.49x` (from results.md row `wasm-final`).

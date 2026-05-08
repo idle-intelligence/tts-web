@@ -138,7 +138,7 @@ Both original hypotheses (CFG dual-KV-cache, tasks_max batching) showed RTF delt
 - [x] **9. Lab-notebook analysis section** (single-shot, ~20m). Write an analysis section in `docs/tada/lab-notebook.md` that: (a) confirms or refutes the CFG hypothesis with measured RTF numbers from Phase 2, (b) states whether SIMD128 was active or silently disabled, (c) lists the tasks_max optimum found, (d) names the final configuration chosen and its RTF, (e) lists ≥ 2 unblocked follow-ups. Commit.
     **Convergence criteria**: `docs/tada/lab-notebook.md` contains a section with headings or bullet points covering all five points (CFG hypothesis verdict, SIMD status, tasks_max optimum, final config + RTF, follow-up list) with at least one numeric RTF value cited per comparison.
 
-- [ ] **Acceptance check** (iterate, criterion-driven). Independently verify the run's acceptance criterion by direct observation of the goal-as-stated — NOT by re-checking the conjunction of upstream tasks. If this fails while upstream tasks are [x], the decomposition was incomplete; use Discovery / Remesh to address the gap and retry.
+- [x] **Acceptance check** (iterate, criterion-driven). Independently verify the run's acceptance criterion by direct observation of the goal-as-stated — NOT by re-checking the conjunction of upstream tasks. If this fails while upstream tasks are [x], the decomposition was incomplete; use Discovery / Remesh to address the gap and retry.
     **Acceptance criterion**: Run these independent checks in sequence; ALL must pass.
 
     (1) `awk -F'|' '/^\| wasm-/ {print $1}' docs/tada/results.md | sed 's/ //g' | sort -u | wc -l` outputs ≥ 3 (at least three distinct wasm row IDs from the agreed conventions).
