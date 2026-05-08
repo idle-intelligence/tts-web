@@ -456,4 +456,4 @@ Note: Neg CFG forward run on ALL steps (not just content). Whisper RMS: -22.1dB 
 
 | ID | Engine | Device | Model | Size | Text | Load(s) | Gen(s) | Decode(s) | Audio(s) | RTF | File |
 |----|--------|--------|-------|------|------|---------|--------|-----------|----------|-----|------|
-| wasm-baseline-varc-ex01-fox | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=512 | 1.3G | fox | — | 14.41 | 6.36 | 3.20 | 6.49x | wasm-baseline.wav |
+| wasm-baseline | burn+candle | wgpu+cpu | Var-C simd=on cfg=1.6 tasks_max=512 | 1.3G | fox | — | 14.41 | 6.36 | 3.20 | 6.49x | wasm-baseline.wav |
