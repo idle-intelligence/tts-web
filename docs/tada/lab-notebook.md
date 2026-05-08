@@ -1943,7 +1943,7 @@ SIMD already on, no fix needed.
 
 ---
 
-## 2026-05-08 — wasm-substep-profile-iter1 — (see commit below)
+## 2026-05-08 — wasm-substep-profile-iter1 — 6a08c6c
 
 ### Per-step gen timing (WASM)
 - step count: 59 (54 content + 5 WASM warmup artifact — last entry 0ms, i.e. done sentinel)
