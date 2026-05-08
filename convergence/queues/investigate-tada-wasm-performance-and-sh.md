@@ -1,4 +1,4 @@
-STATUS: ACTIVE — started 2026-05-07T22:50:28Z
+STATUS: COMPLETE — 2026-05-08, self-review at convergence/queues/investigate-tada-wasm-performance-and-sh-self-review.md
 
 # investigate-tada-wasm-performance-and-sh
 
@@ -153,4 +153,4 @@ Both original hypotheses (CFG dual-KV-cache, tasks_max batching) showed RTF delt
 
 - [x] **Global review** (single-shot, adversarial, criterion-blind). Spawn a fresh Agent (sonnet, no prior context) with `/Users/tc/Code/convergence/prompts/global-review.md`. Inputs: RUN_NAME=`investigate-tada-wasm-performance-and-sh`, REPO_ROOT=`/Users/tc/Code/idle-intelligence/tts-web`, GOAL=run goal as stated above (verbatim), CONV_HOME=`/Users/tc/Code/convergence`. The reviewer reads the goal and the acceptance evidence — never the criterion text — and tries to falsify the run's claimed success. On FAIL: the reviewer appends a Discovery block (re-fix + re-acceptance + re-global-review) to this queue and the loop continues. On PASS: proceed to Self-review.
 
-- [ ] **Self-review** (single-shot, ~30m). Spawn a fresh Agent (sonnet, no prior context) with `/Users/tc/Code/convergence/prompts/self-review.md`. Inputs: RUN_NAME=`investigate-tada-wasm-performance-and-sh`, REPO_ROOT=`/Users/tc/Code/idle-intelligence/tts-web`, COMMIT_PREFIX=`[investigate-tada-wasm-performance-and-sh]`. Output: `convergence/queues/investigate-tada-wasm-performance-and-sh-self-review.md`.
+- [x] **Self-review** (single-shot, ~30m). Spawn a fresh Agent (sonnet, no prior context) with `/Users/tc/Code/convergence/prompts/self-review.md`. Inputs: RUN_NAME=`investigate-tada-wasm-performance-and-sh`, REPO_ROOT=`/Users/tc/Code/idle-intelligence/tts-web`, COMMIT_PREFIX=`[investigate-tada-wasm-performance-and-sh]`. Output: `convergence/queues/investigate-tada-wasm-performance-and-sh-self-review.md`.
