@@ -107,7 +107,32 @@ async function handleLoad(baseUrl, wasmBaseUrl) {
     }
 }
 
-async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgScale) {
+function pcmToWav(pcm, sampleRate) {
+    const buf = new ArrayBuffer(44 + pcm.length * 2);
+    const view = new DataView(buf);
+    view.setUint32(0, 0x46464952, true); // "RIFF"
+    view.setUint32(4, 36 + pcm.length * 2, true);
+    view.setUint32(8, 0x45564157, true); // "WAVE"
+    view.setUint32(12, 0x20746d66, true); // "fmt "
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, 1, true); // mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    view.setUint32(36, 0x61746164, true); // "data"
+    view.setUint32(40, pcm.length * 2, true);
+    let off = 44;
+    for (let i = 0; i < pcm.length; i++) {
+        const s = Math.max(-1, Math.min(1, pcm[i]));
+        view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        off += 2;
+    }
+    return new Blob([buf], { type: 'audio/wav' });
+}
+
+async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgScale, wavCaptureName) {
     if (!engine) {
         postMessage({type: 'error', error: 'Model not loaded'});
         return;
@@ -197,6 +222,19 @@ async function handleGenerate(text, temperature, noiseTemp, numFlowSteps, cfgSca
                 }).catch(() => {}); // silent — server-side capture is best-effort
             } catch {}
             postMessage({type: 'audio', samples: pcm, sampleRate: 24000});
+
+            // Optional WAV capture for benchmarking
+            if (wavCaptureName) {
+                try {
+                    const wavBlob = pcmToWav(pcm, 24000);
+                    const arrayBuf = await wavBlob.arrayBuffer();
+                    fetch('/audio?name=' + encodeURIComponent(wavCaptureName), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'audio/wav' },
+                        body: arrayBuf,
+                    }).catch(() => {});
+                } catch {}
+            }
         }
 
         postMessage({type: 'done', totalSteps: step + 1});
@@ -231,7 +269,7 @@ self.onmessage = async (e) => {
             await handleLoad(msg.baseUrl, msg.wasmBaseUrl);
             break;
         case 'generate':
-            await handleGenerate(msg.text, msg.temperature, msg.noiseTemp, msg.numFlowSteps, msg.cfgScale);
+            await handleGenerate(msg.text, msg.temperature, msg.noiseTemp, msg.numFlowSteps, msg.cfgScale, msg.wavCaptureName);
             break;
         case 'setVoice':
             await handleSetVoice(msg.name, msg.file || msg.name, msg.baseUrl);

@@ -8,7 +8,7 @@
  */
 
 import { createServer } from "node:http";
-import { createReadStream, existsSync, statSync, appendFileSync } from "node:fs";
+import { createReadStream, existsSync, statSync, appendFileSync, writeFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,6 +36,31 @@ const server = createServer((req, res) => {
     // CORS headers
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
+
+    // POST /audio?name=<filename> — write binary body to /tmp/<filename>
+    if (req.method === "POST" && pathname === "/audio") {
+        const name = url.searchParams.get("name") || "";
+        // Reject names with path traversal or directory separators
+        if (!name || name.includes("..") || name.includes("/") || name.includes("\\")) {
+            res.writeHead(400);
+            res.end("Bad filename");
+            return;
+        }
+        const chunks = [];
+        req.on("data", chunk => { chunks.push(chunk); });
+        req.on("end", () => {
+            try {
+                const buf = Buffer.concat(chunks);
+                writeFileSync("/tmp/" + name, buf);
+                res.writeHead(204);
+                res.end();
+            } catch (e) {
+                res.writeHead(500);
+                res.end("Write failed: " + e.message);
+            }
+        });
+        return;
+    }
 
     // POST /timings — append JSON line to /tmp/wasm-timings.jsonl
     if (req.method === "POST" && pathname === "/timings") {

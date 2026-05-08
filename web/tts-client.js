@@ -89,6 +89,7 @@ export class TtsClient {
                 noiseTemp: options.noiseTemp,
                 numFlowSteps: options.numFlowSteps,
                 cfgScale: options.cfgScale,
+                wavCaptureName: options.wavCaptureName,
             });
         } else if (this.modelType === 'kitten') {
             this.worker.postMessage({
