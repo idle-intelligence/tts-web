@@ -2127,3 +2127,40 @@ Native Metal doesn't have this issue because (a) Metal's command buffer model au
 A focused convergence run on H1 + H2 (combined Burn ODE-solver dispatch refactor) is the highest-leverage next step. Expected outcome: WASM RTF from 6.5x to ~2-3x (still above realtime but within 2-4x of native). H3 (decoder GPU port) is a parallel work stream — could land independently for the secondary bottleneck.
 
 H1 and H2 will likely require upstream changes to Burn (or a fork). Not appropriate for a single tts-web convergence run; needs scoping. Recommend opening that as the next project after this run halts.
+
+## Analysis (Task 9 — run summary)
+
+Convergence run `investigate-tada-wasm-performance-and-sh` final analysis. Concise summary of the diagnosis; deeper hypothesis material lives in the `Root cause and follow-up` section above.
+
+**(a) CFG hypothesis: REFUTED.**
+The original goal-text guessed CFG dual-KV-cache (commit ea9da52) caused the post-CFG ~20× regression in worker-step gaps (55ms → 1100ms). Task 4's A/B measurement shows the per-second-of-audio cost is essentially flat:
+- `wasm-cfg16` (cfg=1.6): RTF **6.52x**
+- `wasm-cfg10` (cfg=1.0): RTF **6.30x**
+- Delta: 3.3% — within measurement noise.
+
+The apparent 40% wall-time gain at cfg=1.0 is illusory: the cfg=1.0 run produced 36% less audio (3.20s → 2.04s, likely earlier EOS), making per-second cost flat. CFG is NOT the throughput bottleneck.
+
+**(b) SIMD128: confirmed ON, no fix needed.**
+Task 1's `wasm-objdump -d crates/tada-wasm/pkg/tada_wasm_bg.wasm | grep -cE 'i32x4|f32x4|v128|simd'` returned **189,650 SIMD opcodes**. SIMD128 is active in the production build. Task 3 closed without a fix. The decode regression from prior 5.4s to current 6.2s observed in the historical trace is NOT explained by SIMD being off; it's part of the dispatch-fragmentation pattern identified in Task 5b.
+
+**(c) tasks_max optimum: 1024 (effectively a tie with 512+).**
+Task 5's sweep of {256, 512, 1024, 2048}:
+- 256 → RTF **6.94x** (-5.8% regression)
+- 512 → RTF **6.56x** (production default)
+- 1024 → RTF **6.55x** (numerical winner, 0.2% better — noise)
+- 2048 → RTF **6.58x**
+
+Above 512, RTF is flat within noise. tasks_max is NOT a meaningful optimization lever past the production default. Source restored to `tasks_max=512` (Task 5).
+
+**(d) Final configuration: production unchanged. wasm-final = wasm-baseline. RTF 6.49x.**
+No measured config beat baseline without quality regression. Path (d) "diagnose-not-fix" taken: the actual root cause (dispatch fragmentation in Burn/wgpu's AR ODE-solver path — 797 GPU dispatches/AR-step + 354 readback stalls/AR-step) requires structural Burn refactor work, which is out-of-scope for a config-tweak run. Run converges on rigorous diagnosis as the deliverable.
+
+**(e) Follow-ups (≥2 required, 4 listed; full evidence in `Root cause and follow-up` section above):**
+1. **H1 — Burn ODE-solver dispatch fusion (HIGH).** Fuse the 4.69× extra GPU dispatches in AR steps into batched submissions. Expected ~3-4× AR-step speedup → ~3.5x overall RTF. Likely upstream Burn work.
+2. **H2 — Eliminate per-iteration CPU↔GPU readbacks (HIGH).** Keep ODE-solver intermediate tensors GPU-resident through the iteration; readback only at AR-step boundary. Expected ~2× AR-step speedup. Removes 354 stalls/step × 1-3ms = ~600ms/step.
+3. **H3 — Decoder GPU port (MEDIUM).** Decode is candle CPU at 2.4× native; moving to WebGPU could recover ~3-4s. Independent of H1/H2; could land in parallel.
+4. **H4 — V8 GC pressure during AR steps (LOW-MEDIUM).** ~11ms/step from ODE-solver tensor allocations. Fix via worker-side buffer pool reuse.
+
+**Recommended next-run scope: H1 + H2 (combined Burn ODE-solver dispatch refactor).** Highest leverage — ~3-4x WASM RTF improvement expected. Open as next project after this run halts.
+
+**Honest one-line summary**: this run shipped no perf fix; it shipped the diagnosis that explains why the original hypotheses failed and points to the structural change needed.
