@@ -17,6 +17,10 @@ Usage:
   # From HuggingFace model ID
   python quantize_to_gguf.py --model-id kyutai/pocket-tts-without-voice-cloning -o model.gguf
 
+  # From a per-language checkpoint subfolder (e.g. German)
+  python quantize_to_gguf.py --model-id kyutai/pocket-tts-without-voice-cloning \
+      --subfolder languages/german -o model-de.gguf
+
   # From local safetensors file
   python quantize_to_gguf.py --input model.safetensors -o model.gguf
 
@@ -300,6 +304,13 @@ def main() -> None:
         help="Output path for GGUF file",
     )
     parser.add_argument(
+        "--subfolder",
+        type=str,
+        default=None,
+        help="Repo subfolder to download model.safetensors from "
+             "(e.g. languages/german for a per-language checkpoint)",
+    )
+    parser.add_argument(
         "--validate",
         action="store_true",
         help="Run tensor-level validation after quantization",
@@ -322,18 +333,36 @@ def main() -> None:
             print("ERROR: huggingface_hub is required for --model-id.", file=sys.stderr)
             print("  pip install huggingface_hub", file=sys.stderr)
             sys.exit(1)
-        print(f"Downloading safetensors from {args.model_id}...")
-        for filename in ("tts_b6369a24.safetensors", "model.safetensors"):
+        if args.subfolder:
+            print(f"Downloading safetensors from {args.model_id}/{args.subfolder}...")
             try:
                 input_path = Path(
-                    hf_hub_download(repo_id=args.model_id, filename=filename)
+                    hf_hub_download(
+                        repo_id=args.model_id,
+                        filename="model.safetensors",
+                        subfolder=args.subfolder,
+                    )
                 )
-                break
-            except Exception:
-                continue
+            except Exception as e:
+                print(
+                    f"ERROR: model.safetensors not found in "
+                    f"{args.model_id}/{args.subfolder}: {e}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
         else:
-            print(f"ERROR: no safetensors file found in {args.model_id}", file=sys.stderr)
-            sys.exit(1)
+            print(f"Downloading safetensors from {args.model_id}...")
+            for filename in ("tts_b6369a24.safetensors", "model.safetensors"):
+                try:
+                    input_path = Path(
+                        hf_hub_download(repo_id=args.model_id, filename=filename)
+                    )
+                    break
+                except Exception:
+                    continue
+            else:
+                print(f"ERROR: no safetensors file found in {args.model_id}", file=sys.stderr)
+                sys.exit(1)
         print(f"  Downloaded to {input_path}")
     else:
         input_path = args.input
