@@ -82,11 +82,11 @@ Why:
 - **Unification.** Only the port lets us **delete the JS tokenizer** and have one implementation shared by browser and native.
 - It's our own code — no licensing or dependency question.
 
-**🔴 The real risk, and the one genuine argument for the other route:** the `.model` file carries a `NormalizerSpec` (precompiled NFKC-ish) that our JS **ignores** — `web/worker.js:149` only does the `▁` substitution. Invisible in ASCII English, but French with *decomposed* Unicode (`e` + combining acute vs precomposed `é`) misses the vocab and hits byte-fallback, producing wrong tokens and mispronounced audio. The `tokenizers` crate gets `Precompiled` normalization free. Mitigation: NFC-normalize input deliberately, and let golden tests arbitrate.
+**✅ RESOLVED (2026-07-26) — normalization was a non-issue, in the opposite direction.** All six upstream `.model` files carry `normalizer_spec.name = 'identity'` with an **empty** `precompiled_charsmap` (0 bytes). There is no NFKC map to honour. The JS ignoring `NormalizerSpec` was *correct*, and the mitigation originally proposed here — deliberately NFC-normalizing — would have **introduced** a divergence rather than fixing one. It was not implemented. Decomposed-vs-precomposed input is still a real-world hazard, but it is a *caller* concern, not a tokenizer one: reproducing sentencepiece faithfully means passing it through untouched.
 
-**🔴 Possible existing divergence, in English, today.** `prepare_text_prompt()` prepends 8 spaces for short text (`crates/tts-core/src/tts_model.rs:151`), which our JS encodes as 8 separate `▁` tokens. SentencePiece's default `remove_extra_whitespaces=true` would collapse them. If upstream collapses and we don't, short English utterances have been getting different conditioning than Kyutai's reference all along. **Unverified — the golden tests settle it.**
+**✅ RESOLVED (2026-07-26) — the 8-space question is not a tokenizer question.** All six set `remove_extra_whitespaces = false`, so nothing collapses. Reference sentencepiece encodes `"        Hello world."` as `[260 ×8, 2994, 578, 263]` — eight real `▁` tokens — and our Rust tokenizer now matches exactly. So there is **no tokenizer-level divergence**. What remains is a separate, narrower question: whether prepending 8 spaces in `prepare_text_prompt()` (`crates/tts-core/src/tts_model.rs:151`) is what Kyutai's reference *pipeline* does. That is a prompt-conditioning question to settle against upstream inference code, not against the tokenizer. Still open, now correctly scoped.
 
-Both risks are answered by the same oracle: encode a fixture corpus through Python `sentencepiece` and through our implementation, assert identical ID sequences, per language, **including a short-text case**.
+**🟡 New, found while porting — a real bug in the shipped JS.** `UnigramTokenizer` runs its Viterbi over **UTF-16 code units** (`text.length`, `substring`, `charCodeAt`), so byte fallback emits `<0x{codeUnit}>`: for `é` (U+00E9) that is `<0xE9>` instead of the correct UTF-8 pair `<0xC3><0xA9>`. Harmless for ASCII English — which is why it has never shown — but wrong for precisely the accented and non-BMP input this project depends on. The Rust port runs the lattice over UTF-8 bytes and is correct. **This makes Step 5 (delete the JS tokenizer, call the Rust one) a correctness fix, not just deduplication** — and it must land before the browser goes multilingual.
 
 ---
 
@@ -94,11 +94,13 @@ Both risks are answered by the same oracle: encode a fixture corpus through Pyth
 
 Sequencing note: the tokenizer work is not infrastructure *preceding* the multilingual work — it is the **first work item of it**. Per-language tokenization is the highest-risk unknown, and the native CLI is the cheapest place to validate each checkpoint (quantize → run → listen; no browser, no worker, no cache plumbing).
 
-### Step 1 — Rust tokenizer + golden tests
-- [ ] **1.1 [CREATE]** Port `decodeSentencepieceModel` + `UnigramTokenizer` (`web/worker.js:46-191`) into a new `crates/tts-core/src/tokenizer.rs`. Protobuf varint parse + Viterbi. No new crates.
-- [ ] **1.2 [CREATE]** NFC-normalize input (see §3 risk).
-- [ ] **1.3 [CREATE]** Golden tests vs Python `sentencepiece` for EN + all 5 languages. Fixtures generated once by a script under `scripts/pocket-tts/` (venv). **Must include a short-text case** to settle the 8-space question.
-- [ ] **1.4 [CHECK]** Assert `max(token_id) < 4001` on load — cheap guard, upstream enforces vocab==4000 so this should never fire.
+### Step 1 — Rust tokenizer + golden tests ✅ DONE (2026-07-26, `d5335f6`, `2d9c441`)
+- [x] **1.1** Ported `decodeSentencepieceModel` + `UnigramTokenizer` (`web/worker.js:46-191`) into `crates/tts-core/src/tokenizer.rs`. Hand-rolled protobuf + Viterbi, std only, no new runtime deps. **Lattice runs over UTF-8 bytes, not UTF-16 code units** — see §3. Max piece length is computed from the vocab rather than the JS's hardcoded 64; the 256 byte-fallback ids are resolved once at load.
+- [x] ~~**1.2** NFC-normalize input~~ — **dropped, and correctly so.** The normalizer is `identity` with an empty charsmap; normalizing would have created a divergence. See §3.
+- [x] **1.3** Golden tests vs Python `sentencepiece`: `scripts/pocket-tts/gen_tokenizer_fixtures.py` → `crates/tts-core/tests/fixtures/golden.json`, **115 cases, all 6 languages, 115/115 passing** (`crates/tts-core/tests/tokenizer_golden.rs`). Corpus covers per-language diacritics, empty/whitespace-only input, the 8-space case, real tab/newline, non-BMP emoji (the case that actually exercises byte fallback), and a French-through-English cross-language case. The fixtures also pin the normalizer/trainer flags, so an upstream tokenizer change fails loudly.
+- [x] **1.4** Vocab-size guard at load (must be 4000; embedding table is `[4001, 1024]` with row 4000 padding).
+- The six upstream `tokenizer.model` files are vendored under `crates/tts-core/tests/fixtures/tokenizers/` (~360 KB total) so the tests are hermetic. Repo-root `tokenizer.model` is byte-identical to `languages/english/tokenizer.model` (sha256 `d461765a…`).
+- Found en route: the empty string must return `[]`, not the lone dummy-prefix token. Caught by the golden tests, not by inspection.
 
 ### Step 2 — Real Pocket CLI
 - [ ] **2.1 [CREATE]** Bring `crates/tts-core/examples/tts_generate.rs` up to its siblings' standard: `--model --tokenizer --voice --text --output`. Drop the hardcoded IDs at :256. Match the arg style of `kitten_generate.rs` / `tada_generate.rs` (hand-rolled parsing, no clap).
@@ -117,7 +119,7 @@ Sequencing note: the tokenizer work is not infrastructure *preceding* the multil
 - [ ] **4.2 [CREATE]** Log RTF per language natively (Metal) against the English 1.97× median. Record in the research log.
 
 ### Step 5 — Unify on the Rust tokenizer
-- [ ] **5.1 [CREATE]** Expose `tokenize()` from `crates/tts-wasm`, call it from `web/worker.js`, and **delete the JS tokenizer** (`web/worker.js:46-191`). Do this *before* the browser goes multilingual, so there's one implementation before it's exercised in six languages.
+- [ ] **5.1 [CREATE]** Expose `tokenize()` from `crates/tts-wasm`, call it from `web/worker.js`, and **delete the JS tokenizer** (`web/worker.js:46-191`). Do this *before* the browser goes multilingual, so there's one implementation before it's exercised in six languages. **Now a correctness fix, not just deduplication** — the JS byte fallback is wrong for non-ASCII (§3).
 - [ ] **5.2 [CHECK]** Regression: English demo unchanged.
 
 ### Step 6 — Browser multilingual
@@ -139,10 +141,11 @@ Sequencing note: the tokenizer work is not infrastructure *preceding* the multil
 ## 5. Blockers & open questions
 
 1. **🔴 French size.** Only `french_24l` (~370 MB Q8_0), ~3× the English download. Options: (a) ship with a size warning; (b) wait for Kyutai's distilled French; (c) more aggressive quant (Q4_K_M) — overlaps the existing backlog item. **Recommendation: (b)+(c) — ship the four small languages first, treat French as its own follow-up.** Decide after Step 4 produces native French audio to judge. Note French is the language the requester led with.
-2. **🔴 Unicode normalization** (§3) — the highest-risk correctness unknown.
-3. **🔴 The 8-space / `remove_extra_whitespaces` question** (§3) — may already affect English.
-4. **[CHECK]** Re-hosting licence for derived quants from a gated upstream repo.
-5. **[CHECK]** English root vs `languages/english/` tokenizer byte-identity (§2).
+2. ~~**🔴 Unicode normalization**~~ — **✅ resolved 2026-07-26.** Normalizer is `identity`, charsmap empty. Non-issue; see §3.
+3. ~~**🔴 The 8-space / `remove_extra_whitespaces` question**~~ — **✅ resolved 2026-07-26** *as a tokenizer question* (`remove_extra_whitespaces=false`, we match reference exactly). What survives is narrower: does Kyutai's reference *pipeline* prepend 8 spaces for short text? Settle against upstream inference code before Step 4 listening, so it doesn't get misread as a quantization or voice artefact.
+4. **🟡 JS byte-fallback bug** (§3) — shipped English demo is unaffected in practice, but Step 5 must land before the browser goes multilingual.
+5. **[CHECK]** Re-hosting licence for derived quants from a gated upstream repo.
+6. ~~**[CHECK]** English root vs `languages/english/` tokenizer byte-identity~~ — **✅ confirmed identical** (sha256 `d461765a…`).
 6. **[CHECK]** `_24l` variants for the other four languages — upstream calls them higher-quality but slower. Out of scope for v1.
 
 ## 6. Effort shape
