@@ -108,8 +108,24 @@ Sequencing note: the tokenizer work is not infrastructure *preceding* the multil
 
 ### Step 3 — Quantize + host, per language
 - [ ] **3.1 [CHECK]** HF gated-repo access (`hf auth whoami`; terms accepted on `kyutai/pocket-tts-without-voice-cloning`). Owner believes this is already done.
-- [ ] **3.2 [CREATE]** Add `--subfolder` to `scripts/pocket-tts/quantize_to_gguf.py`. Today `--model-id` calls `hf_hub_download(repo_id, filename)` trying only root-level `tts_b6369a24.safetensors` / `model.safetensors` (`:325-335`) — it cannot reach `languages/<lang>/model.safetensors`.
-- [ ] **3.3 [CHECK]** Verify `remap_key()` and the quantize allowlist still cover the per-language tensor names. Identical architecture, so expect a clean pass — assert rather than assume. For `french_24l`, check nothing hardcodes the 6-layer count.
+- [x] **3.2 [DONE 2026-07-26, `b898a5a`]** `--subfolder` added to `scripts/pocket-tts/quantize_to_gguf.py`. The no-subfolder path is untouched, so English output is bit-for-bit unaffected.
+- [x] **3.3 [DONE]** German quantized clean: 214 tensors → 171 in the GGUF after `--no-encoder`, `remap_key()` covers everything (no `None` returns, no collisions), 6 transformer layers as expected, worst-layer SQNR **39.3 dB** on `flow_lm.out_eos.weight` — *better* than English's 37.2 dB. Output: `hf/pocket-tts/pocket-tts-de-q8_0.gguf`, 133,837,984 B. `languages/german` and `languages/english` have **identical tensor names and shapes**; only values differ.
+
+#### 🔴 3.3a — the per-language checkpoints are a different generation from what we ship
+
+Found while validating German, and it invalidates the plan's "identical architecture" assumption at the *repo* level, not the per-language level. Our shipped `pocket-tts-q8_0.gguf` was built from the **root** `tts_b6369a24.safetensors` (235 MB, 213 tensors), **not** from `languages/english/model.safetensors` (219 MB, 214 tensors). They differ:
+
+| tensor | root (what we ship) | `languages/*` |
+|---|---|---|
+| `flow_lm.speaker_proj_weight` | `[1024, 512]` | `[1024, 32]` |
+| `mimi.downsample.conv.conv.weight` | `[512, 512, 32]` | `[32, 512, 32]` |
+| `flow_lm.bos_before_voice` | **absent** | `[1, 1, 1024]` |
+
+That accounts exactly for the GGUF tensor counts: 170 (shipped English) vs 171 (German). Assessment:
+- `speaker_proj_weight` and `mimi.downsample` — **not loaded by our Rust** (`grep` finds no reference; downsample is stripped by `--no-encoder` anyway). Harmless.
+- `flow_lm.bos_before_voice` — **open question.** We load a *different* tensor, `flow_lm.bos_emb` `[ldim]` (`flow_lm.rs:182`), used only by `replace_nan_with_bos`. `bos_before_voice` is `d_model`-sized and positioned before the voice prompt. **Hypothesis:** it is already baked into the pre-computed voice KV caches — the per-language caches are 127 positions vs `embeddings_v2`'s 125, and +2 is consistent with an added prefix. Unverified. If wrong, German voice conditioning is subtly misaligned. **Settle this before the Step 4 listening pass**, or a bad result gets misattributed to quantization.
+- Voice format also changed: per-language embeddings carry `self_attn/offset` `[1] I64` where `embeddings_v2` carries `self_attn/current_end` `[125] F32`. **Harmless** — our Rust reads only `self_attn/cache` (`tts_generate.rs:213`, `tts-wasm/src/lib.rs:80`) and ignores both.
+- Follow-up: consider re-quantizing English from `languages/english/` so all six languages come from one upstream generation. Would change shipped English audio, so it needs its own listening check.
 - [ ] **3.4 [CREATE]** Produce `pocket-tts-{de,es,pt,it}-q8_0.gguf` with `--no-encoder`. Validate (`--validate` + SQNR spot-check against English's 37.2 dB worst-layer figure in `docs/pocket-tts/QUANTIZATION.md`).
 - [ ] **3.5 [CREATE]** Upload to the **existing** `idle-intelligence/pocket-tts-gguf` under a `languages/<lang>/` prefix mirroring upstream — one repo, one model card, trivial URL builder. Co-host each `tokenizer.model` alongside its checkpoint; they are a matched pair and a mismatch yields plausible-sounding garbage, not an error.
 - [ ] **3.6 [CREATE]** Update the model card: language tags, base-model links, quant method, sizes, credit to Kyutai.
