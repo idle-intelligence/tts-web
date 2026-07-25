@@ -41,9 +41,6 @@ const server = createServer((req, res) => {
     let filePath;
     if (pathname === "/" || pathname === "/index.html") {
         filePath = join(ROOT, "web/index.html");
-    } else if (pathname.startsWith("/tada-pkg/")) {
-        // TADA WASM build output from crates/tada-wasm/pkg/
-        filePath = join(ROOT, "crates/tada-wasm/pkg", pathname.slice("/tada-pkg/".length));
     } else if (pathname.startsWith("/kitten-pkg/")) {
         // Kitten WASM build output from crates/kitten-wasm/pkg/
         filePath = join(ROOT, "crates/kitten-wasm/pkg", pathname.slice("/kitten-pkg/".length));

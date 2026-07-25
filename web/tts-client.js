@@ -13,8 +13,7 @@ export class TtsClient {
 
         this.baseUrl = (options.baseUrl || '').replace(/\/+$/, '');
         this.wasmBaseUrl = options.wasmBaseUrl || null;
-        const defaultWorker = this.modelType === 'tada' ? '/tada-worker.js'
-            : this.modelType === 'kitten' ? '/kitten-worker.js'
+        const defaultWorker = this.modelType === 'kitten' ? '/kitten-worker.js'
             : '/worker.js';
         this.workerUrl = options.workerUrl || (this.baseUrl + defaultWorker);
         this.modelUrl = options.modelUrl || null;
@@ -48,11 +47,7 @@ export class TtsClient {
             this._pendingResolve = resolve;
             this._pendingReject = reject;
 
-            if (this.modelType === 'tada') {
-                const msg = { type: 'load', baseUrl: this.baseUrl || location.origin };
-                if (this.wasmBaseUrl) msg.wasmBaseUrl = this.wasmBaseUrl;
-                this.worker.postMessage(msg);
-            } else if (this.modelType === 'kitten') {
+            if (this.modelType === 'kitten') {
                 this.worker.postMessage({
                     type: 'load',
                     modelUrl: this.modelUrl,
@@ -76,16 +71,7 @@ export class TtsClient {
 
     generate(text, temperature = 0.7, options = {}) {
         if (!this._ready) throw new Error('Not initialized');
-        if (this.modelType === 'tada') {
-            this.worker.postMessage({
-                type: 'generate',
-                text,
-                temperature,
-                noiseTemp: options.noiseTemp,
-                numFlowSteps: options.numFlowSteps,
-                cfgScale: options.cfgScale,
-            });
-        } else if (this.modelType === 'kitten') {
+        if (this.modelType === 'kitten') {
             this.worker.postMessage({
                 type: 'generate',
                 ipa: options.ipa || '',
@@ -96,12 +82,6 @@ export class TtsClient {
             });
         } else {
             this.worker.postMessage({ type: 'generate', text, temperature });
-        }
-    }
-
-    cancel() {
-        if (this.worker && this.modelType === 'tada') {
-            this.worker.postMessage({ type: 'cancel' });
         }
     }
 
@@ -143,7 +123,7 @@ export class TtsClient {
                 this.onProgress(data.step, data.totalTokens, data.isEos, data.tokenId);
                 break;
             case 'audio':
-                // TADA: full audio delivered at once — call onChunk with the complete buffer
+                // Non-streaming models deliver the full audio at once — call onChunk with the complete buffer
                 this.sampleRate = data.sampleRate || this.sampleRate;
                 this.onChunk(data.samples, -1);
                 break;
