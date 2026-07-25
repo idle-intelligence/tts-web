@@ -323,6 +323,7 @@
         <h2>settings <span class="sub">· model</span></h2>
         <div class="model-selector">
             <label><input type="radio" name="model" value="pocket-tts" checked> Pocket TTS (128 MB)</label>
+            <label><input type="radio" name="model" value="pocket-multilingual"> Pocket Multilingual (134 MB)</label>
             <label><input type="radio" name="model" value="kitten"> KittenTTS (~45 MB)</label>
         </div>
     </section>
@@ -344,6 +345,15 @@
 
     <section id="voiceSection">
         <h2>voice</h2>
+        <div class="slider-group" id="languageSelectGroup" style="display:none;margin-bottom:12px">
+            <label for="languageSelect">Language</label>
+            <select id="languageSelect">
+                <option value="de">German</option>
+                <option value="es">Spanish</option>
+                <option value="pt">Portuguese</option>
+                <option value="it">Italian</option>
+            </select>
+        </div>
         <div class="voice-grid" id="voiceGrid"></div>
     </section>
 
@@ -409,9 +419,18 @@
         const speedValue = document.getElementById('speedValue');
         const speedSliderGroup = document.getElementById('speedSliderGroup');
         const ipaDisplay = document.getElementById('ipaDisplay');
+        const languageSelect = document.getElementById('languageSelect');
+        const languageSelectGroup = document.getElementById('languageSelectGroup');
         // kittenPhrases removed
 
         const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
+        // Same 26 voice names exist for every multilingual checkpoint (de/es/pt/it) — voice and
+        // language are orthogonal, so this is one shared list, not a per-language map.
+        const POCKET_ML_VOICES = [
+            'alba', 'anna', 'azelma', 'bill_boerst', 'caro_davy', 'charles', 'cosette', 'eponine',
+            'estelle', 'eve', 'fantine', 'george', 'giovanni', 'jane', 'javert', 'jean', 'juergen',
+            'lola', 'marius', 'mary', 'michael', 'paul', 'peter_yearsley', 'rafael', 'stuart_bell', 'vera',
+        ];
         // Must be alphabetical — matches WASM voice index order (sorted in load_voices)
         const KITTEN_VOICES = ['bella', 'bruno', 'hugo', 'jasper', 'kiki', 'leo', 'luna', 'rosie'];
         const KITTEN_SPEED_PRIORS = {
@@ -419,6 +438,12 @@
             rosie: 0.8, hugo: 0.9, kiki: 0.8, leo: 0.8,
         };
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
+        const DEMO_TEXT_ML = {
+            de: 'Hallo, dies ist ein Test des Text-zu-Sprache-Systems.',
+            es: 'Hola, esta es una prueba del sistema de texto a voz.',
+            pt: 'Olá, este é um teste do sistema de texto para voz.',
+            it: 'Ciao, questo è un test del sistema da testo a voce.',
+        };
 
         let allChunks = [];
         let generating = false;
@@ -427,6 +452,7 @@
         let loadingVoice = false;
         let isDemoGen = false;
         let currentModel = 'pocket-tts';
+        let currentLanguage = languageSelect.value;
         let kittenVoiceIdx = 0;
         let lastIpa = null;
         let kittenVoiceNames = KITTEN_VOICES;
@@ -568,17 +594,45 @@
             } catch { return false; }
         }
 
-        // ---- Voice grid ----
-        const voiceGrid = document.getElementById('voiceGrid');
-        for (const name of VOICES) {
-            const btn = document.createElement('button');
-            btn.className = 'voice-btn';
-            btn.textContent = name;
-            btn.disabled = true;
-            btn.dataset.voice = name;
-            btn.addEventListener('click', () => selectVoice(name));
-            voiceGrid.appendChild(btn);
+        // ---- Pocket Multilingual (de/es/pt/it) — same engine/worker as pocket-tts, different
+        // weights/tokenizer/voice base. Mirrors HF_BASE/VOICE_BASE from web/worker.js:1-2.
+        const POCKET_ML_HF_BASE = 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main';
+        const POCKET_ML_VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
+        function multilingualModelUrl(lang) {
+            return isLocal ? `${location.origin}/pocket-tts-${lang}-q8_0.gguf` : `${POCKET_ML_HF_BASE}/languages/${lang}/pocket-tts-q8_0.gguf`;
         }
+        function multilingualTokenizerUrl(lang) {
+            return isLocal ? `${location.origin}/tokenizer-${lang}.model` : `${POCKET_ML_HF_BASE}/languages/${lang}/tokenizer.model`;
+        }
+        function multilingualVoiceBaseUrl(lang) {
+            // Voice embeddings are not staged locally — always fetched from the upstream Kyutai repo.
+            return `${POCKET_ML_VOICE_BASE}/languages/${lang}/embeddings`;
+        }
+        async function isMultilingualCached(lang) {
+            if (isLocal) return true;
+            try {
+                const cache = await caches.open(MODEL_CACHE);
+                return !!(await cache.match(multilingualModelUrl(lang)));
+            } catch { return false; }
+        }
+
+        // ---- Voice grid ----
+        // Shared between pocket-tts and pocket-multilingual — rebuilt with the right
+        // name list when switching models, so the grid markup/CSS is never duplicated.
+        const voiceGrid = document.getElementById('voiceGrid');
+        function buildVoiceGrid(names) {
+            voiceGrid.innerHTML = '';
+            for (const name of names) {
+                const btn = document.createElement('button');
+                btn.className = 'voice-btn';
+                btn.textContent = name;
+                btn.disabled = true;
+                btn.dataset.voice = name;
+                btn.addEventListener('click', () => selectVoice(name));
+                voiceGrid.appendChild(btn);
+            }
+        }
+        buildVoiceGrid(VOICES);
 
         function setVoiceBtnsEnabled(enabled) {
             voiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
@@ -598,14 +652,24 @@
         }
 
         // ---- Pocket TTS client ----
-        function makePocketClient() {
+        // `overrides` lets makeMultilingualClient() reuse this exact streaming/UI pipeline —
+        // same engine, same worker, only the URLs/demo text/filename differ.
+        function makePocketClient(overrides = {}) {
+            const modelType = overrides.modelType || 'pocket-tts';
+            const demoText = overrides.demoText || DEMO_TEXT;
+            const filenamePrefix = overrides.filenamePrefix || 'pocket-tts';
+            const urlOverrides = {};
+            if (overrides.modelUrl) urlOverrides.modelUrl = overrides.modelUrl;
+            if (overrides.tokenizerUrl) urlOverrides.tokenizerUrl = overrides.tokenizerUrl;
+            if (overrides.voiceBaseUrl) urlOverrides.voiceBaseUrl = overrides.voiceBaseUrl;
+            const hasUrlOverrides = Object.keys(urlOverrides).length > 0;
             return new TtsClient({
-                modelType: 'pocket-tts',
+                modelType,
                 workerUrl: './worker.js',
-                ...(isLocal ? {
+                ...(hasUrlOverrides ? urlOverrides : (isLocal ? {
                     modelUrl: '/pocket-tts-q8_0.gguf',
                     tokenizerUrl: '/tokenizer.model',
-                } : {}),
+                } : {})),
                 onVoiceLoaded: (name) => {
                     loadingVoice = false;
                     activeVoice = name;
@@ -622,7 +686,7 @@
                     generating = true;
                     generateBtn.disabled = true;
                     setVoiceBtnsEnabled(false);
-                    tts.generate(userText || DEMO_TEXT, parseFloat(tempSlider.value));
+                    tts.generate(userText || demoText, parseFloat(tempSlider.value));
                 },
                 onStatus: (text, ready, progress) => {
                     if (ready) {
@@ -739,9 +803,21 @@
                     audioPlayer.src = URL.createObjectURL(blob);
                     audioSection.style.display = 'block';
                     saveWavLink.href = audioPlayer.src;
-                    saveWavLink.download = `pocket-tts-${activeVoice}.wav`;
+                    saveWavLink.download = `${filenamePrefix}-${activeVoice}.wav`;
                     saveWavLink.style.display = 'inline-block';
                 }
+            });
+        }
+
+        // ---- Pocket Multilingual client ----
+        function makeMultilingualClient(lang) {
+            return makePocketClient({
+                modelType: 'pocket-multilingual',
+                modelUrl: multilingualModelUrl(lang),
+                tokenizerUrl: multilingualTokenizerUrl(lang),
+                voiceBaseUrl: multilingualVoiceBaseUrl(lang),
+                demoText: DEMO_TEXT_ML[lang],
+                filenamePrefix: `pocket-ml-${lang}`,
             });
         }
 
@@ -836,8 +912,9 @@
 
         // ---- Model switching ----
         function updateUIForModel(model) {
-            voiceSection.style.display = model === 'pocket-tts' ? '' : 'none';
+            voiceSection.style.display = (model === 'pocket-tts' || model === 'pocket-multilingual') ? '' : 'none';
             kittenVoiceSection.style.display = model === 'kitten' ? '' : 'none';
+            languageSelectGroup.style.display = model === 'pocket-multilingual' ? '' : 'none';
 
             tempSliderGroup.style.display = model === 'kitten' ? 'none' : '';
             speedSliderGroup.style.display = model === 'kitten' ? '' : 'none';
@@ -847,10 +924,10 @@
             ipaDisplay.style.display = 'none';
         }
 
-        async function switchModel(model) {
-            if (model === currentModel && tts) return;
-            currentModel = model;
-
+        // Teardown + reinit for the given model. Shared by switchModel() (model radio change)
+        // and the language <select> handler (same model, different weights) so there is one
+        // code path for "tear down the client and reload" rather than two.
+        async function applyModel(model) {
             // Destroy existing client
             if (tts) {
                 tts.destroy();
@@ -888,7 +965,20 @@
                     downloadBtn.style.display = '';
                     downloadBtn.disabled = false;
                 }
+            } else if (model === 'pocket-multilingual') {
+                buildVoiceGrid(POCKET_ML_VOICES);
+                tts = makeMultilingualClient(currentLanguage);
+                const cached = await isMultilingualCached(currentLanguage);
+                if (cached) {
+                    updateStatus('loading', 'Loading from cache...');
+                    await initClient();
+                } else {
+                    updateStatus('', 'Model not downloaded');
+                    downloadBtn.style.display = '';
+                    downloadBtn.disabled = false;
+                }
             } else {
+                buildVoiceGrid(VOICES);
                 tts = makePocketClient();
                 const cached = await isModelCached();
                 if (cached) {
@@ -902,6 +992,12 @@
             }
         }
 
+        async function switchModel(model) {
+            if (model === currentModel && tts) return;
+            currentModel = model;
+            await applyModel(model);
+        }
+
         document.querySelectorAll('input[name="model"]').forEach(radio => {
             radio.addEventListener('change', (e) => {
                 if (generating) {
@@ -912,6 +1008,15 @@
                 }
                 switchModel(e.target.value);
             });
+        });
+
+        languageSelect.addEventListener('change', (e) => {
+            if (generating) {
+                e.target.value = currentLanguage;
+                return;
+            }
+            currentLanguage = e.target.value;
+            if (currentModel === 'pocket-multilingual') applyModel('pocket-multilingual');
         });
 
         async function initClient() {
@@ -942,7 +1047,7 @@
         generateBtn.addEventListener('click', () => {
             const text = textInput.value.trim();
             if (!text || generating) return;
-            if (currentModel === 'pocket-tts' && !activeVoice) return;
+            if ((currentModel === 'pocket-tts' || currentModel === 'pocket-multilingual') && !activeVoice) return;
             if (currentModel === 'kitten') {
                 const ipa = '';
                 isDemoGen = false;
@@ -968,7 +1073,7 @@
             isDemoGen = false;
             generating = true;
             generateBtn.disabled = true;
-            if (currentModel === 'pocket-tts') setVoiceBtnsEnabled(false);
+            if (currentModel === 'pocket-tts' || currentModel === 'pocket-multilingual') setVoiceBtnsEnabled(false);
             tts.generate(text, parseFloat(tempSlider.value));
         });
 
