@@ -266,6 +266,15 @@
             width: 100%;
             margin-top: 4px;
         }
+        #saveWavLink {
+            display: none;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: var(--faint);
+            text-decoration: none;
+            margin-top: 8px;
+        }
+        #saveWavLink:hover { color: var(--muted); }
 
         .ipa-chip {
             font-family: 'IBM Plex Mono', monospace;
@@ -367,6 +376,7 @@
     <section id="audioSection">
         <h2>output <span class="sub">· audio wav file</span></h2>
         <audio id="audioPlayer" controls></audio>
+        <a id="saveWavLink" download>↓ save wav</a>
         <p id="ipaDisplay" style="display:none;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--faint);margin-top:8px;word-break:break-all"></p>
     </section>
 
@@ -391,6 +401,7 @@
         const stepInfo = document.getElementById('stepInfo');
         const audioSection = document.getElementById('audioSection');
         const audioPlayer = document.getElementById('audioPlayer');
+        const saveWavLink = document.getElementById('saveWavLink');
         const voiceSection = document.getElementById('voiceSection');
         const kittenVoiceSection = document.getElementById('kittenVoiceSection');
         const kittenVoiceGrid = document.getElementById('kittenVoiceGrid');
@@ -510,6 +521,7 @@
             allChunks = [];
             genStartTime = performance.now();
             audioSection.style.display = 'none';
+            saveWavLink.style.display = 'none';
             ipaDisplay.style.display = 'none';
             stepInfo.textContent = ipa ? 'Synthesizing...' : 'Phonemizing...';
             updateStatus('generating', ipa ? 'Synthesizing...' : 'Phonemizing...');
@@ -651,6 +663,7 @@
                     dynamicPrebuffer = 0;
                     playbackStartTime = 0;
                     audioSection.style.display = 'none';
+                    saveWavLink.style.display = 'none';
                     stepInfo.textContent = `Generating... (${numTokens} tokens)`;
                     updateStatus('generating', 'Generating...');
                     if (workletNode) workletNode.port.postMessage({ type: 'clear' });
@@ -725,6 +738,9 @@
                     const blob = new Blob([wav], { type: 'audio/wav' });
                     audioPlayer.src = URL.createObjectURL(blob);
                     audioSection.style.display = 'block';
+                    saveWavLink.href = audioPlayer.src;
+                    saveWavLink.download = `pocket-tts-${activeVoice}.wav`;
+                    saveWavLink.style.display = 'inline-block';
                 }
             });
         }
@@ -827,6 +843,7 @@
             speedSliderGroup.style.display = model === 'kitten' ? '' : 'none';
             stepInfo.textContent = '';
             audioSection.style.display = 'none';
+            saveWavLink.style.display = 'none';
             ipaDisplay.style.display = 'none';
         }
 
@@ -934,6 +951,7 @@
                 allChunks = [];
                 genStartTime = performance.now();
                 audioSection.style.display = 'none';
+                saveWavLink.style.display = 'none';
                 ipaDisplay.style.display = 'none';
                 stepInfo.textContent = ipa ? 'Synthesizing...' : 'Phonemizing...';
                 updateStatus('generating', ipa ? 'Synthesizing...' : 'Phonemizing...');
