@@ -1668,6 +1668,8 @@ dependencies = [
  "rand",
  "rand_distr",
  "safetensors 0.4.5",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
