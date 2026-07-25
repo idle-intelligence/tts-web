@@ -5,6 +5,7 @@ let model = null;
 let tokenizer = null;
 let voiceIndices = {};   // name → voice_index
 let activeVoiceIndex = -1;
+let voiceBaseUrl = `${VOICE_BASE}/embeddings_v2`;
 
 function post(type, data = {}, transferables = []) {
     self.postMessage({ type, ...data }, transferables);
@@ -194,6 +195,7 @@ class UnigramTokenizer {
 // ---- Handlers ----
 async function handleLoad(config) {
     const base = (config.baseUrl || '').replace(/\/+$/, '');
+    voiceBaseUrl = config.voiceBaseUrl || `${VOICE_BASE}/embeddings_v2`;
 
     // 1. Import WASM
     post('status', { text: 'Loading WASM module...' });
@@ -228,7 +230,7 @@ async function handleLoadVoice(name) {
         return;
     }
 
-    const url = `${VOICE_BASE}/embeddings_v2/${name}.safetensors`;
+    const url = `${voiceBaseUrl}/${name}.safetensors`;
     const voiceBuf = await cachedFetch(url, `Downloading voice: ${name}`);
     post('status', { text: `Loading voice: ${name}...` });
     const voiceIndex = model.add_voice(new Uint8Array(voiceBuf));
