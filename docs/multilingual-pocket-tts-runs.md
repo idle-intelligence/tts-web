@@ -6,7 +6,7 @@ Branch `feat/multilingual-pocket-tts`. Voices, checkpoints and tokenizers all fr
 ## Quantization (Q8_0, `--no-encoder --validate`)
 
 Produced by `scripts/pocket-tts/quantize_to_gguf.py --subfolder languages/<lang>`.
-Source checkpoints are 219,029,196 B BF16; all four are structurally identical.
+Source checkpoints are 219,029,196 B BF16 (French: 672,178,676 B).
 
 | Lang | Output | Bytes | GGUF tensors | Layers | Worst-layer SQNR |
 |---|---|---|---|---|---|
@@ -14,6 +14,8 @@ Source checkpoints are 219,029,196 B BF16; all four are structurally identical.
 | es | `pocket-tts-es-q8_0.gguf` | 133,837,984 | 171 | 6 | 39.2 dB |
 | pt | `pocket-tts-pt-q8_0.gguf` | 133,837,984 | 171 | 6 | 39.7 dB |
 | it | `pocket-tts-it-q8_0.gguf` | 133,837,984 | 171 | 6 | 39.5 dB |
+| en2 | `pocket-tts-en2-q8_0.gguf` | 133,837,984 | 171 | 6 | 39.6 dB |
+| fr | `pocket-tts-fr-q8_0.gguf` | 374,792,736 | **315** | **24** | 38.5 dB |
 
 Worst tensor is `flow_lm.out_eos.weight` in every case except en2
 (`flow_lm.transformer.layers.0.linear2.weight`).
@@ -23,9 +25,8 @@ Worst tensor is `flow_lm.out_eos.weight` in every case except en2
 shipped Pocket TTS tab uses. French is the only 24-layer model upstream publishes; its tensor
 count checks out exactly (171 + 8 per-layer tensors × 18 extra layers = 315), and every shape
 outside the layer count matches the 6-layer models, so `remap_key()` and the quantize allowlist
-needed no changes at all. All four beat the shipped English
-model's 37.2 dB. `remap_key()` covers every tensor — no `None` returns, no collisions.
-All four GGUFs have distinct sha256s; the identical byte size is a consequence of identical
+needed no changes at all. All six beat the shipped English model's 37.2 dB. `remap_key()` covers every tensor — no `None` returns, no collisions.
+All GGUFs have distinct sha256s; the identical byte size is a consequence of identical
 shapes, and was checked rather than assumed.
 
 Artifacts live in `hf/pocket-tts/` (outside the repo). **Nothing has been uploaded.**
@@ -40,6 +41,8 @@ Voice `anna` from `languages/<lang>/embeddings/`. All reached EOS naturally.
 | es | "Hola, esta es una prueba del sistema de texto a voz. ¿Cómo estás hoy?" | 3.92 s | EOS step 47 |
 | pt | "Olá, este é um teste do sistema de texto para voz. Como você está?" | 3.92 s | EOS step 47 |
 | it | "Ciao, questo è un test del sistema da testo a voce. Come stai oggi?" | 4.00 s | EOS step 48 |
+| en2 | "Hello, this is a test of the text to speech system." | 3.12 s | EOS step 37, voice `anna` |
+| fr | "Bonjour, ceci est un test du système de synthèse vocale. Comment allez-vous aujourd'hui ?" | 3.68 s | EOS step 44, voice `estelle`, **24 layers auto-detected**, 48 voice tensors |
 
 WAVs kept at `hf/pocket-tts/samples/` for listening. **Not yet listened to by a human** —
 per project convention, audio metrics are not a quality signal, so these are unjudged.
@@ -54,6 +57,13 @@ Voice `alba`, user-initiated generation, fresh page per language.
 | es | 2.40 s | 1.17 s | 0.34 s | 2.30× |
 | pt | 3.12 s | 1.51 s | 0.34 s | 2.27× |
 | it | 4.08 s | 1.92 s | 0.34 s | 2.27× |
+| en2 | 2.80 s | 1.36 s | 0.34 s | 2.26× |
+| fr | 3.92 s | 3.56 s | 1.06 s | 1.37× |
+
+French runs at 1.37× against ~2.3× for the 6-layer models — expected for 4× the depth, and still
+faster than realtime. **Rebuilding the WASM package is required** after any change to layer
+detection: a stale `pkg/` silently loaded 6 of French's 24 layers and produced 0.16 s of audio
+with no error at all.
 
 Zero console errors. Correct assets fetched per language (verified by request interception).
 Save-wav link produces the right per-language filename.
