@@ -48,12 +48,12 @@ const server = createServer((req, res) => {
         filePath = join(ROOT, "../hf/kitten-tts-nano-0.8/kitten-nano.safetensors");
     } else if (pathname === "/kitten-voices.safetensors") {
         filePath = join(ROOT, "../hf/kitten-tts-nano-0.8/kitten-voices.safetensors");
-    } else if (/^\/pocket-tts-(de|es|pt|it)-q8_0\.gguf$/.test(pathname)) {
+    } else if (/^\/pocket-tts-(de|es|pt|it|en2|fr)-q8_0\.gguf$/.test(pathname)) {
         // Multilingual Pocket-TTS GGUFs staged locally (not yet uploaded to HF)
-        const lang = pathname.match(/^\/pocket-tts-(de|es|pt|it)-q8_0\.gguf$/)[1];
+        const lang = pathname.match(/^\/pocket-tts-(de|es|pt|it|en2|fr)-q8_0\.gguf$/)[1];
         filePath = join(ROOT, "../hf/pocket-tts", `pocket-tts-${lang}-q8_0.gguf`);
-    } else if (/^\/tokenizer-(de|es|pt|it)\.model$/.test(pathname)) {
-        const lang = pathname.match(/^\/tokenizer-(de|es|pt|it)\.model$/)[1];
+    } else if (/^\/tokenizer-(de|es|pt|it|en2|fr)\.model$/.test(pathname)) {
+        const lang = pathname.match(/^\/tokenizer-(de|es|pt|it|en2|fr)\.model$/)[1];
         filePath = join(ROOT, "../hf/pocket-tts", `tokenizer-${lang}.model`);
     } else if (pathname.startsWith("/pkg/")) {
         // WASM build output from crates/tts-wasm/pkg/
