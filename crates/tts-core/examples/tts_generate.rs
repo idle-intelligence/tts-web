@@ -204,12 +204,15 @@ fn run() -> CResult<()> {
     eprintln!("  read {} MB", model_bytes.len() / (1024 * 1024));
 
     let mut gguf = mimi_rs::gguf_loader::GgufTensors::from_bytes(&model_bytes, &Device::Cpu)?;
-    let cfg = tts_core::config::TTSConfig::v202601(args.temperature);
+    let cfg = tts_core::config::TTSConfig::v202601_for_gguf(&gguf, args.temperature)?;
     let model = tts_core::tts_model::TTSModel::load_gguf(&mut gguf, &cfg)?;
 
     let sample_rate = model.sample_rate() as u32;
     eprintln!("  model loaded OK (sample_rate={})", sample_rate);
-    eprintln!("  ldim={} dim={}", cfg.flow_lm.ldim, cfg.flow_lm.d_model);
+    eprintln!(
+        "  ldim={} dim={} num_layers={}",
+        cfg.flow_lm.ldim, cfg.flow_lm.d_model, cfg.flow_lm.num_layers
+    );
 
     // --- Load voice (optional) ---
     let voice_state = if let Some(ref voice_path) = args.voice_path {

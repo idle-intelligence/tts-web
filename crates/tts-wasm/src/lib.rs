@@ -90,15 +90,18 @@ pub struct Model {
 impl Model {
     fn new_(model_weights: &[u8]) -> CResult<Model> {
         let mut gguf = mimi_rs::gguf_loader::GgufTensors::from_bytes(model_weights, &Device::Cpu)?;
-        let cfg = tts_core::config::TTSConfig::v202601(0.7);
+        let cfg = tts_core::config::TTSConfig::v202601_for_gguf(&gguf, 0.7)?;
         let inner = tts_core::tts_model::TTSModel::load_gguf(&mut gguf, &cfg)?;
-        console_log!("[Model::new] model loaded from GGUF (Q8_0)");
+        console_log!(
+            "[Model::new] model loaded from GGUF (Q8_0), num_layers={}",
+            cfg.flow_lm.num_layers
+        );
         Ok(Model { inner, cfg, gen_state: None, voice_states: Vec::new() })
     }
 
     fn add_voice_(&mut self, voice_bytes: &[u8]) -> CResult<usize> {
         let tensors = candle_core::safetensors::load_buffer(voice_bytes, &Device::Cpu)?;
-        let num_layers = 6usize;
+        let num_layers = self.cfg.flow_lm.num_layers;
         let mut layer_states = Vec::with_capacity(num_layers);
 
         for i in 0..num_layers {
@@ -115,6 +118,17 @@ impl Model {
                 k.contiguous()?,
                 v.contiguous()?,
                 seq_len,
+            )));
+        }
+
+        // Loudly fail if the voice file has more layer caches than the model config
+        // expects, instead of silently ignoring the extras (e.g. a 6-layer voice
+        // loaded against a 24-layer model, or vice versa).
+        let extra_cache_name = format!("transformer.layers.{num_layers}.self_attn/cache");
+        if tensors.contains_key(&extra_cache_name) {
+            return Err(candle_core::Error::Msg(format!(
+                "voice file has a layer-{num_layers} cache ({extra_cache_name}) but the \
+                 model config only has {num_layers} layers; refusing to silently truncate"
             )));
         }
 
