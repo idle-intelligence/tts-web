@@ -1,7 +1,7 @@
 # Multilingual Pocket-TTS — Plan
 
-**Status:** scoped, not started. No implementation yet.
-**Last updated:** 2026-07-25
+**Status:** de/es/pt/it implemented end-to-end (tokenizer, CLI, quants, browser tab). Awaiting a human listen. English and French not started.
+**Last updated:** 2026-07-26
 **Origin:** [tts-web#2](https://github.com/idle-intelligence/tts-web/issues/2) (@ldenoue) → [kyutai-labs/pocket-tts#118](https://github.com/kyutai-labs/pocket-tts/issues/118)
 **Goal:** add French / German / Spanish / Portuguese / Italian Pocket-TTS.
 
@@ -103,8 +103,8 @@ Sequencing note: the tokenizer work is not infrastructure *preceding* the multil
 - Found en route: the empty string must return `[]`, not the lone dummy-prefix token. Caught by the golden tests, not by inspection.
 
 ### Step 2 — Real Pocket CLI
-- [ ] **2.1 [CREATE]** Bring `crates/tts-core/examples/tts_generate.rs` up to its siblings' standard: `--model --tokenizer --voice --text --output`. Drop the hardcoded IDs at :256. Match the arg style of `kitten_generate.rs` / `tada_generate.rs` (hand-rolled parsing, no clap).
-- [ ] Keep it an `example`, **not** a `[[bin]]` — CLAUDE.md documents `cargo run --example` as the convention for the other models.
+- [x] **2.1 [DONE `ee56b21`]** Brought `crates/tts-core/examples/tts_generate.rs` up to its siblings' standard: `--model --tokenizer --voice --text --output`. Drop the hardcoded IDs at :256. Match the arg style of `kitten_generate.rs` / `tada_generate.rs` (hand-rolled parsing, no clap).
+- [x] Kept it an `example`, **not** a `[[bin]]` — CLAUDE.md documents `cargo run --example` as the convention for the other models.
 
 ### Step 3 — Quantize + host, per language
 - [ ] **3.1 [CHECK]** HF gated-repo access (`hf auth whoami`; terms accepted on `kyutai/pocket-tts-without-voice-cloning`). Owner believes this is already done.
@@ -126,22 +126,22 @@ That accounts exactly for the GGUF tensor counts: 170 (shipped English) vs 171 (
 - `flow_lm.bos_before_voice` — **open question.** We load a *different* tensor, `flow_lm.bos_emb` `[ldim]` (`flow_lm.rs:182`), used only by `replace_nan_with_bos`. `bos_before_voice` is `d_model`-sized and positioned before the voice prompt. **Hypothesis:** it is already baked into the pre-computed voice KV caches — the per-language caches are 127 positions vs `embeddings_v2`'s 125, and +2 is consistent with an added prefix. Unverified. If wrong, German voice conditioning is subtly misaligned. **Settle this before the Step 4 listening pass**, or a bad result gets misattributed to quantization.
 - Voice format also changed: per-language embeddings carry `self_attn/offset` `[1] I64` where `embeddings_v2` carries `self_attn/current_end` `[125] F32`. **Harmless** — our Rust reads only `self_attn/cache` (`tts_generate.rs:213`, `tts-wasm/src/lib.rs:80`) and ignores both.
 - Follow-up: consider re-quantizing English from `languages/english/` so all six languages come from one upstream generation. Would change shipped English audio, so it needs its own listening check.
-- [ ] **3.4 [CREATE]** Produce `pocket-tts-{de,es,pt,it}-q8_0.gguf` with `--no-encoder`. Validate (`--validate` + SQNR spot-check against English's 37.2 dB worst-layer figure in `docs/pocket-tts/QUANTIZATION.md`).
+- [x] **3.4 [DONE]** Produced `pocket-tts-{de,es,pt,it}-q8_0.gguf` (39.2-39.7 dB worst layer, all better than English's 37.2). See `docs/pocket-tts/multilingual-runs.md`. Originally with `--no-encoder`. Validate (`--validate` + SQNR spot-check against English's 37.2 dB worst-layer figure in `docs/pocket-tts/QUANTIZATION.md`).
 - [ ] **3.5 [CREATE]** Upload to the **existing** `idle-intelligence/pocket-tts-gguf` under a `languages/<lang>/` prefix mirroring upstream — one repo, one model card, trivial URL builder. Co-host each `tokenizer.model` alongside its checkpoint; they are a matched pair and a mismatch yields plausible-sounding garbage, not an error.
 - [ ] **3.6 [CREATE]** Update the model card: language tags, base-model links, quant method, sizes, credit to Kyutai.
 
 ### Step 4 — Native test per language
-- [ ] **4.1 [CREATE]** Render a sentence per language via the Step-2 CLI and **listen**. Iterate here, not in the browser. (Audio metrics are unreliable — per CLAUDE.md, the owner listens.)
+- [x] **4.1 [PARTIAL]** Rendered a sentence per language natively and in-browser; WAVs at `hf/pocket-tts/samples/`. **Awaiting a human listen** -- that judgement is not made. Originally: render a sentence per language via the Step-2 CLI and **listen**. Iterate here, not in the browser. (Audio metrics are unreliable — per CLAUDE.md, the owner listens.)
 - [ ] **4.2 [CREATE]** Log RTF per language natively (Metal) against the English 1.97× median. Record in the research log.
 
 ### Step 5 — Unify on the Rust tokenizer
-- [ ] **5.1 [CREATE]** Expose `tokenize()` from `crates/tts-wasm`, call it from `web/worker.js`, and **delete the JS tokenizer** (`web/worker.js:46-191`). Do this *before* the browser goes multilingual, so there's one implementation before it's exercised in six languages. **Now a correctness fix, not just deduplication** — the JS byte fallback is wrong for non-ASCII (§3).
-- [ ] **5.2 [CHECK]** Regression: English demo unchanged.
+- [x] **5.1 [DONE `8b3c87d`]** Exposed `tokenize()` from `crates/tts-wasm`, call it from `web/worker.js`, and **delete the JS tokenizer** (`web/worker.js:46-191`). Do this *before* the browser goes multilingual, so there's one implementation before it's exercised in six languages. **Now a correctness fix, not just deduplication** — the JS byte fallback is wrong for non-ASCII (§3).
+- [x] **5.2 [DONE]** English unchanged -- both implementations produce identical ids for the demo sentence.
 
 ### Step 6 — Browser multilingual
 - [ ] **6.1 [EXISTS]** `web/worker.js` already honours `config.tokenizerUrl` and `config.modelUrl` overrides (`:206`, `:213`) — no structural worker change needed.
-- [ ] **6.2 [CREATE]** Parameterize the voice URL. `web/worker.js:231` hardcodes `${VOICE_BASE}/embeddings_v2/${name}.safetensors`; add a `voiceBaseUrl` config field defaulting to today's value, pass `.../languages/<lang>/embeddings` for non-English.
-- [ ] **6.3 [CREATE]** Language selector. Extend `makePocketClient()` to take a language and build the three URLs; add the control near the pocket-tts radio; make the `VOICES` array a per-language map. **Note:** the view is already shared — `updateUIForModel()` toggles visibility, it does not rebuild the DOM — so this lands inside the existing `voiceSection` without touching Kitten.
+- [x] **6.2 [DONE `f2cb3d6`]** Parameterized the voice URL. `web/worker.js:231` hardcodes `${VOICE_BASE}/embeddings_v2/${name}.safetensors`; add a `voiceBaseUrl` config field defaulting to today's value, pass `.../languages/<lang>/embeddings` for non-English.
+- [x] **6.3 [DONE `c7026b7`]** Language selector, as a separate third tab. Extend `makePocketClient()` to take a language and build the three URLs; add the control near the pocket-tts radio; make the `VOICES` array a per-language map. **Note:** the view is already shared — `updateUIForModel()` toggles visibility, it does not rebuild the DOM — so this lands inside the existing `voiceSection` without touching Kitten.
 - [ ] **6.4 [CREATE]** Bump the Cache API name (`caches.open('tts-model-v3')`, `web/worker.js:16`) or key per language so switching doesn't collide. Verify a language switch tears down and reloads cleanly.
 - [ ] **6.5 [CREATE]** Per-language default test phrase (canonical English is "Hello, this is a test of the text to speech system").
 - [ ] **6.6 [CHECK]** E2E. `scripts/test_demo_e2e.mjs` was **removed with the TADA cleanup** and currently lives only on `feat/tada-burn-wgpu`; it also imports Playwright from the hardcoded absolute path `/Users/tc/node_modules/playwright/index.mjs`, which is not installed. Decide whether to restore + fix it or test manually.
