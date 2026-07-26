@@ -604,9 +604,12 @@
         function multilingualTokenizerUrl(lang) {
             return isLocal ? `${location.origin}/tokenizer-${lang}.model` : `${POCKET_ML_HF_BASE}/languages/${lang}/tokenizer.model`;
         }
+        // Upstream lays its voice folders out by full language name, not by the short code
+        // we use for our own filenames — languages/german/..., not languages/de/...
+        const UPSTREAM_LANG_DIR = { de: 'german', es: 'spanish', pt: 'portuguese', it: 'italian' };
         function multilingualVoiceBaseUrl(lang) {
             // Voice embeddings are not staged locally — always fetched from the upstream Kyutai repo.
-            return `${POCKET_ML_VOICE_BASE}/languages/${lang}/embeddings`;
+            return `${POCKET_ML_VOICE_BASE}/languages/${UPSTREAM_LANG_DIR[lang]}/embeddings`;
         }
         async function isMultilingualCached(lang) {
             if (isLocal) return true;
