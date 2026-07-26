@@ -948,6 +948,9 @@
 
             tempSliderGroup.style.display = model === 'kitten' ? 'none' : '';
             speedSliderGroup.style.display = model === 'kitten' ? '' : 'none';
+            textInput.placeholder = model === 'pocket-multilingual'
+                ? DEMO_TEXT_ML[currentLanguage]
+                : DEMO_TEXT;
             stepInfo.textContent = '';
             audioSection.style.display = 'none';
             saveWavLink.style.display = 'none';
