@@ -52,6 +52,31 @@ struct GenState {
     step: usize,
 }
 
+// ---- Tokenizer ----
+
+#[wasm_bindgen]
+pub struct Tokenizer {
+    inner: tts_core::tokenizer::Tokenizer,
+}
+
+#[wasm_bindgen]
+impl Tokenizer {
+    #[wasm_bindgen(constructor)]
+    pub fn new(model_bytes: &[u8]) -> Result<Tokenizer, JsError> {
+        let inner = tts_core::tokenizer::Tokenizer::from_model_bytes(model_bytes)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Tokenizer { inner })
+    }
+
+    pub fn encode(&self, text: &str) -> Vec<u32> {
+        self.inner.encode(text)
+    }
+
+    pub fn vocab_size(&self) -> usize {
+        self.inner.vocab_size()
+    }
+}
+
 // ---- Model ----
 
 #[wasm_bindgen]
