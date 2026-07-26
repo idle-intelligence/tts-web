@@ -1043,10 +1043,6 @@
             await initClient();
         });
 
-        // Init flow: defer pocket-tts load to avoid noisy console errors on page load
-        // Use switchModel so all models go through the same code path
-        await switchModel('pocket-tts');
-
         generateBtn.addEventListener('click', () => {
             const text = textInput.value.trim();
             if (!text || generating) return;
@@ -1079,6 +1075,12 @@
             if (currentModel === 'pocket-tts' || currentModel === 'pocket-multilingual') setVoiceBtnsEnabled(false);
             tts.generate(text, parseFloat(tempSlider.value));
         });
+
+        // Init flow: defer pocket-tts load to avoid noisy console errors on page load.
+        // This must come AFTER the generate handler is registered — it awaits the initial
+        // model load, and anyone who switches tabs before it resolves would otherwise end
+        // up with a generate button that silently does nothing.
+        await switchModel('pocket-tts');
 
         function encodeWav(samples, sampleRate) {
             const numChannels = 1;
