@@ -52,31 +52,6 @@ struct GenState {
     step: usize,
 }
 
-// ---- Tokenizer ----
-
-#[wasm_bindgen]
-pub struct Tokenizer {
-    inner: tts_core::tokenizer::Tokenizer,
-}
-
-#[wasm_bindgen]
-impl Tokenizer {
-    #[wasm_bindgen(constructor)]
-    pub fn new(model_bytes: &[u8]) -> Result<Tokenizer, JsError> {
-        let inner = tts_core::tokenizer::Tokenizer::from_model_bytes(model_bytes)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(Tokenizer { inner })
-    }
-
-    pub fn encode(&self, text: &str) -> Vec<u32> {
-        self.inner.encode(text)
-    }
-
-    pub fn vocab_size(&self) -> usize {
-        self.inner.vocab_size()
-    }
-}
-
 // ---- Model ----
 
 #[wasm_bindgen]
@@ -90,18 +65,15 @@ pub struct Model {
 impl Model {
     fn new_(model_weights: &[u8]) -> CResult<Model> {
         let mut gguf = mimi_rs::gguf_loader::GgufTensors::from_bytes(model_weights, &Device::Cpu)?;
-        let cfg = tts_core::config::TTSConfig::v202601_for_gguf(&gguf, 0.7)?;
+        let cfg = tts_core::config::TTSConfig::v202601(0.7);
         let inner = tts_core::tts_model::TTSModel::load_gguf(&mut gguf, &cfg)?;
-        console_log!(
-            "[Model::new] model loaded from GGUF (Q8_0), num_layers={}",
-            cfg.flow_lm.num_layers
-        );
+        console_log!("[Model::new] model loaded from GGUF (Q8_0)");
         Ok(Model { inner, cfg, gen_state: None, voice_states: Vec::new() })
     }
 
     fn add_voice_(&mut self, voice_bytes: &[u8]) -> CResult<usize> {
         let tensors = candle_core::safetensors::load_buffer(voice_bytes, &Device::Cpu)?;
-        let num_layers = self.cfg.flow_lm.num_layers;
+        let num_layers = 6usize;
         let mut layer_states = Vec::with_capacity(num_layers);
 
         for i in 0..num_layers {
@@ -118,17 +90,6 @@ impl Model {
                 k.contiguous()?,
                 v.contiguous()?,
                 seq_len,
-            )));
-        }
-
-        // Loudly fail if the voice file has more layer caches than the model config
-        // expects, instead of silently ignoring the extras (e.g. a 6-layer voice
-        // loaded against a 24-layer model, or vice versa).
-        let extra_cache_name = format!("transformer.layers.{num_layers}.self_attn/cache");
-        if tensors.contains_key(&extra_cache_name) {
-            return Err(candle_core::Error::Msg(format!(
-                "voice file has a layer-{num_layers} cache ({extra_cache_name}) but the \
-                 model config only has {num_layers} layers; refusing to silently truncate"
             )));
         }
 

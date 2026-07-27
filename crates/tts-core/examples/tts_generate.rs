@@ -1,45 +1,33 @@
 /// End-to-end TTS generation example.
 ///
 /// Usage:
-///   cargo run --example tts_generate -p tts-core --release -- \
-///     --model /path/to/pocket-tts-q8_0.gguf \
-///     --tokenizer /path/to/tokenizer.model \
-///     --text "Hello, this is a test of the text to speech system." \
+///   cargo run --example tts_generate -- \
+///     --model /path/to/model_int8.safetensors \
 ///     --voice /path/to/alba.safetensors \
 ///     --output /tmp/test_tts.wav \
 ///     [--temperature 0.7]
-///
-/// `--model` is a GGUF checkpoint (loaded via `GgufTensors::from_bytes`), not a
-/// safetensors file. `--tokenizer` is the matching SentencePiece `tokenizer.model`.
 ///
 /// Writes a Float32 PCM WAV at 24000 Hz (mono).
 
 use candle_core::{Device, Result as CResult, Tensor};
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};
 use tts_core::flow_lm::{FlowLMState, Rng};
-use tts_core::tokenizer::Tokenizer;
 use tts_core::tts_model::{TTSState, prepare_text_prompt};
 
 // ---------------------------------------------------------------------------
 // CLI arg parsing (manual, no external deps)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, PartialEq)]
-pub struct Args {
-    pub model_path: String,
-    pub tokenizer_path: String,
-    pub text: String,
-    pub voice_path: Option<String>,
-    pub output_path: String,
-    pub temperature: f32,
+struct Args {
+    model_path: String,
+    voice_path: Option<String>,
+    output_path: String,
+    temperature: f32,
 }
 
-/// Parse CLI args. `args` is the full argv, i.e. `args[0]` is the program name
-/// (matching `std::env::args()`), so this can be exercised directly in tests.
-pub fn parse_args(args: &[String]) -> Result<Args, String> {
+fn parse_args() -> Args {
+    let args: Vec<String> = std::env::args().collect();
     let mut model_path = None;
-    let mut tokenizer_path = None;
-    let mut text = None;
     let mut voice_path = None;
     let mut output_path = None;
     let mut temperature = 0.7f32;
@@ -49,46 +37,34 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
         match args[i].as_str() {
             "--model" => {
                 i += 1;
-                model_path = Some(args.get(i).ok_or("--model requires a value")?.clone());
-            }
-            "--tokenizer" => {
-                i += 1;
-                tokenizer_path = Some(args.get(i).ok_or("--tokenizer requires a value")?.clone());
-            }
-            "--text" => {
-                i += 1;
-                text = Some(args.get(i).ok_or("--text requires a value")?.clone());
+                model_path = Some(args[i].clone());
             }
             "--voice" => {
                 i += 1;
-                voice_path = Some(args.get(i).ok_or("--voice requires a value")?.clone());
+                voice_path = Some(args[i].clone());
             }
             "--output" => {
                 i += 1;
-                output_path = Some(args.get(i).ok_or("--output requires a value")?.clone());
+                output_path = Some(args[i].clone());
             }
             "--temperature" => {
                 i += 1;
-                let raw = args.get(i).ok_or("--temperature requires a value")?;
-                temperature = raw
-                    .parse()
-                    .map_err(|_| format!("--temperature must be a float, got {raw:?}"))?;
+                temperature = args[i].parse().expect("temperature must be f32");
             }
             other => {
-                return Err(format!("Unknown arg: {other}"));
+                eprintln!("Unknown arg: {other}");
+                std::process::exit(1);
             }
         }
         i += 1;
     }
 
-    Ok(Args {
-        model_path: model_path.ok_or("--model is required")?,
-        tokenizer_path: tokenizer_path.ok_or("--tokenizer is required")?,
-        text: text.ok_or("--text is required")?,
+    Args {
+        model_path: model_path.expect("--model required"),
         voice_path,
-        output_path: output_path.unwrap_or_else(|| "/tmp/test_tts.wav".to_string()),
+        output_path: output_path.expect("--output required"),
         temperature,
-    })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -184,15 +160,10 @@ fn log_tensor_stats(label: &str, data: &[f32]) {
 // ---------------------------------------------------------------------------
 
 fn run() -> CResult<()> {
-    let argv: Vec<String> = std::env::args().collect();
-    let args = parse_args(&argv).unwrap_or_else(|e| {
-        eprintln!("{e}");
-        std::process::exit(1);
-    });
+    let args = parse_args();
 
     eprintln!("=== TTS Generate ===");
     eprintln!("model: {}", args.model_path);
-    eprintln!("tokenizer: {}", args.tokenizer_path);
     eprintln!("voice: {:?}", args.voice_path);
     eprintln!("output: {}", args.output_path);
     eprintln!("temperature: {}", args.temperature);
@@ -204,15 +175,12 @@ fn run() -> CResult<()> {
     eprintln!("  read {} MB", model_bytes.len() / (1024 * 1024));
 
     let mut gguf = mimi_rs::gguf_loader::GgufTensors::from_bytes(&model_bytes, &Device::Cpu)?;
-    let cfg = tts_core::config::TTSConfig::v202601_for_gguf(&gguf, args.temperature)?;
+    let cfg = tts_core::config::TTSConfig::v202601(args.temperature);
     let model = tts_core::tts_model::TTSModel::load_gguf(&mut gguf, &cfg)?;
 
     let sample_rate = model.sample_rate() as u32;
     eprintln!("  model loaded OK (sample_rate={})", sample_rate);
-    eprintln!(
-        "  ldim={} dim={} num_layers={}",
-        cfg.flow_lm.ldim, cfg.flow_lm.d_model, cfg.flow_lm.num_layers
-    );
+    eprintln!("  ldim={} dim={}", cfg.flow_lm.ldim, cfg.flow_lm.d_model);
 
     // --- Load voice (optional) ---
     let voice_state = if let Some(ref voice_path) = args.voice_path {
@@ -238,9 +206,7 @@ fn run() -> CResult<()> {
             model.init_flow_lm_state()
         } else {
             // KV cache format
-            // Derive layer count from the loaded model config rather than hardcoding it,
-            // so a checkpoint with a different depth doesn't silently get truncated.
-            let num_layers = cfg.flow_lm.num_layers;
+            let num_layers = 6usize;
             let mut layer_states = Vec::with_capacity(num_layers);
 
             for i in 0..num_layers {
@@ -265,17 +231,6 @@ fn run() -> CResult<()> {
                 )));
             }
 
-            // Loudly fail if the voice file has more layer caches than the model config
-            // expects, instead of silently ignoring the extras (e.g. a future 24-layer
-            // checkpoint's voice file loaded against a 6-layer config).
-            let extra_cache_name = format!("transformer.layers.{num_layers}.self_attn/cache");
-            if tensors.contains_key(&extra_cache_name) {
-                return Err(candle_core::Error::Msg(format!(
-                    "voice file has a layer-{num_layers} cache ({extra_cache_name}) but the \
-                     model config only has {num_layers} layers; refusing to silently truncate"
-                )));
-            }
-
             TTSState {
                 flow_lm_state: FlowLMState {
                     transformer_state: StreamingTransformerState { layer_states },
@@ -290,18 +245,15 @@ fn run() -> CResult<()> {
 
     // --- Prepare text and token IDs ---
     eprintln!("\n[3] Preparing text...");
-    let raw_text = &args.text;
+    let raw_text = "Hello, this is a test of the text to speech system.";
     let (prepared_text, frames_after_eos) = prepare_text_prompt(raw_text);
     eprintln!("  raw: {raw_text:?}");
     eprintln!("  prepared: {prepared_text:?}");
     eprintln!("  frames_after_eos: {frames_after_eos}");
 
-    eprintln!("  loading tokenizer from {}...", args.tokenizer_path);
-    let tokenizer_bytes = std::fs::read(&args.tokenizer_path)
-        .map_err(|e| candle_core::Error::Msg(format!("failed to read tokenizer: {e}")))?;
-    let tokenizer = Tokenizer::from_model_bytes(&tokenizer_bytes)?;
-
-    let token_ids: Vec<u32> = tokenizer.encode(&prepared_text);
+    // Real token IDs from sentencepiece encoding of the prepared text
+    // Obtained by running: python3 -c "import sentencepiece as spm; sp=spm.SentencePieceProcessor(); sp.Load('tokenizer.model'); print(sp.EncodeAsIds('Hello, this is a test of the text to speech system.'))"
+    let token_ids: Vec<u32> = vec![2994, 262, 285, 277, 267, 1115, 272, 265, 2009, 266, 260, 3476, 260, 848, 263];
     eprintln!("  token_ids ({} tokens): {:?}", token_ids.len(), token_ids);
 
     // --- Run prompt_text ---
