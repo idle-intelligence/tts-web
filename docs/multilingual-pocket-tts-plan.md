@@ -144,7 +144,7 @@ That accounts exactly for the GGUF tensor counts: 170 (shipped English) vs 171 (
 - [x] **6.3 [DONE `c7026b7`]** Language selector, as a separate third tab. Extend `makePocketClient()` to take a language and build the three URLs; add the control near the pocket-tts radio; make the `VOICES` array a per-language map. **Note:** the view is already shared — `updateUIForModel()` toggles visibility, it does not rebuild the DOM — so this lands inside the existing `voiceSection` without touching Kitten.
 - [ ] **6.4 [CREATE]** Bump the Cache API name (`caches.open('tts-model-v3')`, `web/worker.js:16`) or key per language so switching doesn't collide. Verify a language switch tears down and reloads cleanly.
 - [ ] **6.5 [CREATE]** Per-language default test phrase (canonical English is "Hello, this is a test of the text to speech system").
-- [ ] **6.6 [CHECK]** E2E. `scripts/test_demo_e2e.mjs` was **removed with the TADA cleanup** and currently lives only on `feat/tada-burn-wgpu`; it also imports Playwright from the hardcoded absolute path `/Users/tc/node_modules/playwright/index.mjs`, which is not installed. Decide whether to restore + fix it or test manually.
+- [ ] **6.6 [CHECK]** E2E. `scripts/test_demo_e2e.mjs` was **removed with the TADA cleanup** and currently lives only on `feat/tada-burn-wgpu`; it also imports Playwright from a hardcoded absolute path to a local `node_modules/playwright`, which is not installed. Decide whether to restore + fix it or test manually.
 
 ### Step 7 — Ship
 - [ ] **7.1 [EXISTS]** `wasm-pack build crates/tts-wasm --target web --release`. **One binary serves all languages** — weights are fetched at runtime.
