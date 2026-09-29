@@ -9,6 +9,10 @@
 /// Both the native example (`tts_generate.rs`) and the WASM binding
 /// (`tts-wasm/src/lib.rs`) call this, so the EOS-timing rule lives in one
 /// place instead of being reimplemented per call site.
+/// EOS is ignored on the first frames: before speech starts, the EOS logit
+/// of some voices can cross the threshold (`tts_model.py:89,884`).
+pub const MIN_FRAMES_BEFORE_EOS: usize = 6;
+
 pub struct EosGate {
     frames_after_eos: usize,
     min_frames_before_eos: usize,
@@ -17,7 +21,7 @@ pub struct EosGate {
 
 impl EosGate {
     pub fn new(frames_after_eos: usize) -> Self {
-        Self::with_min_frames_before_eos(frames_after_eos, 0)
+        Self::with_min_frames_before_eos(frames_after_eos, MIN_FRAMES_BEFORE_EOS)
     }
 
     pub fn with_min_frames_before_eos(frames_after_eos: usize, min_frames_before_eos: usize) -> Self {
