@@ -16,11 +16,16 @@ fn modulate(x: &Tensor, shift: &Tensor, scale: &Tensor) -> Result<Tensor> {
 /// divides by sqrt(E[x^2] + eps). The pocket-tts model was trained with
 /// variance-based normalization (E[(x-mean)^2]) in the denominator, so we
 /// must match that behavior here for correct inference.
+///
+/// pocket_tts's `_rms_norm` (`pocket_tts/modules/mlp.py`) computes the
+/// variance with `x.var(dim=-1, keepdim=True)`, which is PyTorch's *unbiased*
+/// (Bessel-corrected) variance: divides the sum of squared deviations by
+/// `n - 1`, not `n`. Match that here (biased/`n` variance was the bug).
 fn variance_norm(x: &Tensor, weight: &Tensor, eps: f64) -> Result<Tensor> {
     let hidden_size = x.dim(D::Minus1)? as f64;
     let mean = (x.sum_keepdim(D::Minus1)? / hidden_size)?;
     let centered = x.broadcast_sub(&mean)?;
-    let var = (centered.sqr()?.sum_keepdim(D::Minus1)? / hidden_size)?;
+    let var = (centered.sqr()?.sum_keepdim(D::Minus1)? / (hidden_size - 1.0))?;
     let inv_std = (var + eps)?.sqrt()?.recip()?;
     x.broadcast_mul(&inv_std)?.broadcast_mul(weight)
 }
@@ -275,5 +280,87 @@ impl SimpleMLPAdaLN {
             x = block.forward(&x, &y_silu)?;
         }
         self.final_layer.forward(&x, &y_silu)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::variance_norm;
+    use candle_core::{Device, Tensor};
+
+    /// Fixture dumped from the official `pocket_tts.modules.mlp._rms_norm`
+    /// (unbiased variance, PyTorch's default `x.var(dim=-1, keepdim=True)`),
+    /// with a fixed seed (`torch.manual_seed(42)`) and `eps=1e-5`. Guards
+    /// against regressing to the biased (divide-by-n) variance this port
+    /// used before, which silently mismatched pocket-tts's normalization
+    /// scale (the TimestepEmbedder's RMSNorm feeds every flow-net ResBlock's
+    /// AdaLN conditioning, so this error compounds into the generated latent).
+    #[test]
+    fn variance_norm_matches_official_unbiased_variance() -> candle_core::Result<()> {
+        let dev = Device::Cpu;
+        let x = Tensor::from_vec(
+            vec![
+                1.9269150495529175f32,
+                1.4872841835021973,
+                0.9007171988487244,
+                -2.1055214405059814,
+                0.6784184575080872,
+                -1.2345449924468994,
+                -0.043067481368780136,
+                -1.6046669483184814,
+                -0.7521361708641052,
+                1.6487228870391846,
+                -0.3924786448478699,
+                -1.4036067724227905,
+                -0.7278812527656555,
+                -0.5594298839569092,
+                -0.7688389420509338,
+                0.7624453902244568,
+            ],
+            (2, 8),
+            &dev,
+        )?;
+        let alpha = Tensor::from_vec(
+            vec![
+                0.5f32,
+                0.6428571343421936,
+                0.7857142686843872,
+                0.9285714626312256,
+                1.0714285373687744,
+                1.2142857313156128,
+                1.3571428060531616,
+                1.5,
+            ],
+            (8,),
+            &dev,
+        )?;
+        let expected: Vec<f32> = vec![
+            0.6426977515220642,
+            0.6377972364425659,
+            0.47209271788597107,
+            -1.3042150735855103,
+            0.48488089442253113,
+            -1.0000046491622925,
+            -0.03898964077234268,
+            -1.6056482791900635,
+            -0.38093823194503784,
+            1.07361900806427,
+            -0.31236961483955383,
+            -1.320227861404419,
+            -0.7899723052978516,
+            -0.6881049275398254,
+            -1.0569367408752441,
+            1.1584787368774414,
+        ];
+
+        let got = variance_norm(&x, &alpha, 1e-5)?.flatten_all()?.to_vec1::<f32>()?;
+        for (i, (g, e)) in got.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (g - e).abs() < 1e-4,
+                "index {i}: got {g}, expected {e} (diff {})",
+                (g - e).abs()
+            );
+        }
+        Ok(())
     }
 }
