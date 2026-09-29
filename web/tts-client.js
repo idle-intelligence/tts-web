@@ -21,6 +21,7 @@ export class TtsClient {
         this.tokenizerUrl = options.tokenizerUrl || null;
         this.voicesUrl = options.voicesUrl || null;
         this.voiceBaseUrl = options.voiceBaseUrl || null;
+        this.language = options.language || null;
 
         this.worker = null;
         this.sampleRate = 24000;
@@ -61,6 +62,7 @@ export class TtsClient {
                 if (this.voiceUrl) config.voiceUrl = this.voiceUrl;
                 if (this.tokenizerUrl) config.tokenizerUrl = this.tokenizerUrl;
                 if (this.voiceBaseUrl) config.voiceBaseUrl = this.voiceBaseUrl;
+                if (this.language) config.language = this.language;
                 this.worker.postMessage({ type: 'load', config });
             }
         });

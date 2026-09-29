@@ -18,6 +18,7 @@ use candle_core::{Device, Result as CResult, Tensor};
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};
 use tts_core::flow_lm::{FlowLMState, Rng};
 use tts_core::generation::EosGate;
+use tts_core::text_config::TextConfig;
 use tts_core::tokenizer::Tokenizer;
 use tts_core::tts_model::{TTSState, prepare_text_prompt};
 
@@ -33,6 +34,7 @@ pub struct Args {
     pub voice_path: Option<String>,
     pub output_path: String,
     pub temperature: f32,
+    pub language: String,
 }
 
 /// Parse CLI args. `args` is the full argv, i.e. `args[0]` is the program name
@@ -44,6 +46,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
     let mut voice_path = None;
     let mut output_path = None;
     let mut temperature = 0.7f32;
+    let mut language = "english".to_string();
 
     let mut i = 1;
     while i < args.len() {
@@ -75,6 +78,10 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
                     .parse()
                     .map_err(|_| format!("--temperature must be a float, got {raw:?}"))?;
             }
+            "--language" => {
+                i += 1;
+                language = args.get(i).ok_or("--language requires a value")?.clone();
+            }
             other => {
                 return Err(format!("Unknown arg: {other}"));
             }
@@ -89,6 +96,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
         voice_path,
         output_path: output_path.unwrap_or_else(|| "/tmp/test_tts.wav".to_string()),
         temperature,
+        language,
     })
 }
 
@@ -292,8 +300,9 @@ fn run() -> CResult<()> {
     // --- Prepare text and token IDs ---
     eprintln!("\n[3] Preparing text...");
     let raw_text = &args.text;
+    let text_config = TextConfig::for_language(&args.language);
     let (prepared_text, frames_after_eos) =
-        prepare_text_prompt(raw_text, cfg.model_recommended_frames_after_eos);
+        prepare_text_prompt(raw_text, cfg.model_recommended_frames_after_eos, &text_config);
     eprintln!("  raw: {raw_text:?}");
     eprintln!("  prepared: {prepared_text:?}");
     eprintln!("  frames_after_eos: {frames_after_eos}");

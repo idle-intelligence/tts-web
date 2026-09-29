@@ -37,10 +37,8 @@ impl EosGate {
         if is_eos && self.eos_step.is_none() && step >= self.min_frames_before_eos {
             self.eos_step = Some(step);
         }
-        if let Some(eos_step) = self.eos_step {
-            if step >= eos_step + self.frames_after_eos {
-                return false;
-            }
+        if self.eos_step.is_some_and(|eos_step| step >= eos_step + self.frames_after_eos) {
+            return false;
         }
         true
     }

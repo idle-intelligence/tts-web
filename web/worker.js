@@ -70,7 +70,7 @@ async function handleLoad(config) {
     const modelUrl = config.modelUrl || `${HF_BASE}/pocket-tts-q8_0.gguf`;
     const modelBuf = await cachedFetch(modelUrl, 'Downloading model');
     post('status', { text: 'Initializing model...' });
-    model = new wasmModule.Model(new Uint8Array(modelBuf));
+    model = new wasmModule.Model(new Uint8Array(modelBuf), config.language || 'english');
 
     // 4. Ready (voice loaded separately)
     const sampleRate = model.sample_rate();

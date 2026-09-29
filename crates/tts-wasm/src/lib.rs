@@ -3,6 +3,7 @@ use mimi_rs::mimi::MimiState;
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};
 use tts_core::flow_lm::{FlowLMState, Rng};
 use tts_core::generation::EosGate;
+use tts_core::text_config::TextConfig;
 use tts_core::tts_model::TTSState;
 use wasm_bindgen::prelude::*;
 
@@ -83,20 +84,23 @@ impl Tokenizer {
 pub struct Model {
     inner: tts_core::tts_model::TTSModel,
     cfg: tts_core::config::TTSConfig,
+    text_config: TextConfig,
     gen_state: Option<GenState>,
     voice_states: Vec<TTSState>,
 }
 
 impl Model {
-    fn new_(model_weights: &[u8]) -> CResult<Model> {
+    fn new_(model_weights: &[u8], language: &str) -> CResult<Model> {
         let mut gguf = mimi_rs::gguf_loader::GgufTensors::from_bytes(model_weights, &Device::Cpu)?;
         let cfg = tts_core::config::TTSConfig::v202601_for_gguf(&gguf, 0.7)?;
         let inner = tts_core::tts_model::TTSModel::load_gguf(&mut gguf, &cfg)?;
         console_log!(
-            "[Model::new] model loaded from GGUF (Q8_0), num_layers={}",
-            cfg.flow_lm.num_layers
+            "[Model::new] model loaded from GGUF (Q8_0), num_layers={}, language={}",
+            cfg.flow_lm.num_layers,
+            language
         );
-        Ok(Model { inner, cfg, gen_state: None, voice_states: Vec::new() })
+        let text_config = TextConfig::for_language(language);
+        Ok(Model { inner, cfg, text_config, gen_state: None, voice_states: Vec::new() })
     }
 
     fn add_voice_(&mut self, voice_bytes: &[u8]) -> CResult<usize> {
@@ -218,9 +222,10 @@ impl Model {
 #[wasm_bindgen]
 impl Model {
     #[wasm_bindgen(constructor)]
-    pub fn new(model_weights: &[u8]) -> Result<Model, JsError> {
+    pub fn new(model_weights: &[u8], language: Option<String>) -> Result<Model, JsError> {
         console_error_panic_hook::set_once();
-        Self::new_(model_weights).map_err(|e| JsError::new(&e.to_string()))
+        let language = language.unwrap_or_else(|| "english".to_string());
+        Self::new_(model_weights, &language).map_err(|e| JsError::new(&e.to_string()))
     }
 
     pub fn add_voice(&mut self, voice_bytes: &[u8]) -> Result<usize, JsError> {
@@ -231,6 +236,7 @@ impl Model {
         let (processed, frames_after_eos) = tts_core::tts_model::prepare_text_prompt(
             text,
             self.cfg.model_recommended_frames_after_eos,
+            &self.text_config,
         );
         let arr = js_sys::Array::new();
         arr.push(&JsValue::from_str(&processed));

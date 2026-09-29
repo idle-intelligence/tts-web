@@ -700,6 +700,7 @@
             if (overrides.modelUrl) urlOverrides.modelUrl = overrides.modelUrl;
             if (overrides.tokenizerUrl) urlOverrides.tokenizerUrl = overrides.tokenizerUrl;
             if (overrides.voiceBaseUrl) urlOverrides.voiceBaseUrl = overrides.voiceBaseUrl;
+            if (overrides.language) urlOverrides.language = overrides.language;
             const hasUrlOverrides = Object.keys(urlOverrides).length > 0;
             return new TtsClient({
                 modelType,
@@ -856,6 +857,9 @@
                 voiceBaseUrl: multilingualVoiceBaseUrl(lang),
                 demoText: DEMO_TEXT_ML[lang],
                 filenamePrefix: `pocket-ml-${lang}`,
+                // Full Kyutai config name (french/german/...), so the engine
+                // applies that language's replace_characters/remove_semicolons.
+                language: UPSTREAM_LANG_DIR[lang],
             });
         }
 
