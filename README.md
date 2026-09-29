@@ -11,6 +11,9 @@ Browser-native text-to-speech running 100% client-side via Rust/WASM.
 | [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) | ~130MB (Q8_0) | ~97M | Autoregressive + Mimi codec | MIT |
 | [KittenTTS](https://github.com/KittenML/KittenTTS) | ~56MB (F32) | 14M | StyleTTS 2 distilled, single forward pass | Apache 2.0 |
 
+Pocket TTS also speaks French, German, Spanish, Portuguese and Italian, each a
+~134MB Q8_0 quant of Kyutai's per-language checkpoint.
+
 Weights are on HuggingFace: [Pocket TTS GGUF](https://huggingface.co/idle-intelligence/pocket-tts-gguf), [KittenTTS safetensors](https://huggingface.co/idle-intelligence/kitten-tts-nano-safetensors).
 
 ## Quick Start — KittenTTS CLI
