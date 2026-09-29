@@ -33,7 +33,7 @@ FIXTURES_DIR = REPO_ROOT / "crates" / "tts-core" / "tests" / "fixtures"
 TOKENIZERS_DIR = FIXTURES_DIR / "tokenizers"
 OUTPUT_PATH = FIXTURES_DIR / "golden.json"
 
-LANGUAGES = ["english", "french_24l", "german", "spanish", "portuguese", "italian"]
+LANGUAGES = ["english", "french", "german", "spanish", "portuguese", "italian"]
 
 # Expected trainer/normalizer flags, established by prior inspection of all
 # six .model files. If any of these ever changes, we want to know.
@@ -79,7 +79,7 @@ LANGUAGE_SENTENCES = {
         "She sells seashells by the seashore.",
         "It was the best of times, it was the worst of times.",
     ],
-    "french_24l": [
+    "french": [
         CROSS_LANGUAGE_FRENCH_SENTENCE,
         "L'eau est très froide à cette heure-ci, n'est-ce pas ?",
         "Le cœur a ses raisons que la raison ne connaît point.",
