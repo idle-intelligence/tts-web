@@ -11,17 +11,21 @@
 /// (see the reference generation script, not checked into this repo) and
 /// recording total frame/sample counts plus first/last-5 frame PCM stats.
 ///
-/// Known gap, not yet closed: the official package's
-/// `generate_audio_stream` adds +2 to the text-length-based `frames_after_eos`
-/// guess before applying it (pocket_tts/models/tts_model.py:720-731); this
-/// port's `prepare_text_prompt` (crates/tts-core/src/tts_model.rs) does not.
-/// That alone would make official runs ~2 frames longer; the actual deltas
-/// observed (French: 0, German: -2, Spanish: -4, Portuguese: +3, Italian: -3
-/// frames, this port relative to official) are not fully explained by that
-/// one constant, so some residual EOS-timing divergence remains
-/// uninvestigated. This test therefore checks total duration within a loose
-/// 20% tolerance, not frame-exact agreement -- tightening it is follow-up
-/// work, not a claim already met.
+/// EOS/frame-count bugs (off-by-one countdown order, missing `+2` on the
+/// text-length guess, missing `_MIN_FRAMES_BEFORE_EOS` gate) are fixed as of
+/// this test; the frame-count tolerance below is *not* zero because a
+/// residual per-step EOS-logit divergence remains, confirmed on unquantized
+/// F32 weights (not just Q8_0): a flow-LM-only run (`eos_probe`, no Mimi)
+/// against the official French safetensors checkpoint puts the raw EOS
+/// logit within ~0.04 of the official value at step 0, but already ~1.5
+/// off by step 1, and the first EOS crossing 3 steps later than official
+/// (Rust step 36 vs. official step 33 for the French fixture text/voice,
+/// both temperature 0). So this gap is not simply quantization noise; its
+/// exact source (RoPE convention and the frequency formula were checked
+/// against `pocket_tts/modules/rope.py` and match) is not yet isolated --
+/// see the parity run doc for the measured per-language deltas this bound
+/// is based on. This test checks frame-count within that measured bound,
+/// not frame-exact agreement.
 ///
 /// Requires locally-downloaded model/tokenizer/voice files (gated Hub repo);
 /// point at them with env vars, or the test is skipped. `english` is
@@ -30,6 +34,13 @@
 /// checkpoint this repo currently ships as `pocket-tts-q8_0.gguf`, so a
 /// same-checkpoint comparison for English needs the newer checkpoint
 /// quantized first (see the run doc's open items).
+///
+/// Per-step latent max-abs-diff bound (proposed follow-up, not implemented
+/// here): would need fixtures regenerated with raw per-step flow-LM latents,
+/// not just decoded-audio stats; the first decoded PCM frame is too close to
+/// Mimi's own convolution warm-up silence to be a robust proxy (measured:
+/// Rust's frame 0 for the French fixture has |min|/|max| about 20x smaller
+/// than the official fixture's frame 0, despite both being nearly silent).
 use serde::Deserialize;
 use std::path::Path;
 use std::process::Command;
@@ -40,7 +51,15 @@ struct ParityFixture {
     language: String,
     text: String,
     total_samples: usize,
+    num_frames: usize,
 }
+
+/// Frame-count tolerance, in frames, replacing the earlier 20%-duration
+/// ratio. Measured post-fix deltas (rust total frames - official total
+/// frames, this session, Q8_0 GGUF, temperature 0.0): French +1, German -1,
+/// Spanish -3, Portuguese +4, Italian -2. Max observed is 4; this leaves a
+/// documented margin of 1 frame rather than pinning the exact max.
+const FRAME_COUNT_TOLERANCE: i64 = 5;
 
 struct Case {
     language: &'static str,
@@ -100,6 +119,7 @@ fn official_parity_total_duration() {
                 "--model", &model,
                 "--tokenizer", &tokenizer,
                 "--voice", &voice,
+                "--language", case.language,
                 "--text", &fixture.text,
                 "--output", &output_wav,
                 "--temperature", "0.0",
@@ -111,6 +131,12 @@ fn official_parity_total_duration() {
         assert!(output.status.success(), "{}: tts_generate failed:\n{stderr}", case.language);
         assert!(!stderr.contains("nan=1") && !stderr.contains("inf=1"), "{}: NaN/Inf in output", case.language);
 
+        let total_steps: usize = stderr
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("total_steps: "))
+            .unwrap_or_else(|| panic!("{}: total_steps not found in output", case.language))
+            .parse()
+            .unwrap();
         let total_samples: usize = stderr
             .lines()
             .find_map(|l| l.trim().strip_prefix("total_samples: "))
@@ -118,15 +144,15 @@ fn official_parity_total_duration() {
             .parse()
             .unwrap();
 
-        let ratio = total_samples as f64 / fixture.total_samples as f64;
+        let frame_delta = total_steps as i64 - fixture.num_frames as i64;
         println!(
-            "{}: rust={} official={} ratio={:.2}",
-            case.language, total_samples, fixture.total_samples, ratio
+            "{}: rust_frames={} official_frames={} delta={} rust_samples={} official_samples={}",
+            case.language, total_steps, fixture.num_frames, frame_delta, total_samples, fixture.total_samples
         );
         assert!(
-            (0.8..=1.2).contains(&ratio),
-            "{}: total_samples {} vs official {} (ratio {:.2}) outside the documented 20% tolerance",
-            case.language, total_samples, fixture.total_samples, ratio
+            frame_delta.abs() <= FRAME_COUNT_TOLERANCE,
+            "{}: {} frames vs official {} frames (delta {}) outside the documented {}-frame tolerance",
+            case.language, total_steps, fixture.num_frames, frame_delta, FRAME_COUNT_TOLERANCE
         );
     }
 
