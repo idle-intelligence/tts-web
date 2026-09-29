@@ -10,14 +10,14 @@ let model = null;
 let tokenizer = null;
 let voiceIndices = {};   // name → voice_index
 let activeVoiceIndex = -1;
-let voiceBaseUrl = `${VOICE_BASE}/embeddings_v2`;
+let voiceBaseUrl = `${VOICE_BASE}/languages/english/embeddings`;
 
 function post(type, data = {}, transferables = []) {
     self.postMessage({ type, ...data }, transferables);
 }
 
 // ---- Fetch with Cache API + progress ----
-const CACHE_NAME = 'tts-model-v4';
+const CACHE_NAME = 'tts-model-v5';
 
 async function cachedFetch(url, label) {
     const cache = await caches.open(CACHE_NAME);
@@ -51,7 +51,7 @@ async function cachedFetch(url, label) {
 // ---- Handlers ----
 async function handleLoad(config) {
     const base = (config.baseUrl || '').replace(/\/+$/, '');
-    voiceBaseUrl = config.voiceBaseUrl || `${VOICE_BASE}/embeddings_v2`;
+    voiceBaseUrl = config.voiceBaseUrl || `${VOICE_BASE}/languages/english/embeddings`;
 
     // 1. Import WASM
     post('status', { text: 'Loading WASM module...' });
@@ -61,13 +61,13 @@ async function handleLoad(config) {
     await wasmModule.default(wasmBgUrl);
 
     // 2. Download and load tokenizer
-    const tokUrl = config.tokenizerUrl || `${HF_BASE}/tokenizer.model`;
+    const tokUrl = config.tokenizerUrl || `${HF_BASE}/languages/english/tokenizer.model`;
     const tokBuf = await cachedFetch(tokUrl, 'Downloading tokenizer');
     tokenizer = new wasmModule.Tokenizer(new Uint8Array(tokBuf));
     post('status', { text: `Tokenizer loaded (${tokenizer.vocab_size()} pieces)` });
 
     // 3. Download and init model
-    const modelUrl = config.modelUrl || `${HF_BASE}/pocket-tts-q8_0.gguf`;
+    const modelUrl = config.modelUrl || `${HF_BASE}/languages/english/pocket-tts-q8_0.gguf`;
     const modelBuf = await cachedFetch(modelUrl, 'Downloading model');
     post('status', { text: 'Initializing model...' });
     model = new wasmModule.Model(new Uint8Array(modelBuf), config.language || 'english');

@@ -575,11 +575,11 @@
 
         // Bump on every wasm/model-loading change so a stale cached worker/module can't
         // silently keep serving the old build.
-        const ENGINE_BUILD = '2026-09-29-multilingual';
-        const MODEL_CACHE = 'tts-model-v4';
+        const ENGINE_BUILD = '2026-09-29-parity-fixes';
+        const MODEL_CACHE = 'tts-model-v5';
         const MODEL_CHECK_URL = isLocal
-            ? `${location.origin}/pocket-tts-q8_0.gguf`
-            : 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main/pocket-tts-q8_0.gguf';
+            ? `${location.origin}/pocket-tts-en2026-q8_0.gguf`
+            : 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main/languages/english/pocket-tts-q8_0.gguf';
         async function isModelCached() {
             if (isLocal) return true; // always available from dev server
             try {
@@ -706,8 +706,8 @@
                 modelType,
                 workerUrl: `./worker.js?v=${ENGINE_BUILD}`,
                 ...(hasUrlOverrides ? urlOverrides : (isLocal ? {
-                    modelUrl: '/pocket-tts-q8_0.gguf',
-                    tokenizerUrl: '/tokenizer.model',
+                    modelUrl: '/pocket-tts-en2026-q8_0.gguf',
+                    tokenizerUrl: '/tokenizer-english.model',
                 } : {})),
                 onVoiceLoaded: (name) => {
                     loadingVoice = false;

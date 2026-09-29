@@ -28,12 +28,10 @@
 /// not frame-exact agreement.
 ///
 /// Requires locally-downloaded model/tokenizer/voice files (gated Hub repo);
-/// point at them with env vars, or the test is skipped. `english` is
-/// intentionally excluded: the official package's `language="english"` alias
-/// resolves to the newer `english_2026-09` checkpoint, not the older root
-/// checkpoint this repo currently ships as `pocket-tts-q8_0.gguf`, so a
-/// same-checkpoint comparison for English needs the newer checkpoint
-/// quantized first (see the run doc's open items).
+/// point at them with env vars, or the test is skipped. English now points
+/// at the `english_2026-09` checkpoint (quantized this session, worst-layer
+/// SQNR 39.6 dB), matching the official `language="english"` alias, so it is
+/// included here too.
 ///
 /// Per-step latent max-abs-diff bound (proposed follow-up, not implemented
 /// here): would need fixtures regenerated with raw per-step flow-LM latents,
@@ -69,6 +67,7 @@ struct Case {
 }
 
 const CASES: &[Case] = &[
+    Case { language: "english", model_env: "POCKET_TTS_EN_MODEL", tokenizer_env: "POCKET_TTS_EN_TOKENIZER", voice_env: "POCKET_TTS_EN_VOICE" },
     Case { language: "french", model_env: "POCKET_TTS_FR_MODEL", tokenizer_env: "POCKET_TTS_FR_TOKENIZER", voice_env: "POCKET_TTS_FR_VOICE" },
     Case { language: "german", model_env: "POCKET_TTS_DE_MODEL", tokenizer_env: "POCKET_TTS_DE_TOKENIZER", voice_env: "POCKET_TTS_DE_VOICE" },
     Case { language: "spanish", model_env: "POCKET_TTS_ES_MODEL", tokenizer_env: "POCKET_TTS_ES_TOKENIZER", voice_env: "POCKET_TTS_ES_VOICE" },
