@@ -241,3 +241,121 @@ frames both sides, see table above) for the fixture text/voice.
   Hub repo — the code now points at `languages/english/pocket-tts-q8_0.gguf`
   and `languages/english/tokenizer.model` on that repo, but nothing has been
   pushed there in this pass.
+
+## First-frame divergence, root-caused — 2026-09-29 (third pass)
+
+Diagnosed why the flow LM's first generated latent (and everything
+downstream of it) diverges from official starting at generation step 1,
+using a per-step transformer-output dump (`eos_probe`, extended with a
+`--num-layers` bisection flag and a `FULL_TRANSFORMER_OUT` dump gated by
+`TTS_DUMP_FULL`) against an equivalent hook on the official
+`FlowLMModel.forward`/`StreamingTransformer.forward`.
+
+**Bisection result** (French, F32 unquantized, step-0 generation call,
+loading only the first *N* of the flow LM's 6 transformer layers on both
+sides, cosine similarity of the resulting `transformer_out` vector):
+
+| N layers | cosine sim | max abs diff |
+|---|---|---|
+| 0 (no layers, sanity check) | 0.9999999998 | 1.8e-7 |
+| 1 | 0.9999 | 0.018 |
+| 2 | 0.9974 | 0.074 |
+| 3 | 0.9760 | 0.229 |
+| 4 | 0.9300 | 0.470 |
+| 5 | 0.8842 | 0.553 |
+| 6 (full) | 0.7560 | 1.178 |
+
+N=0 confirms the harness itself is exact (embeddings, `input_linear`,
+`bos_emb`, text tokenization all match to float32 rounding). The
+divergence starts small at N=1 (~0.17% of the vector's norm) and
+compounds roughly geometrically with each added transformer layer. This
+is the signature of a real per-layer floating-point difference between
+candle's and PyTorch's attention/FFN math (not a single discrete logic
+bug — a logic bug in RoPE convention, masking, or an offset error would
+show a large jump at N=1, not this gradual compounding), amplified by the
+autoregressive flow-matching loop feeding the resulting latent back into
+the next step.
+
+Two real bugs were found and fixed along the way, neither of which turned
+out to be the dominant driver of the gap, confirmed by re-running the
+same bisection after each fix and seeing the curve above essentially
+unchanged:
+
+1. **GELU approximation mismatch, `mimi-rs`'s `StreamingTransformerLayer`
+   FF block** (`src/transformer.rs:513`, both `Kind::Mimi` and
+   `Kind::FlowLm`): used `gelu_erf()` (exact, erf-based) where official
+   uses `F.gelu(x, approximate="tanh")`
+   (`pocket_tts/modules/transformer.py:48`), which is candle's `gelu()`
+   (tanh approximation). Already fixed on `mimi-rs` branch
+   `fix-streaming-parity` (commit `5bfe3be`); not touched here since
+   `mimi-rs` is a separate crate and that branch owns the fix. Re-running
+   the bisection against the fixed `mimi-rs` build left the cosine-sim
+   curve above essentially unchanged, so this was not the dominant cause
+   for this particular text/voice.
+2. **Biased vs. unbiased variance in the flow-net's `TimestepEmbedder`
+   RMSNorm** (`crates/tts-core/src/mlp.rs`, `variance_norm`): divided the
+   sum of squared deviations by `n` (biased). Official's `_rms_norm`
+   (`pocket_tts/modules/mlp.py:20-25`) computes `x.var(dim=-1,
+   keepdim=True)` with no `unbiased=False`, i.e. PyTorch's default
+   *unbiased* (n-1 denominator) variance. Fixed to divide by `n - 1`, with
+   a unit test against a fixture computed from the official `_rms_norm`.
+   This RMSNorm output feeds every flow-net `ResBlock`'s AdaLN
+   conditioning, so it does affect the generated latent, but the fix's
+   magnitude (~0.1-0.2% scale correction for the flow net's 512-wide
+   hidden size) was too small on its own to close the gap either.
+
+The remaining divergence therefore lives inside `mimi-rs`'s
+`StreamingTransformer` (attention + FFN numerics: exact matmul/softmax
+summation order, `scaled_dot_product_attention` vs. an explicit
+softmax, or similar low-level floating-point differences from PyTorch),
+compounded by the flow-matching sampler's sensitivity to its own input
+near the EOS threshold. Per this task's constraints, `mimi-rs` itself
+was not modified (a fix there belongs to whichever branch owns
+`mimi-rs`, same as the GELU/downsample fixes already on
+`fix-streaming-parity`); the two real bugs found in `tts-core`
+(GELU-adjacent's fixed-elsewhere confirmation and the RMSNorm variance
+fix) are fixed and tested here.
+
+### Re-measurement with the fixed `mimi-rs` (GELU + downsample fixes) and the RMSNorm fix
+
+French, F32 unquantized, flow-LM-only (`eos_probe`, no Mimi), per-step EOS
+logit, before vs. after both fixes:
+
+| Step | Official | Rust before (GELU-buggy `mimi-rs`, biased-variance RMSNorm) | Rust after (fixed `mimi-rs`, unbiased-variance RMSNorm) |
+|---|---|---|---|
+| 0 | -14.35 | -14.32 | -14.31 |
+| 1 | -11.70 | -13.25 | -13.25 |
+| 4 | -13.47 | -11.69 | -11.69 |
+| 5 | -15.85 | -13.03 | -13.03 |
+
+Unchanged to two decimal places — consistent with the bisection above:
+neither fix was the dominant contributor for this text/voice, and the
+per-layer floating-point compounding remains the open item.
+
+Q8_0 GGUF, all six languages, temperature 0, same fixture texts/voices
+(`cargo test -p tts-core --release --test official_parity -- --ignored
+--nocapture`, against the fixed `mimi-rs` + RMSNorm fix):
+
+| Lang | Rust frames (before, 2nd pass) | Rust frames (after, this pass) | Official frames | Δ before | Δ after |
+|---|---|---|---|---|---|
+| en | 41 | 42 | 41 | 0 | +1 |
+| fr | 37 | 39 | 36 | +1 | +3 |
+| de | 45 | 46 | 46 | -1 | 0 |
+| es | 52 | 51 | 55 | -3 | -4 |
+| pt | 49 | 45 | 45 | +4 | 0 |
+| it | 52 | 54 | 54 | -2 | 0 |
+
+Sum of absolute frame deltas: 11 before, 8 after. Three of six languages
+(German, Portuguese, Italian) now match official frame-for-frame; French
+and Spanish moved slightly further off, English moved from exact to +1.
+This mixed result is consistent with the root cause being floating-point
+sensitivity in a feedback loop near a fixed threshold rather than a
+single directional bug: fixing a systematic bias does not uniformly
+improve every language/voice combination when the underlying dynamics
+are this sensitive to small perturbations.
+
+**Given the F32 gap is not fully closed**, the residual Q8_0 deltas above
+are not purely quantization noise on top of an otherwise-exact port; the
+quantization contribution cannot be cleanly separated from the
+still-open transformer-level floating-point gap until that gap is
+closed (or shown irreducible) on the `mimi-rs` side.
