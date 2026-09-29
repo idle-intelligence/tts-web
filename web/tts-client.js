@@ -20,6 +20,7 @@ export class TtsClient {
         this.voiceUrl = options.voiceUrl || null;
         this.tokenizerUrl = options.tokenizerUrl || null;
         this.voicesUrl = options.voicesUrl || null;
+        this.voiceBaseUrl = options.voiceBaseUrl || null;
 
         this.worker = null;
         this.sampleRate = 24000;
@@ -59,6 +60,7 @@ export class TtsClient {
                 if (this.modelUrl) config.modelUrl = this.modelUrl;
                 if (this.voiceUrl) config.voiceUrl = this.voiceUrl;
                 if (this.tokenizerUrl) config.tokenizerUrl = this.tokenizerUrl;
+                if (this.voiceBaseUrl) config.voiceBaseUrl = this.voiceBaseUrl;
                 this.worker.postMessage({ type: 'load', config });
             }
         });
