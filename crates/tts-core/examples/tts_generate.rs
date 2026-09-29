@@ -17,6 +17,7 @@
 use candle_core::{Device, Result as CResult, Tensor};
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};
 use tts_core::flow_lm::{FlowLMState, Rng};
+use tts_core::generation::EosGate;
 use tts_core::tokenizer::Tokenizer;
 use tts_core::tts_model::{TTSState, prepare_text_prompt};
 
@@ -326,12 +327,20 @@ fn run() -> CResult<()> {
     eprintln!("\n[5] Generating audio ({max_frames} max frames, frames_after_eos={frames_after_eos})...");
 
     let mut audio_chunks: Vec<f32> = Vec::new();
-    let mut eos_countdown: Option<usize> = None;
+    let mut eos_gate = EosGate::new(frames_after_eos);
     let mut total_steps = 0usize;
 
     for step in 0..max_frames {
         let (next_latent, is_eos) =
             model.generate_step(&mut tts_state, &prev_latent, &mut rng)?;
+
+        // Check-then-append order (matches tts_model.py:874-892): decide
+        // whether this step's latent is produced *before* decoding/appending
+        // its audio, not after.
+        if !eos_gate.accept(step, is_eos) {
+            eprintln!("  EOS countdown reached 0 at step {step}, stopping");
+            break;
+        }
 
         let audio_chunk = model.decode_latent(&next_latent, &mut mimi_state)?;
         let pcm = audio_chunk.flatten_all()?.to_vec1::<f32>()?;
@@ -346,22 +355,12 @@ fn run() -> CResult<()> {
             "step {:3}: pcm_len={} is_eos={} min={:.4} max={:.4} mean={:.4} nan={nan_count} inf={inf_count}",
             step, pcm.len(), is_eos, pcm_min, pcm_max, pcm_mean
         );
+        if is_eos {
+            eprintln!("  EOS detected at step {step}");
+        }
 
         audio_chunks.extend_from_slice(&pcm);
         total_steps = step + 1;
-
-        if is_eos && eos_countdown.is_none() {
-            eprintln!("  EOS detected at step {step}, starting countdown ({frames_after_eos} frames)");
-            eos_countdown = Some(frames_after_eos);
-        }
-
-        if let Some(ref mut c) = eos_countdown {
-            if *c == 0 {
-                eprintln!("  EOS countdown reached 0 at step {step}, stopping");
-                break;
-            }
-            *c -= 1;
-        }
 
         prev_latent = next_latent;
     }

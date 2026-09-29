@@ -2,6 +2,7 @@ use candle_core::{Device, Result as CResult, Tensor};
 use mimi_rs::mimi::MimiState;
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};
 use tts_core::flow_lm::{FlowLMState, Rng};
+use tts_core::generation::EosGate;
 use tts_core::tts_model::TTSState;
 use wasm_bindgen::prelude::*;
 
@@ -47,8 +48,7 @@ struct GenState {
     prev_latent: Tensor,
     rng: WasmRng,
     max_frames: usize,
-    frames_after_eos: usize,
-    eos_countdown: Option<usize>,
+    eos_gate: EosGate,
     step: usize,
 }
 
@@ -174,8 +174,7 @@ impl Model {
             prev_latent,
             rng,
             max_frames,
-            frames_after_eos,
-            eos_countdown: None,
+            eos_gate: EosGate::new(frames_after_eos),
             step: 0,
         });
         Ok(())
@@ -194,23 +193,15 @@ impl Model {
         let (next_latent, is_eos) =
             self.inner.generate_step(&mut state.tts_state, &state.prev_latent, &mut state.rng)?;
 
-        let audio_chunk =
-            self.inner.decode_latent(&next_latent, &mut state.mimi_state)?;
-
-        if is_eos && state.eos_countdown.is_none() {
-            state.eos_countdown = Some(state.frames_after_eos);
+        // Check-then-append order (matches tts_model.py:874-892): decide
+        // whether this step's latent is produced *before* decoding/appending
+        // its audio, not after.
+        if !state.eos_gate.accept(state.step, is_eos) {
+            return Ok(None);
         }
 
-        let done = if let Some(ref mut countdown) = state.eos_countdown {
-            if *countdown == 0 {
-                true
-            } else {
-                *countdown -= 1;
-                false
-            }
-        } else {
-            false
-        };
+        let audio_chunk =
+            self.inner.decode_latent(&next_latent, &mut state.mimi_state)?;
 
         state.prev_latent = next_latent;
         state.step += 1;
@@ -218,9 +209,7 @@ impl Model {
         let pcm = audio_chunk.flatten_all()?.to_vec1::<f32>()?;
         let result = js_sys::Float32Array::from(pcm.as_slice());
 
-        if !done {
-            self.gen_state = Some(state);
-        }
+        self.gen_state = Some(state);
 
         Ok(Some(result))
     }
