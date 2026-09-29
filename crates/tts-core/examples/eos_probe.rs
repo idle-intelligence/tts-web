@@ -60,7 +60,10 @@ fn run() -> CResult<()> {
         .unwrap_or(80);
 
     let tensors = candle_core::safetensors::load(&model_path, &Device::Cpu)?;
-    let cfg = tts_core::config::TTSConfig::v202601_for_safetensors_keys(tensors.keys(), 0.0)?;
+    let mut cfg = tts_core::config::TTSConfig::v202601_for_safetensors_keys(tensors.keys(), 0.0)?;
+    if let Some(n) = arg(&argv, "--num-layers") {
+        cfg.flow_lm.num_layers = n.parse().unwrap();
+    }
     let vb = VarBuilder::from_tensors(tensors, candle_core::DType::F32, &Device::Cpu);
     let flow_lm = FlowLM::load(vb.pp("flow_lm"), &cfg.flow_lm)?;
     eprintln!("flow_lm loaded, num_layers={}", cfg.flow_lm.num_layers);
@@ -123,7 +126,7 @@ fn run() -> CResult<()> {
         )?;
         let latent_data = latent.flatten_all()?.to_vec1::<f32>()?;
         let max_abs = latent_data.iter().fold(0f32, |a, &b| a.max(b.abs()));
-        eprintln!("STEP {step} is_eos={is_eos} latent_max_abs={max_abs:.6}");
+        eprintln!("STEP {step} is_eos={is_eos} latent_max_abs={max_abs:.6} latent[..8]={:?}", &latent_data[..8.min(latent_data.len())]);
         if !gate.accept(step, is_eos) {
             eprintln!("STOP at step {step}");
             break;
