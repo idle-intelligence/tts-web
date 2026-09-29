@@ -228,7 +228,10 @@ impl Model {
     }
 
     pub fn prepare_text(&self, text: &str) -> js_sys::Array {
-        let (processed, frames_after_eos) = tts_core::tts_model::prepare_text_prompt(text);
+        let (processed, frames_after_eos) = tts_core::tts_model::prepare_text_prompt(
+            text,
+            self.cfg.model_recommended_frames_after_eos,
+        );
         let arr = js_sys::Array::new();
         arr.push(&JsValue::from_str(&processed));
         arr.push(&JsValue::from_f64(frames_after_eos as f64));

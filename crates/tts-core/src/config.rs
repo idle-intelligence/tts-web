@@ -21,6 +21,11 @@ pub struct TTSConfig {
     pub temp: f32,
     pub lsd_decode_steps: usize,
     pub eos_threshold: f32,
+    /// Per-model override for `frames_after_eos`, matching
+    /// `Config.model_recommended_frames_after_eos` (`pocket_tts/utils/config.py`).
+    /// `None` for every currently shipped language config, in which case the
+    /// text-length-based guess (see `prepare_text_prompt`) is used instead.
+    pub model_recommended_frames_after_eos: Option<usize>,
 }
 
 impl TTSConfig {
@@ -42,6 +47,7 @@ impl TTSConfig {
             temp,
             lsd_decode_steps: 1,
             eos_threshold: -4.0,
+            model_recommended_frames_after_eos: None,
         }
     }
 

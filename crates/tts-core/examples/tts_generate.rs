@@ -292,7 +292,8 @@ fn run() -> CResult<()> {
     // --- Prepare text and token IDs ---
     eprintln!("\n[3] Preparing text...");
     let raw_text = &args.text;
-    let (prepared_text, frames_after_eos) = prepare_text_prompt(raw_text);
+    let (prepared_text, frames_after_eos) =
+        prepare_text_prompt(raw_text, cfg.model_recommended_frames_after_eos);
     eprintln!("  raw: {raw_text:?}");
     eprintln!("  prepared: {prepared_text:?}");
     eprintln!("  frames_after_eos: {frames_after_eos}");

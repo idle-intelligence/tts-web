@@ -132,15 +132,27 @@ pub const MAX_TOKENS_PER_CHUNK: usize = 50;
 
 /// Prepare text for generation: capitalize, add punctuation, pad short text.
 /// Returns (prepared_text, frames_after_eos).
-pub fn prepare_text_prompt(text: &str) -> (String, usize) {
+///
+/// `model_recommended_frames_after_eos` mirrors
+/// `Config.model_recommended_frames_after_eos`: when a model config sets it,
+/// it overrides the text-length-based guess entirely (`tts_model.py:720-731`).
+/// None of the currently shipped language configs set it.
+pub fn prepare_text_prompt(
+    text: &str,
+    model_recommended_frames_after_eos: Option<usize>,
+) -> (String, usize) {
     let mut text = text.trim().to_string();
     if text.is_empty() {
-        return (text, 3);
+        return (text, model_recommended_frames_after_eos.unwrap_or(3));
     }
     text = text.replace(['\n', '\r'], " ").replace("  ", " ");
 
     let number_of_words = text.split_whitespace().count();
-    let frames_after_eos = if number_of_words <= 4 { 3 } else { 1 };
+    let frames_after_eos_guess = if number_of_words <= 4 { 3 } else { 1 };
+    // tts_model.py:728: `frames_after_eos_guess += 2` before it is used, unless
+    // the model config supplies its own recommended value.
+    let frames_after_eos =
+        model_recommended_frames_after_eos.unwrap_or(frames_after_eos_guess + 2);
     let mut chars = text.chars();
     if let Some(first) = chars.next() {
         text = first.to_uppercase().to_string() + chars.as_str();
