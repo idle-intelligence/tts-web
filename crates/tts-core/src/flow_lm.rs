@@ -236,6 +236,9 @@ impl FlowLM {
         let eos_logit = self.out_eos.forward(&transformer_out)?;
         let eos_val = eos_logit.flatten_all()?.to_vec1::<f32>()?;
         let is_eos = eos_val[0] > eos_threshold;
+        if std::env::var("TTS_DEBUG_EOS").is_ok() {
+            eprintln!("EOS_LOGIT {}", eos_val[0]);
+        }
 
         let noise_data: Vec<f32> = (0..b * self.ldim).map(|_| rng.sample()).collect();
         let noise = Tensor::from_vec(noise_data, (b, self.ldim), dev)?;

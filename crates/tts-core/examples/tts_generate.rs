@@ -15,6 +15,7 @@
 /// Writes a Float32 PCM WAV at 24000 Hz (mono).
 
 use candle_core::{Device, Result as CResult, Tensor};
+use candle_nn::VarBuilder;
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};
 use tts_core::flow_lm::{FlowLMState, Rng};
 use tts_core::generation::EosGate;
@@ -35,6 +36,10 @@ pub struct Args {
     pub output_path: String,
     pub temperature: f32,
     pub language: String,
+    /// When set, `--model` is read as an unquantized safetensors checkpoint
+    /// (via VarBuilder) instead of a Q8_0 GGUF, for numerical parity work
+    /// against the official PyTorch weights.
+    pub safetensors: bool,
 }
 
 /// Parse CLI args. `args` is the full argv, i.e. `args[0]` is the program name
@@ -47,6 +52,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
     let mut output_path = None;
     let mut temperature = 0.7f32;
     let mut language = "english".to_string();
+    let mut safetensors = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -82,6 +88,9 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
                 i += 1;
                 language = args.get(i).ok_or("--language requires a value")?.clone();
             }
+            "--safetensors" => {
+                safetensors = true;
+            }
             other => {
                 return Err(format!("Unknown arg: {other}"));
             }
@@ -97,6 +106,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
         output_path: output_path.unwrap_or_else(|| "/tmp/test_tts.wav".to_string()),
         temperature,
         language,
+        safetensors,
     })
 }
 
@@ -207,14 +217,26 @@ fn run() -> CResult<()> {
     eprintln!("temperature: {}", args.temperature);
 
     // --- Load model ---
-    eprintln!("\n[1] Loading model...");
-    let model_bytes = std::fs::read(&args.model_path)
-        .map_err(|e| candle_core::Error::Msg(format!("failed to read model: {e}")))?;
-    eprintln!("  read {} MB", model_bytes.len() / (1024 * 1024));
-
-    let mut gguf = mimi_rs::gguf_loader::GgufTensors::from_bytes(&model_bytes, &Device::Cpu)?;
-    let cfg = tts_core::config::TTSConfig::v202601_for_gguf(&gguf, args.temperature)?;
-    let model = tts_core::tts_model::TTSModel::load_gguf(&mut gguf, &cfg)?;
+    eprintln!("\n[1] Loading model ({})...", if args.safetensors { "safetensors" } else { "GGUF" });
+    let (model, cfg) = if args.safetensors {
+        let tensors = candle_core::safetensors::load(&args.model_path, &Device::Cpu)?;
+        eprintln!("  read {} tensors from safetensors", tensors.len());
+        let cfg = tts_core::config::TTSConfig::v202601_for_safetensors_keys(
+            tensors.keys(),
+            args.temperature,
+        )?;
+        let vb = VarBuilder::from_tensors(tensors, candle_core::DType::F32, &Device::Cpu);
+        let model = tts_core::tts_model::TTSModel::load(vb, &cfg)?;
+        (model, cfg)
+    } else {
+        let model_bytes = std::fs::read(&args.model_path)
+            .map_err(|e| candle_core::Error::Msg(format!("failed to read model: {e}")))?;
+        eprintln!("  read {} MB", model_bytes.len() / (1024 * 1024));
+        let mut gguf = mimi_rs::gguf_loader::GgufTensors::from_bytes(&model_bytes, &Device::Cpu)?;
+        let cfg = tts_core::config::TTSConfig::v202601_for_gguf(&gguf, args.temperature)?;
+        let model = tts_core::tts_model::TTSModel::load_gguf(&mut gguf, &cfg)?;
+        (model, cfg)
+    };
 
     let sample_rate = model.sample_rate() as u32;
     eprintln!("  model loaded OK (sample_rate={})", sample_rate);
