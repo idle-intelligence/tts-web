@@ -436,7 +436,7 @@
             'lola', 'marius', 'mary', 'michael', 'paul', 'peter_yearsley', 'rafael', 'stuart_bell', 'vera',
         ];
         const LANG_LABELS = { en2: 'English (new)', fr: 'French', de: 'German', es: 'Spanish', pt: 'Portuguese', it: 'Italian' };
-        const POCKET_ML_SIZES = { en2: 134, fr: 375, de: 134, es: 134, pt: 134, it: 134 };
+        const POCKET_ML_SIZES = { en2: 134, fr: 134, de: 134, es: 134, pt: 134, it: 134 };
         const LANG_DEFAULT_VOICE = { fr: 'estelle', de: 'juergen', es: 'lola', pt: 'rafael', it: 'giovanni' };
         // Must be alphabetical — matches WASM voice index order (sorted in load_voices)
         const KITTEN_VOICES = ['bella', 'bruno', 'hugo', 'jasper', 'kiki', 'leo', 'luna', 'rosie'];
@@ -573,7 +573,10 @@
         // Detect local dev server (not deployed to GitHub Pages)
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
-        const MODEL_CACHE = 'tts-model-v3';
+        // Bump on every wasm/model-loading change so a stale cached worker/module can't
+        // silently keep serving the old build.
+        const ENGINE_BUILD = '2026-09-29-multilingual';
+        const MODEL_CACHE = 'tts-model-v4';
         const MODEL_CHECK_URL = isLocal
             ? `${location.origin}/pocket-tts-q8_0.gguf`
             : 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main/pocket-tts-q8_0.gguf';
@@ -615,7 +618,7 @@
         }
         // Upstream lays its voice folders out by full language name, not by the short code
         // we use for our own filenames — languages/german/..., not languages/de/...
-        const UPSTREAM_LANG_DIR = { en2: 'english', fr: 'french_24l', de: 'german', es: 'spanish', pt: 'portuguese', it: 'italian' };
+        const UPSTREAM_LANG_DIR = { en2: 'english', fr: 'french', de: 'german', es: 'spanish', pt: 'portuguese', it: 'italian' };
         function multilingualVoiceBaseUrl(lang) {
             // Voice embeddings are not staged locally — always fetched from the upstream Kyutai repo.
             return `${POCKET_ML_VOICE_BASE}/languages/${UPSTREAM_LANG_DIR[lang]}/embeddings`;
@@ -700,7 +703,7 @@
             const hasUrlOverrides = Object.keys(urlOverrides).length > 0;
             return new TtsClient({
                 modelType,
-                workerUrl: './worker.js',
+                workerUrl: `./worker.js?v=${ENGINE_BUILD}`,
                 ...(hasUrlOverrides ? urlOverrides : (isLocal ? {
                     modelUrl: '/pocket-tts-q8_0.gguf',
                     tokenizerUrl: '/tokenizer.model',
