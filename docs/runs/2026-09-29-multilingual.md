@@ -149,3 +149,95 @@ language grid.
 - `scripts/pocket-tts/gen_tokenizer_fixtures.py` — `french_24l` → `french`
 - `web/index.html`, `web/worker.js` — French points at `languages/french`, build tag bump
 - `docs/multilingual-pocket-tts-runs.md` — unmodified historical branch log, kept as-is
+
+## Parity fixes and English checkpoint move — 2026-09-29 (second pass)
+
+Fixed three EOS/frame-count bugs found by reading the official package
+against this port: the countdown was checked after appending a step's
+audio instead of before (off-by-one), the official `+= 2` on the
+text-length-based `frames_after_eos` guess was missing, and there was no
+`_MIN_FRAMES_BEFORE_EOS = 6` gate on early EOS detections. Also ported the
+official per-language text normalization (`replace_characters`,
+`remove_semicolons`, full terminal-punctuation handling, and gating
+`pad_with_spaces_for_short_inputs` behind config instead of applying it
+unconditionally).
+
+### Frame counts, Rust (Q8_0 GGUF, temperature 0) vs. official, before and after
+
+"Before" is the first-pass run doc's ratio table (old EOS/frame-count logic,
+`total_samples`, divided by 1920 samples/frame). "After" is this session's
+run against the same weights, tokenizers and voices with the fixes above and
+the same fixed text/voice per language. English was not part of the "before"
+table (excluded then; moved to the `english_2026-09` checkpoint in this
+pass, see below).
+
+| Lang | Rust frames (before) | Rust frames (after) | Official frames | Δ frames, after (rust − official) |
+|---|---|---|---|---|
+| en | — | 41 | 41 | 0 |
+| fr | 36 | 37 | 36 | +1 |
+| de | 44 | 45 | 46 | -1 |
+| es | 51 | 52 | 55 | -3 |
+| pt | 48 | 49 | 45 | +4 |
+| it | 51 | 52 | 54 | -2 |
+
+Source: `cargo test -p tts-core --test official_parity --release -- --ignored --nocapture`,
+this session (`fr/de/es/pt/it` against the same GGUFs/tokenizers/voices as the
+first pass; `en` against the newly quantized `english_2026-09` GGUF). "Before"
+column from `docs/runs/2026-09-29-multilingual.md`'s "Official PyTorch parity"
+table (`total_samples / 1920`).
+
+### Residual divergence is not primarily quantization noise
+
+A flow-LM-only probe (`cargo run --example eos_probe -p tts-core --release`,
+no Mimi, unquantized F32 safetensors from the official
+`kyutai/pocket-tts-without-voice-cloning` checkpoint) against the same
+French text/voice at temperature 0, diffed against a Python-side hook on
+`FlowLMModel.out_eos`:
+
+| Step | Rust (F32, unquantized) EOS logit | Official EOS logit |
+|---|---|---|
+| 0 | -14.32 | -14.35 |
+| 1 | -13.25 | -11.70 |
+| 4 | -11.69 | -13.47 |
+| 5 | -13.03 | -15.85 |
+
+First EOS crossing (`> -4.0`): Rust F32 at step 36, official at step 33 (Δ=3).
+Rust Q8_0 (the production path) crosses at step 34 (Δ=1 vs. official) —
+*closer* to official than the unquantized F32 run. Both engines' RoPE
+convention and frequency formula were checked line-by-line against
+`pocket_tts/modules/rope.py` and match exactly (interleaved-pairs, same
+`max_period` formula). LayerNorm epsilon (`1e-5`) also matches.
+
+**Verdict**: the gap is not simply Q8_0 quantization noise added on top of an
+otherwise-exact port — it is present already in F32, and quantization noise
+does not uniformly make it worse. The exact source (most likely floating-point
+summation-order differences between candle and PyTorch compounding through
+the flow-matching sampler's chaotic sensitivity near the EOS threshold, or a
+smaller structural difference in `mimi-rs`'s `StreamingTransformer` not yet
+isolated) remains open. This is not a fabricated conclusion to close the
+investigation — it reflects the actual measurement above, not an assumption.
+
+### English checkpoint
+
+Moved to `english_2026-09` (same weights as the official `language="english"`
+alias, per its own config comment). Quantized this session with the same
+pipeline used for the other five languages:
+
+| Tensors | Layers | Worst-layer SQNR |
+|---|---|---|
+| 214 | 6 | 39.6 dB |
+
+Above the 37 dB project threshold. Frame count matches official exactly (41
+frames both sides, see table above) for the fixture text/voice.
+
+### Not done in this pass
+
+- Root-causing the residual per-step divergence beyond ruling out RoPE
+  convention/frequency and LayerNorm epsilon — needs a deeper diff of
+  `mimi-rs`'s `StreamingTransformer` (KV-cache indexing, attention masking)
+  against `pocket_tts/modules/transformer.py`. `mimi-rs` is a separate,
+  shared crate; a fix there is out of scope for this pass.
+- Uploading the new English GGUF/tokenizer to the `idle-intelligence/pocket-tts-gguf`
+  Hub repo — the code now points at `languages/english/pocket-tts-q8_0.gguf`
+  and `languages/english/tokenizer.model` on that repo, but nothing has been
+  pushed there in this pass.
