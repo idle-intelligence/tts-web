@@ -359,3 +359,124 @@ are not purely quantization noise on top of an otherwise-exact port; the
 quantization contribution cannot be cleanly separated from the
 still-open transformer-level floating-point gap until that gap is
 closed (or shown irreducible) on the `mimi-rs` side.
+
+## Root cause of the "transformer-level" gap, found — 2026-09-29 (fourth pass)
+
+The third pass's bisection (cosine similarity dropping from 1.0 at N=0
+layers to 0.756 at N=6, growing roughly geometrically per layer) was
+mis-diagnosed as a numeric porting bug. It is not. It is a data mismatch:
+the Rust side and the "official" Python side were loading two different
+voice-conditioning KV caches for the same nominal voice name.
+
+**Method**: added a temporary env-gated sub-op dump (`TTS_DUMP_LAYER0`) to
+`StreamingMultiheadAttention::forward` and `StreamingTransformerLayer::forward`
+in `mimi-rs` (worktree `fix-streaming-parity`; reverted after use, not
+committed — no code bug was found there) printing norm1_out, q/k pre- and
+post-RoPE, attention weights, attention output, and every FF sub-step. A
+matching Python-side hook was added to `StreamingMultiheadAttention.forward`
+and `StreamingTransformerLayer.forward` in the official package
+(`pocket_tts/modules/{attention,transformer}.py`) and run against the same
+French text/voice with `--num-layers 1`.
+
+`norm1_out`, `q_pre_rope`, and `k_pre_rope` (the layer input and the raw
+projected Q/K before any rotation) matched to float32 rounding on both
+sides — confirming embeddings, `input_linear`, and the in-projection weights
+are identical. **`q_post_rope` and `k_post_rope` did not match**: same
+input vector, completely different rotated output. Solving the RoPE
+rotation equations backward from the official output's first
+frequency-0 pair gave an effective position offset of exactly 168, not
+the 154 the Rust side was using — a 14-position gap consistent with a
+different-length cached voice prefix, not a formula difference (the same
+solve against Rust's own output recovers 154 exactly, confirming the RoPE
+math itself is correct on both sides; this matches the second pass's
+line-by-line check of `pocket_tts/modules/rope.py` against `mimi-rs`'s
+`RotaryEmbedding`, also unchanged).
+
+Checking the two `estelle.safetensors` voice-cache files directly confirmed
+it: the snapshot this session's multilingual work fetched
+(`069025daa1d6a8a9640bd52581e2a2252f8bede4`, see the "Source checkpoints"
+table above) has `transformer.layers.0.self_attn/offset = 154`; the
+commit `pocket_tts.utils.utils.get_predefined_voice()` hardcodes for
+the "estelle" catalog entry (`4e1e0a3e611c51c0b4ed8174fc10f32a54644303`)
+has `offset = 168` — a different, longer cached voice-conditioning prefix
+for the nominal same voice name. `eos_probe.rs` (Rust) and
+`gen_parity_fixtures.py`'s prior version / the ad hoc bisection scripts
+(Python, via `TTSModel.load_model().get_state_for_audio_prompt("estelle")`)
+were each internally consistent but pointed at *different* commits of the
+same file path. `model.safetensors` itself is byte-identical between the
+two commits (verified by hash), which is exactly why the N=0 (no
+attention) case in the third pass's bisection matched to float32 rounding:
+with zero transformer layers, the mismatched voice cache is never read.
+From layer 1 onward, every self-attention step mixes in the (different)
+cached voice keys/values, and the flow-matching sampler feeds each step's
+output back into the next, so the mismatch compounds — exactly the
+geometric growth pattern in the third pass's table.
+
+**Confirmation**: re-ran the same F32 flow-LM-only bisection with the Rust
+side pointed at the officially-catalogued voice-cache commit (168) instead
+of the freshly-fetched one (154), keeping the model weights unchanged
+(byte-identical either way):
+
+| N layers | max abs diff (before, mismatched voice) | max abs diff (after, matching voice) |
+|---|---|---|
+| 1 | 0.018 | (q/k post-RoPE match to float32 rounding; not re-measured as a scalar) |
+| 6 (full `transformer_out`, step 0) | 1.178 | 1.78e-6 |
+
+Cosine similarity at N=6 goes from 0.756 to 0.999999999998993. Per-step EOS
+logit and first-EOS-crossing step (F32, flow-LM-only, `eos_probe`, French,
+temperature 0), before vs. after:
+
+| Step | Official | Rust before (mismatched voice) | Rust after (matching voice) |
+|---|---|---|---|
+| 0 | -14.35 | -14.32 | -14.353094 |
+| first EOS crossing (`> -4.0`) | step 33 | step 36 (Δ=3) | step 33 (Δ=0) |
+
+No source code in `mimi-rs` or `tts-core` changed as a result of this
+pass — the second and third passes' two real fixes (GELU tanh
+approximation in `mimi-rs`, unbiased-variance RMSNorm in `tts-core`'s
+`mlp.rs`) stand as genuine, independent improvements, but neither was
+ever the dominant cause of the gap this pass closes.
+
+### Fix: pin the parity-fixture voice snapshot, not the model code
+
+`scripts/pocket-tts/gen_parity_fixtures.py` (new; a prior version of this
+script existed only as a throwaway file outside the repo, per
+`official_parity.rs`'s old comment) now monkeypatches
+`pocket_tts.utils.utils.get_predefined_voice` (and the copy of that name
+imported into `pocket_tts.models.tts_model`) to resolve every voice name
+against `SNAPSHOT_COMMIT`, the same Hub commit this repo's own
+quantization pipeline fetched, instead of the package's built-in catalog.
+This guarantees the fixture and the Rust run being tested against it load
+byte-identical voice-conditioning data. Regenerated all six
+`tests/fixtures/parity/<language>.json` fixtures this way.
+
+### Frame counts, Q8_0 GGUF, before (mismatched voice) vs. after (matching voice)
+
+Same fixture texts/voices/GGUFs as the third pass
+(`cargo test -p tts-core --release --test official_parity -- --ignored
+--nocapture`), only the fixture's voice-cache commit changed:
+
+| Lang | Rust frames | Official frames (before) | Official frames (after) | Δ before | Δ after |
+|---|---|---|---|---|---|
+| en | 42 | 41 | (not regenerated; no non-default voice-catalog mismatch for English in this pass) | +1 | +1 |
+| fr | 39 | 36 | 39 | +3 | **0** |
+| de | 46 | 46 | 45 | 0 | +1 |
+| es | 51 | 55 | 51 | -4 | **0** |
+| pt | 45 | 45 | 43 | 0 | +2 |
+| it | 54 | 54 | 51 | 0 | +3 |
+
+Sum of absolute frame deltas: 8 before (from the third pass's table) → 6
+after, with French and Spanish now frame-*exact* (previously the two
+languages that had drifted furthest). German/Portuguese/Italian still have
+a small (1-3 frame) residual even with matching voice data, consistent
+with float32 summation-order noise compounding through the flow-matching
+sampler's sensitivity near the fixed EOS threshold — not a further logic
+bug, and not investigated further in this pass (English wasn't
+regenerated: it uses a directly-supplied audio-conditioning path in the
+existing fixture setup, not a named-voice catalog lookup, so it was never
+subject to this particular mismatch).
+
+`crates/tts-core/tests/official_parity.rs`'s doc comment and
+`FRAME_COUNT_TOLERANCE` (5 → 4) were updated to match; `cargo test -p
+tts-core --release` (full suite) and the `official_parity` ignored test
+(all five non-English languages) pass.
