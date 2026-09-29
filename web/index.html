@@ -217,14 +217,23 @@
             font-family: 'IBM Plex Mono', monospace;
             font-size: 13px;
             font-weight: 500;
-            padding: 6px 0;
+            padding: 6px 4px;
             cursor: pointer;
             border: 1px solid var(--border);
             background: transparent;
             color: var(--text);
             border-radius: 0;
             text-align: center;
+            overflow-wrap: break-word;
             transition: border-color 0.15s, background 0.15s, color 0.15s;
+        }
+        @media (max-width: 480px) {
+            .voice-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            .voice-btn {
+                font-size: 11px;
+            }
         }
         .voice-btn:hover:not(:disabled) {
             border-color: var(--text);
@@ -311,6 +320,14 @@
             text-decoration: none;
         }
         footer a:hover { color: var(--muted); }
+        footer .credit {
+            font-size: 13px;
+            color: var(--faint);
+            line-height: 1.6;
+            margin-top: 16px;
+        }
+        footer .credit a { text-decoration: underline; color: var(--faint); }
+        footer .credit a:hover { color: var(--muted); }
     </style>
 </head>
 <body>
@@ -395,6 +412,7 @@
 
     <footer>
         <a href="https://idleintelligence.org">idleintelligence.org</a>
+        <p class="credit">Voices and models: <a href="https://huggingface.co/kyutai/pocket-tts">Kyutai Pocket TTS</a> (CC-BY-4.0), per language. <a href="https://huggingface.co/KittenML/kitten-tts-nano-0.1">KittenTTS</a> (Apache-2.0).</p>
     </footer>
 
     <script type="module">
@@ -447,7 +465,7 @@
         const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
         const DEMO_TEXT_ML = {
             en2: 'Hello, this is a test of the new-generation text-to-speech system.',
-            fr: "Bonjour, ceci est un test du système de synthèse vocale — c'est déjà prêt.",
+            fr: "Bonjour, ceci est un test du système de synthèse vocale. C'est déjà prêt.",
             de: 'Hallo, dies ist ein Test des Text-zu-Sprache-Systems.',
             es: 'Hola, esta es una prueba del sistema de texto a voz.',
             pt: 'Olá, este é um teste do sistema de texto para voz.',
