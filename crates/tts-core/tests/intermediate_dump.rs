@@ -7,7 +7,7 @@
 ///   cargo test -p tts-core --test intermediate_dump -- --nocapture 2>&1 | tee /tmp/intermediate_dump.txt
 ///
 /// Requirements:
-///   MODEL: /Users/tc/Code/idle-intelligence/tts-web/model_int8.safetensors
+///   MODEL: $MODELS_DIR/model_int8.safetensors (MODELS_DIR defaults to "models")
 ///   VOICE: /tmp/alba.safetensors
 
 use candle_core::{DType, Device, Result as CResult, Tensor};
@@ -16,7 +16,9 @@ use tts_core::config::TTSConfig;
 use tts_core::flow_lm::{FlowLMState, Rng};
 use tts_core::tts_model::{TTSModel, TTSState};
 
-const MODEL_PATH: &str = "/Users/tc/Code/idle-intelligence/tts-web/model_int8.safetensors";
+fn model_path() -> String {
+    format!("{}/model_int8.safetensors", std::env::var("MODELS_DIR").unwrap_or_else(|_| "models".into()))
+}
 const VOICE_PATH: &str = "/tmp/alba.safetensors";
 const WAV_OUTPUT: &str = "/tmp/test_tts_debug.wav";
 
@@ -131,8 +133,9 @@ fn write_wav(path: &str, samples: &[f32], sample_rate: u32) -> std::io::Result<(
 
 #[test]
 fn test_intermediate_tensor_dump() {
-    if !std::path::Path::new(MODEL_PATH).exists() {
-        eprintln!("SKIP: model not found at {MODEL_PATH}");
+    let model_path = model_path();
+    if !std::path::Path::new(&model_path).exists() {
+        eprintln!("SKIP: model not found at {model_path}");
         return;
     }
     if !std::path::Path::new(VOICE_PATH).exists() {
@@ -148,7 +151,7 @@ fn test_intermediate_tensor_dump() {
     // Stage 0: Load model
     // -----------------------------------------------------------------------
     eprintln!("--- STAGE 0: Model Loading ---");
-    let bytes = std::fs::read(MODEL_PATH).expect("failed to read model");
+    let bytes = std::fs::read(&model_path).expect("failed to read model");
     eprintln!("DUMP [raw_model] bytes={}", bytes.len());
 
     let dequantized = mimi_rs::dequantize::dequantize_and_remap(&bytes);

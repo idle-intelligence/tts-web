@@ -173,7 +173,10 @@ fn validate_int8_dequantization() {
         Ok(p) => PathBuf::from(p),
         Err(_) => {
             // Default to the known location
-            PathBuf::from("/Users/tc/Code/idle-intelligence/tts-web/model_int8.safetensors")
+            PathBuf::from(format!(
+                "{}/model_int8.safetensors",
+                std::env::var("MODELS_DIR").unwrap_or_else(|_| "models".into())
+            ))
         }
     };
 

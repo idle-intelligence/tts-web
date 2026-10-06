@@ -61,8 +61,9 @@ struct Args {
 
 fn parse_args() -> Args {
     let args: Vec<String> = std::env::args().collect();
-    let mut model_path = String::from("/Users/tc/Code/idle-intelligence/hf/kitten-tts-nano-0.8/kitten-nano.safetensors");
-    let mut voices_path = String::from("/Users/tc/Code/idle-intelligence/hf/kitten-tts-nano-0.8/kitten-voices.safetensors");
+    let models_dir = std::env::var("MODELS_DIR").unwrap_or_else(|_| "models".into());
+    let mut model_path = format!("{models_dir}/kitten-tts-nano-0.8/kitten-nano.safetensors");
+    let mut voices_path = format!("{models_dir}/kitten-tts-nano-0.8/kitten-voices.safetensors");
     let mut voice_name = String::from("jasper");
     let mut text = String::from("Hello, world.");
     let mut speed = 1.0f32;

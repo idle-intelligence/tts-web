@@ -12,8 +12,15 @@ use kitten_core::phoneme_map::map_phonemes_to_ids;
 use kitten_core::predictor::Predictor;
 use safetensors::SafeTensors;
 
-const MODEL_PATH: &str = "/Users/tc/Code/idle-intelligence/hf/kitten-tts-nano-0.8/kitten-nano.safetensors";
-const VOICES_PATH: &str = "/Users/tc/Code/idle-intelligence/hf/kitten-tts-nano-0.8/kitten-voices.safetensors";
+fn models_dir() -> String {
+    std::env::var("MODELS_DIR").unwrap_or_else(|_| "models".into())
+}
+fn model_path() -> String {
+    format!("{}/kitten-tts-nano-0.8/kitten-nano.safetensors", models_dir())
+}
+fn voices_path() -> String {
+    format!("{}/kitten-tts-nano-0.8/kitten-voices.safetensors", models_dir())
+}
 
 const ALL_VOICES: &[&str] = &["bella", "bruno", "hugo", "jasper", "kiki", "leo", "luna", "rosie"];
 
@@ -23,12 +30,12 @@ const ALL_VOICES: &[&str] = &["bella", "bruno", "hugo", "jasper", "kiki", "leo",
 
 fn load_model() -> anyhow::Result<KittenModel> {
     let cfg = KittenConfig::nano();
-    let data = std::fs::read(MODEL_PATH)?;
+    let data = std::fs::read(model_path())?;
     KittenModel::load(&data, &cfg, &Device::Cpu)
 }
 
 fn load_style(voice_name: &str, text_len: usize) -> anyhow::Result<Tensor> {
-    let voices_data = std::fs::read(VOICES_PATH)?;
+    let voices_data = std::fs::read(voices_path())?;
     let st = SafeTensors::deserialize(&voices_data)?;
     let tv = st
         .tensor(voice_name)
@@ -441,7 +448,7 @@ fn compare_tensors(label: &str, rust: &Tensor, onnx: &Tensor) -> anyhow::Result<
 fn test_decoder_with_onnx_inputs() -> anyhow::Result<()> {
     // Load model weights
     let cfg = KittenConfig::nano();
-    let data = std::fs::read(MODEL_PATH)?;
+    let data = std::fs::read(model_path())?;
     use candle_core::DType;
     use candle_nn::VarBuilder;
     let vb = VarBuilder::from_buffered_safetensors(data, DType::F32, &Device::Cpu)?;
@@ -599,7 +606,7 @@ fn test_f0_predictor_with_onnx_shared_lstm() -> anyhow::Result<()> {
 
     // Load model weights (just need the predictor)
     let cfg = KittenConfig::nano();
-    let data = std::fs::read(MODEL_PATH)?;
+    let data = std::fs::read(model_path())?;
     let vb = VarBuilder::from_buffered_safetensors(data, DType::F32, &Device::Cpu)?;
     let predictor = Predictor::load(vb, &cfg)?;
     eprintln!("Model loaded.");

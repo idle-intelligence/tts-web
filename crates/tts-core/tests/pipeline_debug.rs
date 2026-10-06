@@ -2,7 +2,7 @@
 /// Run with: cargo test -p tts-core --test pipeline_debug -- --nocapture
 ///
 /// These tests require the model file at:
-///   /Users/tc/Code/idle-intelligence/tts-web/model_int8.safetensors
+///   $MODELS_DIR/model_int8.safetensors (MODELS_DIR defaults to "models")
 ///
 /// If the file is absent, tests are skipped (they return early with a message).
 
@@ -12,7 +12,9 @@ use tts_core::config::TTSConfig;
 use tts_core::flow_lm::Rng;
 use tts_core::tts_model::TTSModel;
 
-const MODEL_PATH: &str = "/Users/tc/Code/idle-intelligence/tts-web/model_int8.safetensors";
+fn model_path() -> String {
+    format!("{}/model_int8.safetensors", std::env::var("MODELS_DIR").unwrap_or_else(|_| "models".into()))
+}
 
 // ---------------------------------------------------------------------------
 // Helper: print tensor statistics
@@ -42,11 +44,12 @@ fn tensor_stats(name: &str, t: &Tensor) {
 // Helper: check model file exists, skip if not
 // ---------------------------------------------------------------------------
 
-fn model_path_or_skip() -> Option<&'static str> {
-    if std::path::Path::new(MODEL_PATH).exists() {
-        Some(MODEL_PATH)
+fn model_path_or_skip() -> Option<String> {
+    let path = model_path();
+    if std::path::Path::new(&path).exists() {
+        Some(path)
     } else {
-        eprintln!("SKIP: model file not found at {MODEL_PATH}");
+        eprintln!("SKIP: model file not found at {path}");
         None
     }
 }
@@ -56,8 +59,9 @@ fn model_path_or_skip() -> Option<&'static str> {
 // ---------------------------------------------------------------------------
 
 fn load_model() -> (TTSModel, TTSConfig) {
-    eprintln!("Loading model from {MODEL_PATH}...");
-    let bytes = std::fs::read(MODEL_PATH).expect("failed to read model file");
+    let path = model_path();
+    eprintln!("Loading model from {path}...");
+    let bytes = std::fs::read(&path).expect("failed to read model file");
     eprintln!("  read {} MB", bytes.len() / (1024 * 1024));
 
     let dequantized = mimi_rs::dequantize::dequantize_and_remap(&bytes);
