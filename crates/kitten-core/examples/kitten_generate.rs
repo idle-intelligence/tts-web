@@ -305,14 +305,18 @@ fn load_style(
     // Build an F32 candle tensor
     let flat_f32: Vec<f32> = match dtype {
         safetensors::Dtype::F32 => {
-            data.chunks_exact(4)
-                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            data.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b))
                 .collect()
         }
         safetensors::Dtype::BF16 => {
-            data.chunks_exact(2)
+            data.as_chunks::<2>()
+                .0
+                .iter()
                 .map(|b| {
-                    let bits = u16::from_le_bytes([b[0], b[1]]);
+                    let bits = u16::from_le_bytes(*b);
                     f32::from_bits((bits as u32) << 16)
                 })
                 .collect()

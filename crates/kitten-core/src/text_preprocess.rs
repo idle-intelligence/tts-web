@@ -1,11 +1,11 @@
-/// Text preprocessor for KittenTTS.
-///
-/// Converts currencies, units, scale suffixes, fractions, scientific notation,
-/// IP addresses, ranges, and other patterns into spoken-word form before
-/// passing text to espeak-ng.
-///
-/// espeak-ng already handles: plain integers, ordinals (1st/2nd), times (3:45).
-/// This module handles everything else.
+//! Text preprocessor for KittenTTS.
+//!
+//! Converts currencies, units, scale suffixes, fractions, scientific notation,
+//! IP addresses, ranges, and other patterns into spoken-word form before
+//! passing text to espeak-ng.
+//!
+//! espeak-ng already handles: plain integers, ordinals (1st/2nd), times (3:45).
+//! This module handles everything else.
 
 // ---------------------------------------------------------------------------
 // Number-to-words
@@ -654,13 +654,13 @@ fn expand_tokens(s: &str) -> String {
             }
 
             // Units (e.g. 100km)
-            if let Some((int_val, frac, end)) = parse_number_prefix(bytes, i) {
-                if let Some((unit_len, unit_word)) = unit_suffix(bytes, end) {
-                    let num_words = float_to_words(int_val, &frac);
-                    out.push_str(&format!("{} {}", num_words, unit_word));
-                    i = end + unit_len;
-                    continue;
-                }
+            if let Some((int_val, frac, end)) = parse_number_prefix(bytes, i)
+                && let Some((unit_len, unit_word)) = unit_suffix(bytes, end)
+            {
+                let num_words = float_to_words(int_val, &frac);
+                out.push_str(&format!("{} {}", num_words, unit_word));
+                i = end + unit_len;
+                continue;
             }
 
             // Plain number — leave for espeak (it handles integers fine)

@@ -20,9 +20,11 @@ use safetensors::SafeTensors;
 
 fn bf16_slice_to_f32(bytes: &[u8]) -> Vec<f32> {
     bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| {
-            let raw = bf16::from_le_bytes([c[0], c[1]]);
+            let raw = bf16::from_le_bytes(*c);
             raw.to_f32()
         })
         .collect()

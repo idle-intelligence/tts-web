@@ -25,7 +25,7 @@ impl LUTConditioner {
         Ok(Self { embed, dim, output_dim })
     }
 
-    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, n_bins: usize, dim: usize, output_dim: usize) -> Result<Self> {
+    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, _n_bins: usize, dim: usize, output_dim: usize) -> Result<Self> {
         let embed = gguf.tensor(&format!("{prefix}.embed.weight"))?;
         Ok(Self { embed, dim, output_dim })
     }
@@ -37,7 +37,7 @@ impl LUTConditioner {
             return Tensor::zeros((1, 0, self.dim), DType::F32, dev);
         }
         let ids = Tensor::from_vec(
-            token_ids.iter().map(|&x| x as u32).collect::<Vec<_>>(),
+            token_ids.to_vec(),
             (token_ids.len(),),
             self.embed.device(),
         )?;

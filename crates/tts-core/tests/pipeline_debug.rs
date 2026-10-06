@@ -658,8 +658,10 @@ fn test_voice_cache_loading() {
             "layer {i} cache byte length mismatch");
 
         let f32_values: Vec<f32> = raw
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
             .collect();
 
         let nan_count = f32_values.iter().filter(|x| x.is_nan()).count();
@@ -685,8 +687,10 @@ fn test_voice_cache_loading() {
         // But we document what the file actually stores.
         let end_values: Vec<f32> = end_tensor
             .data()
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
             .collect();
         let end_min = end_values.iter().cloned().fold(f32::INFINITY, f32::min);
         let end_max = end_values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -763,8 +767,10 @@ fn test_voice_primed_generation() {
         let raw = cache_tensor.data().to_vec();
         let total_elements = 2 * 1 * seq_len * num_heads * head_dim;
         let f32_data: Vec<f32> = raw
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
             .collect();
         assert_eq!(f32_data.len(), total_elements,
             "layer {i} element count mismatch");

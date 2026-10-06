@@ -52,7 +52,7 @@ impl TimestepEmbedder {
         Ok(Self { linear1, linear2, rms_weight, freqs })
     }
 
-    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, hidden_size: usize, frequency_embedding_size: usize) -> Result<Self> {
+    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, _hidden_size: usize, _frequency_embedding_size: usize) -> Result<Self> {
         let mlp_prefix = format!("{prefix}.mlp");
         let linear1 = gguf.qlinear(&format!("{mlp_prefix}.0"))?;
         let linear2 = gguf.qlinear(&format!("{mlp_prefix}.2"))?;
@@ -101,7 +101,7 @@ impl ResBlock {
         Ok(Self { in_ln, mlp_linear1, mlp_linear2, ada_ln_silu_linear })
     }
 
-    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, channels: usize) -> Result<Self> {
+    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, _channels: usize) -> Result<Self> {
         let in_ln_w = gguf.tensor(&format!("{prefix}.in_ln.weight"))?;
         let in_ln_b = gguf.tensor(&format!("{prefix}.in_ln.bias"))?;
         let in_ln = LayerNorm::new(in_ln_w, in_ln_b, 1e-6);
@@ -154,7 +154,7 @@ impl FinalLayer {
         Ok(Self { norm_final, linear, ada_ln_silu_linear })
     }
 
-    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, model_channels: usize, out_channels: usize) -> Result<Self> {
+    pub fn load_gguf(gguf: &mut GgufTensors, prefix: &str, model_channels: usize, _out_channels: usize) -> Result<Self> {
         let device = gguf.device.clone();
         let ones = Tensor::ones((model_channels,), DType::F32, &device)?;
         let zeros = Tensor::zeros((model_channels,), DType::F32, &device)?;
@@ -232,10 +232,11 @@ impl SimpleMLPAdaLN {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn load_gguf(
         gguf: &mut GgufTensors, prefix: &str,
-        in_channels: usize, model_channels: usize, out_channels: usize,
-        cond_channels: usize, num_res_blocks: usize, num_time_conds: usize,
+        _in_channels: usize, model_channels: usize, out_channels: usize,
+        _cond_channels: usize, num_res_blocks: usize, num_time_conds: usize,
     ) -> Result<Self> {
         let mut time_embeds = Vec::new();
         for i in 0..num_time_conds {

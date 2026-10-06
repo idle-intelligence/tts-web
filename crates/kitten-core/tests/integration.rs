@@ -47,13 +47,17 @@ fn load_style(voice_name: &str, text_len: usize) -> anyhow::Result<Tensor> {
 
     let flat_f32: Vec<f32> = match tv.dtype() {
         safetensors::Dtype::F32 => data
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
             .collect(),
         safetensors::Dtype::BF16 => data
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|b| {
-                let bits = u16::from_le_bytes([b[0], b[1]]);
+                let bits = u16::from_le_bytes(*b);
                 f32::from_bits((bits as u32) << 16)
             })
             .collect(),
@@ -374,8 +378,10 @@ fn load_npy(path: &str) -> anyhow::Result<Tensor> {
     );
 
     let floats: Vec<f32> = data_bytes[..n_elements * 4]
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
         .collect();
 
     Ok(Tensor::from_vec(floats, shape.as_slice(), &Device::Cpu)?)
@@ -586,8 +592,10 @@ fn load_bin_f32(path: &str, shape: &[usize]) -> anyhow::Result<Tensor> {
         bytes.len()
     );
     let floats: Vec<f32> = bytes
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
         .collect();
     Ok(Tensor::from_vec(floats, shape, &Device::Cpu)?)
 }

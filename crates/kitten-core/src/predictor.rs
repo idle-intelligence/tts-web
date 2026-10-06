@@ -2,6 +2,7 @@ use anyhow::Result;
 use candle_core::{DType, IndexOp, Tensor};
 use candle_nn::{conv1d, linear, Conv1d, Conv1dConfig, Linear, Module, VarBuilder};
 
+#[allow(clippy::needless_range_loop)]
 fn depthwise_conv_transpose1d(
     x: &Tensor,
     weight: &Tensor,
@@ -519,6 +520,7 @@ impl Predictor {
 // durations: [batch, seq] i64
 // Returns: [batch, T, C] where T = sum(durations[b]) for each b
 // ---------------------------------------------------------------------------
+#[allow(clippy::needless_range_loop)]
 fn length_regulator(text_features: &Tensor, durations: &Tensor) -> Result<Tensor> {
     let (batch, _seq, c) = text_features.dims3()?;
     let dev = text_features.device();

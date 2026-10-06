@@ -161,6 +161,7 @@ impl DecodeBlock {
     }
 
     // x: [batch, 322, T] → [batch, 256, T] (or [batch, 256, 2T] for upsample block)
+    #[allow(clippy::unnecessary_unwrap)]
     fn forward(&self, x: &Tensor, style: &Tensor) -> Result<Tensor> {
         if self.pool_weight.is_some() {
             // Upsampling decode block (decode.3)
@@ -216,6 +217,7 @@ impl DecodeBlock {
 /// Depthwise ConvTranspose1d: each channel uses its own 1×kernel filter.
 /// weight: [C, 1, kernel], bias: [C]
 /// Implements groups=C by looping over channels.
+#[allow(clippy::needless_range_loop)]
 fn depthwise_conv_transpose1d(
     x: &Tensor,
     weight: &Tensor,
@@ -617,6 +619,7 @@ impl Generator {
 
         // ONNX uses alpha=0.1 before ups.0 and ups.1 (not 0.2)
         let gen_lrelu_alphas = [0.1, 0.1];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..self.upsample_rates.len() {
             h = leaky_relu(&h, gen_lrelu_alphas[i])?;
 
@@ -758,7 +761,7 @@ impl Decoder {
         let mut h = self.encode.forward(&enc_in, &style_half)?; // [batch, 256, T]
 
         // Four DecodeBlocks
-        for (_block_idx, block) in self.decode.iter().enumerate() {
+        for block in self.decode.iter() {
             // Align asr, f0, n to current h time dim (needed for block 3 which doubles T)
             let ht = h.dim(2)?;
             let asr_t = match_time(&asr, ht)?;
