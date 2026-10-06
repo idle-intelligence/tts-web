@@ -70,11 +70,11 @@ This produces `kitten-nano.safetensors` and `kitten-voices.safetensors` in the s
 ## Quick Start — Browser Demo
 
 ```bash
-# Build KittenTTS WASM
-wasm-pack build crates/kitten-wasm --target web --release -- --features wasm --no-default-features
+# Build both WASM packages and assemble the site
+scripts/build.sh
 
-# Start dev server
-node web/serve.mjs --port 8082
+# Start a local server
+python3 scripts/serve.py --port 8082
 ```
 
 Open http://localhost:8082/web/, select KittenTTS, click a voice.
