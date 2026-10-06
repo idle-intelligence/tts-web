@@ -242,27 +242,24 @@ fn test_intermediate_tensor_dump() {
     {
         use mimi_rs::transformer::LayerAttentionState;
         for (i, ls) in tts_state.flow_lm_state.transformer_state.layer_states.iter().enumerate() {
-            match ls {
-                LayerAttentionState::FlowLm(mha) => {
-                    eprintln!("DUMP [kv_after_prompt_text_layer_{i}] current_end={}", mha.current_end);
-                    if i == 0 {
-                        // Get all accumulated k/v chunks
-                        let all_chunks: Vec<&Tensor> = mha.k_chunks.iter().collect();
-                        if !all_chunks.is_empty() {
-                            let k_all = if all_chunks.len() == 1 {
-                                all_chunks[0].clone()
-                            } else {
-                                Tensor::cat(&all_chunks, 1).unwrap()
-                            };
-                            eprintln!("DUMP [k_all_layer_0] shape={:?}", k_all.shape());
-                            // Last token (text token 14, index = 125+14=139 in combined)
-                            let last_tok = k_all.dim(1).unwrap() - 1;
-                            let last_k = k_all.narrow(1, last_tok, 1).unwrap();
-                            dump_tensor("k_all_layer_0_last_token", &last_k, 10);
-                        }
+            if let LayerAttentionState::FlowLm(mha) = ls {
+                eprintln!("DUMP [kv_after_prompt_text_layer_{i}] current_end={}", mha.current_end);
+                if i == 0 {
+                    // Get all accumulated k/v chunks
+                    let all_chunks: Vec<&Tensor> = mha.k_chunks.iter().collect();
+                    if !all_chunks.is_empty() {
+                        let k_all = if all_chunks.len() == 1 {
+                            all_chunks[0].clone()
+                        } else {
+                            Tensor::cat(&all_chunks, 1).unwrap()
+                        };
+                        eprintln!("DUMP [k_all_layer_0] shape={:?}", k_all.shape());
+                        // Last token (text token 14, index = 125+14=139 in combined)
+                        let last_tok = k_all.dim(1).unwrap() - 1;
+                        let last_k = k_all.narrow(1, last_tok, 1).unwrap();
+                        dump_tensor("k_all_layer_0_last_token", &last_k, 10);
                     }
                 }
-                _ => {}
             }
         }
     }
