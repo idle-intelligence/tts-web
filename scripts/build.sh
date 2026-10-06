@@ -23,12 +23,14 @@ ENGINE_BUILD="${ENGINE_BUILD:-dev}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+
 echo "==> Building tts-wasm for ENGINE_BUILD=$ENGINE_BUILD"
-RUSTFLAGS="--remap-path-prefix=$HOME=/home" \
+RUSTFLAGS="--remap-path-prefix=$HOME=/home --remap-path-prefix=$CARGO_HOME_DIR=/cargo" \
   wasm-pack build crates/tts-wasm --target web --release
 
 echo "==> Building kitten-wasm (wasm feature) for ENGINE_BUILD=$ENGINE_BUILD"
-RUSTFLAGS="--remap-path-prefix=$HOME=/home" \
+RUSTFLAGS="--remap-path-prefix=$HOME=/home --remap-path-prefix=$CARGO_HOME_DIR=/cargo" \
   wasm-pack build crates/kitten-wasm --target web --release --no-default-features --features wasm
 
 TTS_WASM="crates/tts-wasm/pkg/tts_wasm_bg.wasm"
