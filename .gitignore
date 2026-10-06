@@ -6,6 +6,7 @@
 tokenizer.model
 tokenizer.json
 /target
+/_site/
 __pycache__/
 *.pyc
 .DS_Store
