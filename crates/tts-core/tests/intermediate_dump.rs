@@ -1,16 +1,16 @@
-/// Deep intermediate tensor dump test.
-///
-/// Runs a SINGLE generation step with voice conditioning and dumps tensor values
-/// at every pipeline stage so they can be compared against a reference implementation.
-///
-/// Run with:
-///   cargo test -p tts-core --test intermediate_dump -- --nocapture 2>&1 | tee /tmp/intermediate_dump.txt
-///
-/// Requirements:
-///   MODEL: $MODELS_DIR/model_int8.safetensors (MODELS_DIR defaults to "models")
-///   VOICE: /tmp/alba.safetensors
+//! Deep intermediate tensor dump test.
+//!
+//! Runs a SINGLE generation step with voice conditioning and dumps tensor values
+//! at every pipeline stage so they can be compared against a reference implementation.
+//!
+//! Run with:
+//!   cargo test -p tts-core --test intermediate_dump -- --nocapture 2>&1 | tee /tmp/intermediate_dump.txt
+//!
+//! Requirements:
+//!   MODEL: $MODELS_DIR/model_int8.safetensors (MODELS_DIR defaults to "models")
+//!   VOICE: /tmp/alba.safetensors
 
-use candle_core::{DType, Device, Result as CResult, Tensor};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::{Module, VarBuilder};
 use tts_core::config::TTSConfig;
 use tts_core::flow_lm::{FlowLMState, Rng};
@@ -276,7 +276,7 @@ fn test_intermediate_tensor_dump() {
     // Manually replicate replace_nan_with_bos to see intermediate
     let bos_emb_data = model.flow_lm.bos_emb.flatten_all().and_then(|f| f.to_vec1::<f32>()).unwrap();
     let flat_bos = bos_latent.flatten_all().and_then(|f| f.to_vec1::<f32>()).unwrap();
-    let mut replaced_data: Vec<f32> = flat_bos.iter().enumerate().map(|(i, &v)| {
+    let replaced_data: Vec<f32> = flat_bos.iter().enumerate().map(|(i, &v)| {
         if v.is_nan() { bos_emb_data[i % ldim] } else { v }
     }).collect();
     dump_vec("bos_latent_after_replace_nan", &replaced_data, 32);

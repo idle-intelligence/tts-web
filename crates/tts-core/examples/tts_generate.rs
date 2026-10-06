@@ -1,13 +1,13 @@
-/// End-to-end TTS generation example.
-///
-/// Usage:
-///   cargo run --example tts_generate -- \
-///     --model /path/to/model_int8.safetensors \
-///     --voice /path/to/alba.safetensors \
-///     --output /tmp/test_tts.wav \
-///     [--temperature 0.7]
-///
-/// Writes a Float32 PCM WAV at 24000 Hz (mono).
+//! End-to-end TTS generation example.
+//!
+//! Usage:
+//!   cargo run --example tts_generate -- \
+//!     --model /path/to/model_int8.safetensors \
+//!     --voice /path/to/alba.safetensors \
+//!     --output /tmp/test_tts.wav \
+//!     [--temperature 0.7]
+//!
+//! Writes a Float32 PCM WAV at 24000 Hz (mono).
 
 use candle_core::{Device, Result as CResult, Tensor};
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};

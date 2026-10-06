@@ -1,8 +1,8 @@
-/// Integration tests for KittenTTS.
-///
-/// These tests require local model files and are gated with `#[ignore]`.
-/// Run with:
-///   cargo test -p kitten-core -- --ignored --nocapture
+//! Integration tests for KittenTTS.
+//!
+//! These tests require local model files and are gated with `#[ignore]`.
+//! Run with:
+//!   cargo test -p kitten-core -- --ignored --nocapture
 
 use candle_core::{Device, IndexOp, Tensor};
 use kitten_core::config::KittenConfig;
@@ -184,7 +184,7 @@ fn test_synthesize_fox() {
     // "The quick brown fox jumps over the lazy dog." — IPA from espeak-ng
     let ipa = "ðə kwɪk bɹaʊn fɒks dʒʌmps əʊvə ðə leɪzi dɒɡ";
     let phoneme_ids = map_phonemes_to_ids(ipa);
-    eprintln!("fox IDs ({} tokens): {:?}", phoneme_ids.len(), &phoneme_ids);
+    eprintln!("fox IDs ({} tokens): {:?}", phoneme_ids.len(), phoneme_ids);
 
     let style = load_style("jasper", ipa.len()).expect("load style");
     let samples = model.synthesize(&phoneme_ids, &style, 1.0).expect("synthesize");
@@ -253,7 +253,7 @@ fn test_speed_control() {
     let ratio = slow.len() as f32 / fast.len() as f32;
     eprintln!("  ratio (slow/fast): {ratio:.2}");
     assert!(
-        ratio >= 1.5 && ratio <= 8.0,
+        (1.5..=8.0).contains(&ratio),
         "Speed ratio out of expected range: {ratio:.2}"
     );
 
@@ -483,7 +483,7 @@ fn test_decoder_with_onnx_inputs() -> anyhow::Result<()> {
     let onnx_decode1_out = fix("decode1_output_256ch.npy")?;  // [1, 256, 51]
     let onnx_decode2_out = fix("decode2_output_256ch.npy")?;  // [1, 256, 51]
     let onnx_decode3_out = fix("decode3_output_256ch.npy")?;  // [1, 256, 102]
-    let onnx_conv_post   = fix("conv_post_output_22ch.npy")?; // [1, 22, T_stft]
+    let _onnx_conv_post  = fix("conv_post_output_22ch.npy")?; // [1, 22, T_stft]
     let onnx_waveform    = fix("waveform_before_tanh.npy")?;  // [1, 1, T_audio]
 
     // f0_2t: we don't have the pre-downsampled f0, so reconstruct by nearest-upsample from f0_down.

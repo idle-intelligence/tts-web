@@ -1,21 +1,21 @@
-/// Kitten TTS generation example.
-///
-/// Usage:
-///   # With embedded espeak (no system dependency):
-///   cargo run --example kitten_generate -p kitten-core --release --features espeak -- \
-///     [--text "Hello world"]
-///
-///   # Without espeak feature (needs espeak-ng installed or --ipa flag):
-///   cargo run --example kitten_generate -p kitten-core --release -- \
-///     [--model /path/to/kitten-nano.safetensors] \
-///     [--voices /path/to/kitten-voices.safetensors] \
-///     [--voice jasper] \
-///     [--text "Hello world"] \
-///     [--ipa "həlˈəʊ wˈɜːld"] \
-///     [--speed 1.0] \
-///     [--output /tmp/kitten_out.wav]
-///
-/// Writes a Float32 PCM WAV at 24000 Hz (mono).
+//! Kitten TTS generation example.
+//!
+//! Usage:
+//!   # With embedded espeak (no system dependency):
+//!   cargo run --example kitten_generate -p kitten-core --release --features espeak -- \
+//!     [--text "Hello world"]
+//!
+//!   # Without espeak feature (needs espeak-ng installed or --ipa flag):
+//!   cargo run --example kitten_generate -p kitten-core --release -- \
+//!     [--model /path/to/kitten-nano.safetensors] \
+//!     [--voices /path/to/kitten-voices.safetensors] \
+//!     [--voice jasper] \
+//!     [--text "Hello world"] \
+//!     [--ipa "həlˈəʊ wˈɜːld"] \
+//!     [--speed 1.0] \
+//!     [--output /tmp/kitten_out.wav]
+//!
+//! Writes a Float32 PCM WAV at 24000 Hz (mono).
 
 use candle_core::{DType, Device, IndexOp, Tensor};
 use kitten_core::config::KittenConfig;

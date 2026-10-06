@@ -1,9 +1,9 @@
-/// Baseline tests using the original non-quantized BF16 model.
-/// Run with: cargo test -p tts-core --test baseline_original -- --nocapture
-///
-/// These tests require the original model at /tmp/tts_original.safetensors
-/// Download: curl -L -o /tmp/tts_original.safetensors \
-///   https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main/tts_b6369a24.safetensors
+//! Baseline tests using the original non-quantized BF16 model.
+//! Run with: cargo test -p tts-core --test baseline_original -- --nocapture
+//!
+//! These tests require the original model at /tmp/tts_original.safetensors
+//! Download: curl -L -o /tmp/tts_original.safetensors \
+//!   https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main/tts_b6369a24.safetensors
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;

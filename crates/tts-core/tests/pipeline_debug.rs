@@ -1,10 +1,10 @@
-/// Integration tests that validate each step of the TTS pipeline.
-/// Run with: cargo test -p tts-core --test pipeline_debug -- --nocapture
-///
-/// These tests require the model file at:
-///   $MODELS_DIR/model_int8.safetensors (MODELS_DIR defaults to "models")
-///
-/// If the file is absent, tests are skipped (they return early with a message).
+//! Integration tests that validate each step of the TTS pipeline.
+//! Run with: cargo test -p tts-core --test pipeline_debug -- --nocapture
+//!
+//! These tests require the model file at:
+//!   $MODELS_DIR/model_int8.safetensors (MODELS_DIR defaults to "models")
+//!
+//! If the file is absent, tests are skipped (they return early with a message).
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
@@ -654,7 +654,7 @@ fn test_voice_cache_loading() {
 
         // Value check: no NaN/Inf, non-trivial values
         let raw = cache.data();
-        assert_eq!(raw.len(), 2 * 1 * seq_len * expected_num_heads * expected_head_dim * 4,
+        assert_eq!(raw.len(), 2 * seq_len * expected_num_heads * expected_head_dim * 4,
             "layer {i} cache byte length mismatch");
 
         let f32_values: Vec<f32> = raw
@@ -765,7 +765,7 @@ fn test_voice_primed_generation() {
 
         // Load into candle tensor: raw bytes → F32 tensor [2, 1, seq_len, num_heads, head_dim]
         let raw = cache_tensor.data().to_vec();
-        let total_elements = 2 * 1 * seq_len * num_heads * head_dim;
+        let total_elements = 2 * seq_len * num_heads * head_dim;
         let f32_data: Vec<f32> = raw
             .as_chunks::<4>()
             .0

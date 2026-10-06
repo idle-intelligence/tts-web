@@ -34,6 +34,7 @@ fn bf16_slice_to_f32(bytes: &[u8]) -> Vec<f32> {
 // Dequantize: mirrors dequantize.rs logic exactly
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::needless_range_loop)]
 fn dequantize(
     i8_bytes: &[u8],
     scale_bytes: &[u8],
