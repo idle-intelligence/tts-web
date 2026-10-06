@@ -2,6 +2,11 @@
 
 const CACHE_NAME = 'kitten-model-v1';
 
+// Cache-bust tag for the wasm module URL below; scripts/build.sh rewrites
+// this to ENGINE_BUILD on every deploy so a rebuild is never served from an
+// older build's cache.
+const ENGINE_BUILD = "dev";
+
 let wasm = null;
 let engine = null;
 let phonemizeFn = null;
@@ -59,8 +64,8 @@ async function cachedFetch(url, label) {
 async function handleLoad(modelUrl, voicesUrl, wasmBaseUrl) {
     try {
         postMessage({ type: 'status', text: 'Loading WASM module...', ready: false });
-        wasm = await import(wasmBaseUrl + '/kitten_wasm.js');
-        await wasm.default({ module_or_path: wasmBaseUrl + '/kitten_wasm_bg.wasm' });
+        wasm = await import(wasmBaseUrl + '/kitten_wasm.js?v=' + ENGINE_BUILD);
+        await wasm.default({ module_or_path: wasmBaseUrl + '/kitten_wasm_bg.wasm?v=' + ENGINE_BUILD });
 
         engine = new wasm.KittenEngine();
 

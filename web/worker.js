@@ -1,6 +1,11 @@
 const HF_BASE = 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main';
 const VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
 
+// Cache-bust tag for the wasm module URL below; scripts/build.sh rewrites
+// this to ENGINE_BUILD on every deploy so a rebuild is never served from an
+// older build's cache.
+const ENGINE_BUILD = "dev";
+
 let model = null;
 let tokenizer = null;
 let voiceIndices = {};   // name → voice_index
@@ -197,8 +202,8 @@ async function handleLoad(config) {
 
     // 1. Import WASM
     post('status', { text: 'Loading WASM module...' });
-    const wasmJsUrl = base ? (base + '/pkg/tts_wasm.js') : new URL('../pkg/tts_wasm.js', import.meta.url).href;
-    const wasmBgUrl = base ? (base + '/pkg/tts_wasm_bg.wasm') : new URL('../pkg/tts_wasm_bg.wasm', import.meta.url).href;
+    const wasmJsUrl = (base ? (base + '/pkg/tts_wasm.js') : new URL('../pkg/tts_wasm.js', import.meta.url).href) + '?v=' + ENGINE_BUILD;
+    const wasmBgUrl = (base ? (base + '/pkg/tts_wasm_bg.wasm') : new URL('../pkg/tts_wasm_bg.wasm', import.meta.url).href) + '?v=' + ENGINE_BUILD;
     const wasmModule = await import(wasmJsUrl);
     await wasmModule.default(wasmBgUrl);
 
