@@ -284,6 +284,7 @@ impl SimpleMLPAdaLN {
 }
 
 #[cfg(test)]
+#[allow(clippy::excessive_precision)]
 mod tests {
     use super::variance_norm;
     use candle_core::{Device, Tensor};
