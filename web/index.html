@@ -593,7 +593,7 @@
 
         // Bump on every wasm/model-loading change so a stale cached worker/module can't
         // silently keep serving the old build.
-        const ENGINE_BUILD = '2026-09-29-parity-fixes';
+        const ENGINE_BUILD = '2026-10-07-voice-pin';
         const MODEL_CACHE = 'tts-model-v5';
         const MODEL_CHECK_URL = isLocal
             ? `${location.origin}/pocket-tts-en2026-q8_0.gguf`
@@ -627,7 +627,9 @@
         // ---- Pocket Multilingual (de/es/pt/it) — same engine/worker as pocket-tts, different
         // weights/tokenizer/voice base. Mirrors HF_BASE/VOICE_BASE from web/worker.js:1-2.
         const POCKET_ML_HF_BASE = 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main';
-        const POCKET_ML_VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
+        // Voice KV caches are tied to the exact weights that computed them. Pinned to the
+        // revision our GGUFs were quantized from (also the one pocket-tts 3.3.0 pins).
+        const POCKET_ML_VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/4e1e0a3e611c51c0b4ed8174fc10f32a54644303';
         function multilingualModelUrl(lang) {
             return isLocal ? `${location.origin}/pocket-tts-${lang}-q8_0.gguf` : `${POCKET_ML_HF_BASE}/languages/${lang}/pocket-tts-q8_0.gguf`;
         }
