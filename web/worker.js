@@ -1,5 +1,5 @@
 const HF_BASE = 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main';
-const VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
+const VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/4e1e0a3e611c51c0b4ed8174fc10f32a54644303';
 
 // Cache-bust tag for the wasm module URL below; scripts/build.sh rewrites
 // this to ENGINE_BUILD on every deploy so a rebuild is never served from an
