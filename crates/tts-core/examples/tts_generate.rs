@@ -1,6 +1,16 @@
 /// End-to-end TTS generation example.
 ///
-/// Usage:
+/// Select a language and voice by name — the GGUF model, tokenizer and voice
+/// embedding are downloaded and cached automatically:
+///
+///   cargo run --example tts_generate -p tts-core --release -- \
+///     --language italian --voice giovanni \
+///     --text "Ciao, questo e un test." \
+///     --output /tmp/test_tts.wav
+///
+/// `--model`/`--tokenizer`/`--voice` still take a local file path, overriding
+/// the download for offline use:
+///
 ///   cargo run --example tts_generate -p tts-core --release -- \
 ///     --model /path/to/pocket-tts-q8_0.gguf \
 ///     --tokenizer /path/to/tokenizer.model \
@@ -9,11 +19,12 @@
 ///     --output /tmp/test_tts.wav \
 ///     [--temperature 0.7]
 ///
+/// `--list` prints the available languages and voices and exits.
+///
 /// `--model` is a GGUF checkpoint (loaded via `GgufTensors::from_bytes`), not a
 /// safetensors file. `--tokenizer` is the matching SentencePiece `tokenizer.model`.
 ///
 /// Writes a Float32 PCM WAV at 24000 Hz (mono).
-
 use candle_core::{Device, Result as CResult, Tensor};
 use candle_nn::VarBuilder;
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};
@@ -24,14 +35,79 @@ use tts_core::tokenizer::Tokenizer;
 use tts_core::tts_model::{TTSState, prepare_text_prompt};
 
 // ---------------------------------------------------------------------------
+// Model catalog — languages and voices the HF repos offer, mirroring the
+// choices on the web demo (web/index.html's "pocket-multilingual" tab).
+// ---------------------------------------------------------------------------
+
+/// Full language folder names, as laid out by both
+/// `idle-intelligence/pocket-tts-gguf` and the upstream Kyutai voice repo.
+pub const LANGUAGES: &[&str] = &[
+    "english", "french", "german", "spanish", "portuguese", "italian",
+];
+
+/// Voice names. The same 26 names exist under every language's `embeddings/`
+/// folder — voice and language are orthogonal, so this is one shared list.
+pub const VOICES: &[&str] = &[
+    "alba", "anna", "azelma", "bill_boerst", "caro_davy", "charles", "cosette", "eponine",
+    "estelle", "eve", "fantine", "george", "giovanni", "jane", "javert", "jean", "juergen",
+    "lola", "marius", "mary", "michael", "paul", "peter_yearsley", "rafael", "stuart_bell", "vera",
+];
+
+/// The voice the web demo pre-selects for each language.
+pub fn default_voice_for_language(language: &str) -> &'static str {
+    match language {
+        "french" => "estelle",
+        "german" => "juergen",
+        "spanish" => "lola",
+        "portuguese" => "rafael",
+        "italian" => "giovanni",
+        _ => "alba", // english
+    }
+}
+
+const GGUF_REPO_BASE: &str = "https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main";
+/// Voice embeddings are a KV cache tied to the exact weights that produced
+/// them, so they stay pinned to the revision our GGUFs were quantized from
+/// (also the one pocket-tts 3.3.0 pins) — never `main`.
+const VOICE_REPO_BASE: &str =
+    "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/4e1e0a3e611c51c0b4ed8174fc10f32a54644303";
+
+pub fn model_url(language: &str) -> String {
+    format!("{GGUF_REPO_BASE}/languages/{language}/pocket-tts-q8_0.gguf")
+}
+
+pub fn tokenizer_url(language: &str) -> String {
+    format!("{GGUF_REPO_BASE}/languages/{language}/tokenizer.model")
+}
+
+pub fn voice_url(language: &str, voice: &str) -> String {
+    format!("{VOICE_REPO_BASE}/languages/{language}/embeddings/{voice}.safetensors")
+}
+
+fn print_list() {
+    println!("models: pocket-tts (kitten_generate -p kitten-core has KittenTTS)");
+    println!("languages: {}", LANGUAGES.join(", "));
+    println!("voices (shared across all languages): {}", VOICES.join(", "));
+    println!("default voice per language:");
+    for lang in LANGUAGES {
+        println!("  {lang}: {}", default_voice_for_language(lang));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing (manual, no external deps)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq)]
 pub struct Args {
-    pub model_path: String,
-    pub tokenizer_path: String,
+    /// Local GGUF path override. `None` means: download+cache by `language`.
+    pub model_path: Option<String>,
+    /// Local tokenizer path override. `None` means: download+cache by `language`.
+    pub tokenizer_path: Option<String>,
     pub text: String,
+    /// Either a local safetensors path (contains '/' or '\\', or ends in
+    /// `.safetensors`) or a voice name to download+cache. `None` means: use
+    /// the default voice for `language`.
     pub voice_path: Option<String>,
     pub output_path: String,
     pub temperature: f32,
@@ -40,6 +116,14 @@ pub struct Args {
     /// (via VarBuilder) instead of a Q8_0 GGUF, for numerical parity work
     /// against the official PyTorch weights.
     pub safetensors: bool,
+    pub list: bool,
+}
+
+/// A bare voice argument is a path override when it looks like one (has a
+/// path separator or the `.safetensors` extension); otherwise it's a name to
+/// resolve against `VOICES` and download.
+fn looks_like_path(value: &str) -> bool {
+    value.contains('/') || value.contains('\\') || value.ends_with(".safetensors")
 }
 
 /// Parse CLI args. `args` is the full argv, i.e. `args[0]` is the program name
@@ -53,6 +137,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
     let mut temperature = 0.7f32;
     let mut language = "english".to_string();
     let mut safetensors = false;
+    let mut list = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -91,6 +176,9 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
             "--safetensors" => {
                 safetensors = true;
             }
+            "--list" => {
+                list = true;
+            }
             other => {
                 return Err(format!("Unknown arg: {other}"));
             }
@@ -98,16 +186,141 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
         i += 1;
     }
 
+    if list {
+        return Ok(Args {
+            model_path,
+            tokenizer_path,
+            text: text.unwrap_or_default(),
+            voice_path,
+            output_path: output_path.unwrap_or_else(|| "/tmp/test_tts.wav".to_string()),
+            temperature,
+            language,
+            safetensors,
+            list,
+        });
+    }
+
+    if !LANGUAGES.contains(&language.as_str()) {
+        return Err(format!(
+            "unknown language {language:?}; valid languages: {}",
+            LANGUAGES.join(", ")
+        ));
+    }
+
+    if let Some(ref v) = voice_path
+        && !looks_like_path(v)
+        && !VOICES.contains(&v.as_str())
+    {
+        return Err(format!(
+            "unknown voice {v:?}; valid voices: {}",
+            VOICES.join(", ")
+        ));
+    }
+
     Ok(Args {
-        model_path: model_path.ok_or("--model is required")?,
-        tokenizer_path: tokenizer_path.ok_or("--tokenizer is required")?,
+        model_path,
+        tokenizer_path,
         text: text.ok_or("--text is required")?,
         voice_path,
         output_path: output_path.unwrap_or_else(|| "/tmp/test_tts.wav".to_string()),
         temperature,
         language,
         safetensors,
+        list,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Download + cache
+// ---------------------------------------------------------------------------
+
+/// `~/.cache/tts-web` by default, overridable for tests via `TTS_WEB_CACHE_DIR`.
+fn cache_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("TTS_WEB_CACHE_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home).join(".cache").join("tts-web")
+}
+
+/// Download `url` to `cache_path` if not already cached, verifying the
+/// downloaded size against the server's `Content-Length`, then return the
+/// file's bytes (from cache or freshly downloaded).
+fn cached_download(url: &str, cache_path: &std::path::Path) -> Result<Vec<u8>, String> {
+    if cache_path.exists() {
+        eprintln!("  cached: {}", cache_path.display());
+        return std::fs::read(cache_path).map_err(|e| format!("failed to read cache {}: {e}", cache_path.display()));
+    }
+
+    eprintln!("  downloading {url}...");
+    use std::io::Read;
+    let agent = ureq::AgentBuilder::new().build();
+    let resp = agent
+        .get(url)
+        .set("User-Agent", "tts-web/0.1 (+https://github.com/idle-intelligence/tts-web)")
+        .call()
+        .map_err(|e| format!("download failed for {url}: {e}"))?;
+
+    let expected_len: Option<usize> = resp
+        .header("Content-Length")
+        .and_then(|s| s.parse().ok());
+
+    let mut bytes = Vec::new();
+    resp.into_reader()
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("failed reading response body for {url}: {e}"))?;
+
+    if let Some(expected) = expected_len
+        && bytes.len() != expected
+    {
+        return Err(format!(
+            "size mismatch downloading {url}: expected {expected} bytes, got {}",
+            bytes.len()
+        ));
+    }
+    if bytes.is_empty() {
+        return Err(format!("downloaded 0 bytes from {url}"));
+    }
+
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("failed to create cache dir {}: {e}", parent.display()))?;
+    }
+    let tmp_path = cache_path.with_extension("tmp");
+    std::fs::write(&tmp_path, &bytes).map_err(|e| format!("failed to write cache file: {e}"))?;
+    std::fs::rename(&tmp_path, cache_path).map_err(|e| format!("failed to finalize cache file: {e}"))?;
+    eprintln!("  cached to {} ({} bytes)", cache_path.display(), bytes.len());
+
+    Ok(bytes)
+}
+
+fn resolve_model_bytes(args: &Args) -> Result<Vec<u8>, String> {
+    if let Some(ref path) = args.model_path {
+        return std::fs::read(path).map_err(|e| format!("failed to read model {path}: {e}"));
+    }
+    let url = model_url(&args.language);
+    let cache_path = cache_dir().join("pocket-tts").join(&args.language).join("pocket-tts-q8_0.gguf");
+    cached_download(&url, &cache_path)
+}
+
+fn resolve_tokenizer_bytes(args: &Args) -> Result<Vec<u8>, String> {
+    if let Some(ref path) = args.tokenizer_path {
+        return std::fs::read(path).map_err(|e| format!("failed to read tokenizer {path}: {e}"));
+    }
+    let url = tokenizer_url(&args.language);
+    let cache_path = cache_dir().join("pocket-tts").join(&args.language).join("tokenizer.model");
+    cached_download(&url, &cache_path)
+}
+
+/// Returns `None` when no voice is wanted at all — never the case today since
+/// a default is always picked, but kept for symmetry with the file-based path.
+fn resolve_voice_bytes(args: &Args) -> Result<Vec<u8>, String> {
+    let raw = args.voice_path.clone().unwrap_or_else(|| default_voice_for_language(&args.language).to_string());
+    if looks_like_path(&raw) {
+        return std::fs::read(&raw).map_err(|e| format!("failed to read voice {raw}: {e}"));
+    }
+    let url = voice_url(&args.language, &raw);
+    let cache_path = cache_dir().join("pocket-tts").join(&args.language).join("voices").join(format!("{raw}.safetensors"));
+    cached_download(&url, &cache_path)
 }
 
 // ---------------------------------------------------------------------------
@@ -202,24 +415,39 @@ fn log_tensor_stats(label: &str, data: &[f32]) {
 // Main
 // ---------------------------------------------------------------------------
 
-fn run() -> CResult<()> {
-    let argv: Vec<String> = std::env::args().collect();
-    let args = parse_args(&argv).unwrap_or_else(|e| {
-        eprintln!("{e}");
-        std::process::exit(1);
-    });
+/// Result of running generation end to end, without writing a WAV file —
+/// used by `run()` and exercised directly by the multi-language network test.
+pub struct GenResult {
+    pub samples: Vec<f32>,
+    pub sample_rate: u32,
+    pub total_steps: usize,
+    /// Whether the model emitted an EOS token before generation stopped
+    /// (as opposed to running out of `max_frames`).
+    pub eos_reached: bool,
+}
 
+/// Download/load everything `args` points at and run generation to
+/// completion. Shared by `run()` (which also writes a WAV) and the network
+/// test (which checks EOS + finite samples per language).
+pub fn generate(args: &Args) -> CResult<GenResult> {
     eprintln!("=== TTS Generate ===");
-    eprintln!("model: {}", args.model_path);
-    eprintln!("tokenizer: {}", args.tokenizer_path);
+    eprintln!("language: {}", args.language);
+    eprintln!("model: {:?} (download+cache if not set)", args.model_path);
+    eprintln!("tokenizer: {:?} (download+cache if not set)", args.tokenizer_path);
     eprintln!("voice: {:?}", args.voice_path);
     eprintln!("output: {}", args.output_path);
     eprintln!("temperature: {}", args.temperature);
 
+    if args.safetensors && args.model_path.is_none() {
+        return Err(candle_core::Error::Msg(
+            "--safetensors requires --model (an explicit safetensors path)".to_string(),
+        ));
+    }
+
     // --- Load model ---
     eprintln!("\n[1] Loading model ({})...", if args.safetensors { "safetensors" } else { "GGUF" });
     let (model, cfg) = if args.safetensors {
-        let tensors = candle_core::safetensors::load(&args.model_path, &Device::Cpu)?;
+        let tensors = candle_core::safetensors::load(args.model_path.as_ref().unwrap(), &Device::Cpu)?;
         eprintln!("  read {} tensors from safetensors", tensors.len());
         let cfg = tts_core::config::TTSConfig::v202601_for_safetensors_keys(
             tensors.keys(),
@@ -229,8 +457,7 @@ fn run() -> CResult<()> {
         let model = tts_core::tts_model::TTSModel::load(vb, &cfg)?;
         (model, cfg)
     } else {
-        let model_bytes = std::fs::read(&args.model_path)
-            .map_err(|e| candle_core::Error::Msg(format!("failed to read model: {e}")))?;
+        let model_bytes = resolve_model_bytes(args).map_err(candle_core::Error::Msg)?;
         eprintln!("  read {} MB", model_bytes.len() / (1024 * 1024));
         let mut gguf = mimi_rs::gguf_loader::GgufTensors::from_bytes(&model_bytes, &Device::Cpu)?;
         let cfg = tts_core::config::TTSConfig::v202601_for_gguf(&gguf, args.temperature)?;
@@ -245,11 +472,10 @@ fn run() -> CResult<()> {
         cfg.flow_lm.ldim, cfg.flow_lm.d_model, cfg.flow_lm.num_layers
     );
 
-    // --- Load voice (optional) ---
-    let voice_state = if let Some(ref voice_path) = args.voice_path {
-        eprintln!("\n[2] Loading voice from {}...", voice_path);
-        let voice_bytes = std::fs::read(voice_path)
-            .map_err(|e| candle_core::Error::Msg(format!("failed to read voice: {e}")))?;
+    // --- Load voice ---
+    let voice_state = {
+        eprintln!("\n[2] Loading voice...");
+        let voice_bytes = resolve_voice_bytes(args).map_err(candle_core::Error::Msg)?;
         eprintln!("  read {} KB", voice_bytes.len() / 1024);
 
         let tensors = candle_core::safetensors::load_buffer(&voice_bytes, &Device::Cpu)?;
@@ -313,9 +539,6 @@ fn run() -> CResult<()> {
                 },
             }
         }
-    } else {
-        eprintln!("\n[2] No voice file, using empty state");
-        model.init_flow_lm_state()
     };
     eprintln!("  voice state ready");
 
@@ -329,9 +552,8 @@ fn run() -> CResult<()> {
     eprintln!("  prepared: {prepared_text:?}");
     eprintln!("  frames_after_eos: {frames_after_eos}");
 
-    eprintln!("  loading tokenizer from {}...", args.tokenizer_path);
-    let tokenizer_bytes = std::fs::read(&args.tokenizer_path)
-        .map_err(|e| candle_core::Error::Msg(format!("failed to read tokenizer: {e}")))?;
+    eprintln!("  loading tokenizer...");
+    let tokenizer_bytes = resolve_tokenizer_bytes(args).map_err(candle_core::Error::Msg)?;
     let tokenizer = Tokenizer::from_model_bytes(&tokenizer_bytes)?;
 
     let token_ids: Vec<u32> = tokenizer.encode(&prepared_text);
@@ -361,6 +583,7 @@ fn run() -> CResult<()> {
     let mut audio_chunks: Vec<f32> = Vec::new();
     let mut eos_gate = EosGate::new(frames_after_eos);
     let mut total_steps = 0usize;
+    let mut eos_reached = false;
 
     for step in 0..max_frames {
         let (next_latent, is_eos) =
@@ -372,6 +595,9 @@ fn run() -> CResult<()> {
         if !eos_gate.accept(step, is_eos) {
             eprintln!("  EOS countdown reached 0 at step {step}, stopping");
             break;
+        }
+        if is_eos {
+            eos_reached = true;
         }
 
         let audio_chunk = model.decode_latent(&next_latent, &mut mimi_state)?;
@@ -404,11 +630,37 @@ fn run() -> CResult<()> {
     eprintln!("  total_duration: {:.2}s", total_seconds);
     log_tensor_stats("final_audio", &audio_chunks);
 
-    // --- Write WAV ---
+    Ok(GenResult {
+        samples: audio_chunks,
+        sample_rate,
+        total_steps,
+        eos_reached,
+    })
+}
+
+fn run() -> CResult<()> {
+    let argv: Vec<String> = std::env::args().collect();
+    let args = parse_args(&argv).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(1);
+    });
+
+    if args.list {
+        print_list();
+        return Ok(());
+    }
+
+    let result = generate(&args)?;
+
     eprintln!("\n[7] Writing WAV to {}...", args.output_path);
-    write_wav(&args.output_path, &audio_chunks, sample_rate)
+    write_wav(&args.output_path, &result.samples, result.sample_rate)
         .map_err(|e| candle_core::Error::Msg(format!("failed to write WAV: {e}")))?;
-    eprintln!("  wrote {} samples ({:.2}s) at {}Hz", audio_chunks.len(), total_seconds, sample_rate);
+    eprintln!(
+        "  wrote {} samples ({:.2}s) at {}Hz",
+        result.samples.len(),
+        result.samples.len() as f64 / result.sample_rate as f64,
+        result.sample_rate
+    );
     eprintln!("\nDone! Audio saved to {}", args.output_path);
 
     Ok(())
