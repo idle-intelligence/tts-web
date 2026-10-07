@@ -6,7 +6,15 @@ Branch `feat/multilingual-pocket-tts`. Voices, checkpoints and tokenizers all fr
 ## Quantization (Q8_0, `--no-encoder --validate`)
 
 Produced by `scripts/pocket-tts/quantize_to_gguf.py --subfolder languages/<lang>`.
-Source checkpoints are 219,029,196 B BF16 (French: 672,178,676 B).
+Source checkpoints are 219,029,196 B BF16.
+
+**Correction (2026-10-07):** this section originally listed French as a 24-layer, 374,792,736 B
+outlier (315 GGUF tensors). That was quantized from `main` before Kyutai's 2026-10-01 upload (see
+the Italian-gibberish entry below); at the revision we pin to,
+`4e1e0a3e611c51c0b4ed8174fc10f32a54644303`, `languages/french/model.safetensors` is 219,029,196 B,
+the same 6-layer shape as every other language, and our `fr` GGUF is 133,837,984 B — not 24 layers,
+not 374 MB. The table below is left as originally logged for the historical record; treat the `fr`
+row as superseded by this note, not as the current state.
 
 | Lang | Output | Bytes | GGUF tensors | Layers | Worst-layer SQNR |
 |---|---|---|---|---|---|
@@ -15,17 +23,18 @@ Source checkpoints are 219,029,196 B BF16 (French: 672,178,676 B).
 | pt | `pocket-tts-pt-q8_0.gguf` | 133,837,984 | 171 | 6 | 39.7 dB |
 | it | `pocket-tts-it-q8_0.gguf` | 133,837,984 | 171 | 6 | 39.5 dB |
 | en2 | `pocket-tts-en2-q8_0.gguf` | 133,837,984 | 171 | 6 | 39.6 dB |
-| fr | `pocket-tts-fr-q8_0.gguf` | 374,792,736 | **315** | **24** | 38.5 dB |
+| fr (as quantized from `main`, 2026-09-29 — see correction above) | `pocket-tts-fr-q8_0.gguf` | 374,792,736 | **315** | **24** | 38.5 dB |
 
 Worst tensor is `flow_lm.out_eos.weight` in every case except en2
 (`flow_lm.transformer.layers.0.linear2.weight`).
 
 **en2 and fr are on branch `feat/multilingual-en-fr`**, the rest on `feat/multilingual-pocket-tts`.
 `en2` is `languages/english` — the new-generation English, NOT the older root checkpoint the
-shipped Pocket TTS tab uses. French is the only 24-layer model upstream publishes; its tensor
-count checks out exactly (171 + 8 per-layer tensors × 18 extra layers = 315), and every shape
-outside the layer count matches the 6-layer models, so `remap_key()` and the quantize allowlist
-needed no changes at all. All six beat the shipped English model's 37.2 dB. `remap_key()` covers every tensor — no `None` returns, no collisions.
+shipped Pocket TTS tab uses. At the time of this GGUF, `main` was the only revision with a 24-layer
+French checkpoint; its tensor count checked out exactly (171 + 8 per-layer tensors × 18 extra
+layers = 315), and every shape outside the layer count matched the 6-layer models, so
+`remap_key()` and the quantize allowlist needed no changes. All six beat the shipped English
+model's 37.2 dB. `remap_key()` covers every tensor — no `None` returns, no collisions.
 All GGUFs have distinct sha256s; the identical byte size is a consequence of identical
 shapes, and was checked rather than assumed.
 
