@@ -1,153 +1,128 @@
 # tts-web
 
-Browser-native text-to-speech running 100% client-side via Rust/WASM.
+Text-to-speech that runs entirely in the browser, with Rust compiled to WebAssembly. No server: the text never leaves the machine.
 
-[**Try the demo →**](https://idle-intelligence.github.io/tts-web/web/)
+[**Try the demo**](https://idle-intelligence.github.io/tts-web/web/)
 
 ## Models
 
 | Model | Size | Params | Architecture | License |
 |-------|------|--------|-------------|---------|
-| [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) | ~130MB (Q8_0) | ~97M | Autoregressive + Mimi codec | MIT |
+| [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) | ~134MB per language (Q8_0) | ~97M | Autoregressive + Mimi codec | MIT (code), CC-BY-4.0 (weights) |
 | [KittenTTS](https://github.com/KittenML/KittenTTS) | ~56MB (F32) | 14M | StyleTTS 2 distilled, single forward pass | Apache 2.0 |
 
-Pocket TTS also speaks French, German, Spanish, Portuguese and Italian, each a
-~134MB Q8_0 quant of Kyutai's per-language checkpoint.
+Weights are on Hugging Face: [Pocket TTS GGUF](https://huggingface.co/idle-intelligence/pocket-tts-gguf), [KittenTTS safetensors](https://huggingface.co/idle-intelligence/kitten-tts-nano-safetensors).
 
-Weights are on HuggingFace: [Pocket TTS GGUF](https://huggingface.co/idle-intelligence/pocket-tts-gguf), [KittenTTS safetensors](https://huggingface.co/idle-intelligence/kitten-tts-nano-safetensors).
+## Languages
 
-## Quick Start — KittenTTS CLI
+Pocket TTS speaks six languages. Each is a separate Q8_0 quantization of Kyutai's checkpoint for that language, from [kyutai/pocket-tts-without-voice-cloning](https://huggingface.co/kyutai/pocket-tts-without-voice-cloning) at revision `4e1e0a3`.
 
-Generate speech from text with zero system dependencies:
+| Language | Default voice |
+|----------|---------------|
+| English | alba |
+| French | estelle |
+| German | juergen |
+| Spanish | lola |
+| Portuguese | rafael |
+| Italian | giovanni |
 
-```bash
-# Clone
-git clone https://github.com/idle-intelligence/tts-web.git
-cd tts-web
-
-# Download model weights (~60MB)
-hf download idle-intelligence/kitten-tts-nano-safetensors --local-dir models/kitten-nano
-
-# Build (one-time)
-cargo build --example kitten_generate -p kitten-core --release --features espeak
-
-# Generate speech — no system dependencies needed
-./target/release/examples/kitten_generate \
-  --model models/kitten-nano/kitten-nano.safetensors \
-  --voices models/kitten-nano/kitten-voices.safetensors \
-  --voice jasper \
-  --text "Hello, this is a test of the text-to-speech system." \
-  --output hello.wav
-```
-
-The `--features espeak` flag bundles a pure-Rust espeak-ng port with English data, so text → IPA phonemization works out of the box. The built binary at `target/release/examples/kitten_generate` is standalone — use it directly without `cargo run`.
-
-8 built-in voices: bella, jasper, luna, bruno, rosie, hugo, kiki, leo.
-
-### Without the espeak feature
-
-If you prefer not to pull the GPL espeak-ng crate, you can use system espeak-ng or pass IPA directly:
-
-```bash
-# Option A: system espeak-ng (brew install espeak-ng)
-cargo run --example kitten_generate -p kitten-core --release -- --text "Hello world"
-
-# Option B: pass IPA directly
-cargo run --example kitten_generate -p kitten-core --release -- --ipa "həlˈəʊ wˈɜːld"
-```
-
-### Using the original KittenTTS ONNX weights
-
-If you prefer to convert the weights yourself instead of using the pre-converted safetensors from HuggingFace:
-
-```bash
-# Download the original ONNX model from KittenML
-hf download KittenML/KittenTTS-nano --local-dir models/kitten-nano
-
-# Convert ONNX → safetensors (requires: pip install onnx safetensors numpy)
-python scripts/kitten/convert_kitten_to_safetensors.py models/kitten-nano
-```
-
-This produces `kitten-nano.safetensors` and `kitten-voices.safetensors` in the same directory.
+A Pocket TTS voice is a KV cache computed by one specific model, so voices are always fetched from the same Kyutai revision as the weights. Voices from a different revision produce broken speech.
 
 ## Command line
 
-Both engines have a native CLI example that selects a model, language and voice by name —
-weights, tokenizer and voice are downloaded and cached automatically (under `~/.cache/tts-web`
-for Pocket TTS, under `models/` for KittenTTS). `--model`/`--tokenizer`/`--voice`/`--voices` still
-take a local file path, overriding the download for offline use.
+Pick a language and a voice by name. The weights, tokenizer and voice are downloaded on first use and cached under `~/.cache/tts-web`.
 
 ```bash
-# Pocket TTS: Italian, voice giovanni
+git clone https://github.com/idle-intelligence/tts-web.git
+cd tts-web
+
+# Italian, voice giovanni
 cargo run --example tts_generate -p tts-core --release -- \
   --language italian --voice giovanni \
   --text "Ciao, questo è un test." \
-  --output /tmp/italian.wav
+  --output italian.wav
 
-# Pocket TTS: see every language and voice available
+# Every language and voice available
 cargo run --example tts_generate -p tts-core --release -- --list
-
-# KittenTTS: voice bruno (downloads the ~56MB model + voices on first run)
-cargo run --example kitten_generate -p kitten-core --release --features espeak -- \
-  --voice bruno --text "Hello, this is a test." --output /tmp/bruno.wav
 ```
 
-Pocket TTS voices are a KV cache tied to the exact weights that produced them, so they're always
-fetched from the pinned Kyutai revision the GGUFs were quantized from — never `main`.
+`--model`, `--tokenizer` and `--voice` also accept local file paths, for offline use.
 
-## Quick Start — Browser Demo
+KittenTTS (English) works the same way, with 8 voices: bella, jasper, luna, bruno, rosie, hugo, kiki, leo. The model and voices (~56MB) are downloaded into `models/` on first run.
 
 ```bash
-# Build both WASM packages and assemble the site
-scripts/build.sh
+cargo run --example kitten_generate -p kitten-core --release --features espeak -- \
+  --voice bruno --text "Hello, this is a test." --output bruno.wav
+```
 
-# Start a local server
+The `espeak` feature bundles a pure-Rust port of espeak-ng with English data, so text to phonemes works with no system dependency. The built binary, `target/release/examples/kitten_generate`, runs on its own.
+
+### KittenTTS without the espeak feature
+
+The espeak-ng port is GPL. To avoid it, use a system espeak-ng or pass IPA directly:
+
+```bash
+# System espeak-ng (brew install espeak-ng)
+cargo run --example kitten_generate -p kitten-core --release -- --text "Hello world"
+
+# IPA input
+cargo run --example kitten_generate -p kitten-core --release -- --ipa "həlˈəʊ wˈɜːld"
+```
+
+### Converting the original KittenTTS ONNX weights
+
+To convert the weights yourself instead of using the safetensors on Hugging Face:
+
+```bash
+hf download KittenML/KittenTTS-nano --local-dir models/kitten-nano
+python scripts/kitten/convert_kitten_to_safetensors.py models/kitten-nano   # needs onnx, safetensors, numpy
+```
+
+This writes `kitten-nano.safetensors` and `kitten-voices.safetensors` next to the ONNX file.
+
+## Browser demo
+
+```bash
+scripts/build.sh                     # builds both WASM packages and assembles the site
 python3 scripts/serve.py --port 8082
 ```
 
-Open http://localhost:8082/web/, select KittenTTS, click a voice.
+Open http://localhost:8082/web/.
 
 ## Architecture
 
 ```
 crates/
-  kitten-core/     # Pure candle inference (BERT → text encoder → predictor → decoder)
-  kitten-wasm/     # WASM bindings (2.8MB binary)
+  kitten-core/     # KittenTTS inference (BERT, text encoder, predictor, decoder) on Candle
+  kitten-wasm/     # KittenTTS WASM bindings
   tts-core/        # Pocket TTS inference
   tts-wasm/        # Pocket TTS WASM bindings
 
 web/
-  index.html       # Shared demo UI (model selector)
+  index.html       # Demo page (model and language selector)
   kitten-worker.js # KittenTTS Web Worker
   worker.js        # Pocket TTS Web Worker
   tts-client.js    # Shared client class
 ```
 
-- **KittenTTS**: Single forward pass (no autoregressive loop). Text → espeak IPA → phoneme IDs → model → 24kHz audio. 0.24 RTF native, 1.81x realtime WASM.
-- **Pocket TTS**: Autoregressive with Mimi codec decoder. Streams audio chunks for real-time playback. 0.23 RTF native, 2.28x realtime WASM.
-- **[mimi-rs](https://github.com/idle-intelligence/mimi-rs)**: Shared Mimi audio codec library.
+- **Pocket TTS**: autoregressive, with the Mimi codec decoder; audio is streamed in chunks for real-time playback.
+- **KittenTTS**: a single forward pass. Text goes to espeak IPA, phoneme IDs, the model, then 24kHz audio.
+- **[mimi-rs](https://github.com/idle-intelligence/mimi-rs)**: the shared Mimi audio codec library.
 
 ## Performance (M-series Mac)
 
 | Model | Native RTF | WASM (Chrome) |
 |-------|-----------|---------------|
-| Pocket TTS | 0.23 | 2.28x realtime (TTFB 0.41s) |
+| Pocket TTS | 0.23 | 2.28x realtime (first audio after 0.41s) |
 | KittenTTS | 0.24 | 1.81x realtime |
 
-RTF = generation time / audio duration (lower = faster). WASM speed = audio duration / wall time (higher = faster).
+RTF is generation time divided by audio duration (lower is faster). WASM speed is audio duration divided by wall time (higher is faster).
 
-## Building WASM from Source
+## Building from source
 
-The KittenTTS CLI (Quick Start above) builds standalone with no extra repos needed.
+Dependencies come straight from git; no other checkout is needed:
 
-For WASM builds (Pocket TTS, browser demo), the workspace uses patched dependencies via `[patch]` in `Cargo.toml`. You need these sibling repos checked out locally:
+- **[candle](https://github.com/ilnmtlbnm/candle)**, branch `wasm-simd-opt`: a fork with an optimized WASM SIMD128 quantized matmul, applied through `[patch.crates-io]` in `Cargo.toml`.
+- **[mimi-rs](https://github.com/idle-intelligence/mimi-rs)**: the Mimi codec (encoder, decoder, streaming transformer).
 
-```
-parent/
-  candle/         # git clone https://github.com/ilnmtlbnm/candle
-  mimi-rs/        # git clone https://github.com/idle-intelligence/mimi-rs
-  tts-web/        # this repo
-```
-
-- **[candle](https://github.com/ilnmtlbnm/candle)** — fork with optimized WASM SIMD quantized matmul
-- **[mimi-rs](https://github.com/idle-intelligence/mimi-rs)** — shared Mimi audio codec (encoder + decoder + streaming transformer)
+The Rust toolchain is pinned in `rust-toolchain.toml`.
