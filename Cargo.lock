@@ -1012,6 +1012,7 @@ dependencies = [
  "espeak-ng",
  "safetensors 0.4.5",
  "serde_json",
+ "ureq",
 ]
 
 [[package]]
