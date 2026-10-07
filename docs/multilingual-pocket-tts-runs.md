@@ -85,3 +85,105 @@ external can race the reload. That matches the original hypothesis (a late teard
 generation, a stale `onDone` closure building the blob), but the fix was a side effect of the UX
 change rather than a targeted repair, so the underlying shared-state fragility in `applyModel` has
 not been audited. Treat this as "symptom gone", not "root cause proven".
+
+## 2026-10-07 — Italian gibberish: voice embeddings from a different model revision
+
+Report: Italian on the page sounds like gibberish ("de de de"), even on simple text.
+
+### Upstream revisions
+
+`kyutai/pocket-tts-without-voice-cloning` on 2026-10-01 (commits `cede6cf`, `3463ec7`, `1e08e6a`)
+replaced `model.safetensors` **and** every voice embedding for it, es, de, pt, fr and nl. English
+weights did not change. The latest PyPI release, pocket-tts 3.3.0 (2026-09-24), pins weights,
+tokenizers and predefined voices to `4e1e0a3e611c51c0b4ed8174fc10f32a54644303`.
+
+Our GGUFs (2026-09-29) were quantized from `main` before that upload. Dequantized GGUF tensor vs
+upstream weights, SQNR in dB:
+
+| Lang | Tensor | GGUF vs 4e1e0a3 | GGUF vs main | 4e1e0a3 vs main |
+|---|---|---|---|---|
+| it | layers.0.self_attn.in_proj.weight | 44.7 | -2.6 | -1.3 |
+| it | conditioner.embed.weight | 347.1 | 9.0 | 9.1 |
+| es | layers.0.self_attn.in_proj.weight | 44.9 | -1.2 | -0.4 |
+| de | layers.0.self_attn.in_proj.weight | 44.6 | -1.5 | -1.1 |
+| pt | layers.0.self_attn.in_proj.weight | 45.1 | -2.5 | -1.3 |
+| fr | layers.0.self_attn.in_proj.weight | 44.3 | -0.9 | -0.7 |
+| en2 | layers.0.self_attn.in_proj.weight | 45.4 | 45.4 | 335.1 |
+
+Every GGUF matches `4e1e0a3`. The page fetched voices from `resolve/main`, i.e. KV caches computed
+by the 2026-10-01 models, for fr/de/es/pt/it. English voices on main are byte-identical to `4e1e0a3`.
+
+Tokenizers: all six local `tokenizer-<code>.model` sha256s equal the upstream `tokenizer.model` at
+both `4e1e0a3` and main. Token ids for the Italian sentences equal the reference's
+(`tokenizer.json` via `tokenizers`, and `sentencepiece`) id for id:
+
+| Text | Ids (ours = reference) |
+|---|---|
+| Ciao, questo è un test del sistema da testo a voce. | 801 271 273 261 260 438 319 277 1845 293 260 1733 392 292 1845 273 267 659 262 |
+| Buongiorno, come stai? | 2614 471 261 303 546 276 306 |
+| Oggi il cielo è azzurro. | 3384 269 938 319 267 2413 262 |
+
+Text preparation (strip, replace_characters, capitalisation, terminal punctuation, no padding) gives
+the same string as the reference's `prepare_text_prompt` for all three.
+
+### Temperature-0 parity, Italian, "Ciao, questo è un test del sistema da testo a voce."
+
+Reference: pocket-tts 3.3.0 on the GPU box. Rust F32: `eos_probe` (flow LM only, unquantized
+safetensors). Rust Q8: `tts_generate --temperature 0`. "Weights / voices" names the revision of each.
+
+| Weights / voices | Voice | Ref frames | Rust F32 frames | Rust Q8 frames | Step-0 EOS-logit diff F32 | Step-0 latent[..8] max diff F32 |
+|---|---|---|---|---|---|---|
+| 4e1e0a3 / 4e1e0a3 | giovanni | 54 | 55 | 49 | 3.7e-3 | 1.8e-3 |
+| 4e1e0a3 / 4e1e0a3 | anna | 44 | 44 | 44 | 1.9e-3 | 6.5e-4 |
+| 4e1e0a3 / main | giovanni | 81 | 77 | 63 | 2.7e-3 | 2.7e-4 |
+| 4e1e0a3 / main | anna | 30 | 30 | 40 | 3.3e-3 | 5.6e-4 |
+| main / main | giovanni | 43 | 43 | — | 2.4e-3 | 8.8e-5 |
+| main / main | anna | 44 | 44 | — | 2.0e-3 | 7.7e-4 |
+
+The reference itself, given 4e1e0a3 weights and main voices (the page's combination), runs to 81
+frames for a 54-frame sentence; Rust F32 tracks the reference in every combination.
+
+Spanish, reference only, "Hola, esta es una prueba del sistema de texto a voz.", temperature 0:
+lola 55 frames with 4e1e0a3 voices, 51 with main voices; giovanni 57 and 54.
+
+### Listening sets (temperature 0.7, seed 42)
+
+`hf/pocket-tts/samples/it-compare-2026-10-07/` (outside the repo): 3 sentences × giovanni/anna/marius
+for ours (Q8, main voices), ourspin (Q8, 4e1e0a3 voices), ref (3.3.0 defaults), refmain (main
+weights + main voices), refmismatch (4e1e0a3 weights + main voices). Native EOS steps, page sentence:
+ours giovanni 64, anna 28, marius 42; ourspin giovanni 46, anna 41, marius 32. Reference durations,
+page sentence: giovanni 3.36 s, anna 3.20 s, marius 2.96 s.
+
+### Fix
+
+Voice base URL pinned to `resolve/4e1e0a3e611c51c0b4ed8174fc10f32a54644303`, build tag
+`2026-10-07-voice-pin` (branch `multilingual-voice-pin`).
+
+### Gates with the pin (GPU box)
+
+Native, Q8, page text and page default voice, 4e1e0a3 voices, temperature 0.7:
+
+| Lang | Voice | EOS step | Steps | Audio | NaN/inf |
+|---|---|---|---|---|---|
+| en2 | alba | 41 | 44 | 3.52 s | 0/0 |
+| fr | estelle | 47 | 50 | 4.00 s | 0/0 |
+| de | juergen | 45 | 48 | 3.84 s | 0/0 |
+| es | lola | 41 | 44 | 3.52 s | 0/0 |
+| pt | rafael | 37 | 40 | 3.20 s | 0/0 |
+| it | giovanni | 46 | 49 | 3.92 s | 0/0 |
+
+Reference (3.3.0, same text/voice, temperature 0.7): en2 3.84 s, fr 4.32 s, de 3.44 s, es 3.52 s,
+pt 3.44 s, it 3.36 s. WAVs in `hf/pocket-tts/samples/gates-2026-10-07/`.
+
+Browser, headless Chromium (CPU), `scripts/build.sh` with `ENGINE_BUILD=2026-10-07-voice-pin`, fresh
+page per language, explicit voice click: every language generated, zero console errors, every voice
+request went to `.../resolve/4e1e0a3e.../languages/<lang>/embeddings/<voice>.safetensors`.
+
+| Lang | Voice | Result |
+|---|---|---|
+| en2 | alba | 3.52 s audio |
+| fr | estelle | 3.76 s audio |
+| de | juergen | 3.76 s audio |
+| es | lola | 3.52 s audio |
+| pt | rafael | 3.20 s audio |
+| it | giovanni | 3.76 s audio |
