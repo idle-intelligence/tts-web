@@ -593,7 +593,7 @@
 
         // Bump on every wasm/model-loading change so a stale cached worker/module can't
         // silently keep serving the old build.
-        const ENGINE_BUILD = '2026-10-07-voice-pin';
+        const ENGINE_BUILD = '2026-10-07-hf-layout';
         const MODEL_CACHE = 'tts-model-v5';
         const MODEL_CHECK_URL = isLocal
             ? `${location.origin}/pocket-tts-en2026-q8_0.gguf`
@@ -631,13 +631,13 @@
         // revision our GGUFs were quantized from (also the one pocket-tts 3.3.0 pins).
         const POCKET_ML_VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/4e1e0a3e611c51c0b4ed8174fc10f32a54644303';
         function multilingualModelUrl(lang) {
-            return isLocal ? `${location.origin}/pocket-tts-${lang}-q8_0.gguf` : `${POCKET_ML_HF_BASE}/languages/${lang}/pocket-tts-q8_0.gguf`;
+            return isLocal ? `${location.origin}/pocket-tts-${lang}-q8_0.gguf` : `${POCKET_ML_HF_BASE}/languages/${UPSTREAM_LANG_DIR[lang]}/pocket-tts-q8_0.gguf`;
         }
         function multilingualTokenizerUrl(lang) {
-            return isLocal ? `${location.origin}/tokenizer-${lang}.model` : `${POCKET_ML_HF_BASE}/languages/${lang}/tokenizer.model`;
+            return isLocal ? `${location.origin}/tokenizer-${lang}.model` : `${POCKET_ML_HF_BASE}/languages/${UPSTREAM_LANG_DIR[lang]}/tokenizer.model`;
         }
-        // Upstream lays its voice folders out by full language name, not by the short code
-        // we use for our own filenames — languages/german/..., not languages/de/...
+        // Upstream (and our GGUF repo, which mirrors it) lays folders out by full language
+        // name, not by the short code we use for our own filenames — languages/german/..., not languages/de/...
         const UPSTREAM_LANG_DIR = { en2: 'english', fr: 'french', de: 'german', es: 'spanish', pt: 'portuguese', it: 'italian' };
         function multilingualVoiceBaseUrl(lang) {
             // Voice embeddings are not staged locally — always fetched from the upstream Kyutai repo.
