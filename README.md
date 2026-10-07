@@ -70,6 +70,31 @@ python scripts/kitten/convert_kitten_to_safetensors.py models/kitten-nano
 
 This produces `kitten-nano.safetensors` and `kitten-voices.safetensors` in the same directory.
 
+## Command line
+
+Both engines have a native CLI example that selects a model, language and voice by name —
+weights, tokenizer and voice are downloaded and cached automatically (under `~/.cache/tts-web`
+for Pocket TTS, under `models/` for KittenTTS). `--model`/`--tokenizer`/`--voice`/`--voices` still
+take a local file path, overriding the download for offline use.
+
+```bash
+# Pocket TTS: Italian, voice giovanni
+cargo run --example tts_generate -p tts-core --release -- \
+  --language italian --voice giovanni \
+  --text "Ciao, questo è un test." \
+  --output /tmp/italian.wav
+
+# Pocket TTS: see every language and voice available
+cargo run --example tts_generate -p tts-core --release -- --list
+
+# KittenTTS: voice bruno (downloads the ~56MB model + voices on first run)
+cargo run --example kitten_generate -p kitten-core --release --features espeak -- \
+  --voice bruno --text "Hello, this is a test." --output /tmp/bruno.wav
+```
+
+Pocket TTS voices are a KV cache tied to the exact weights that produced them, so they're always
+fetched from the pinned Kyutai revision the GGUFs were quantized from — never `main`.
+
 ## Quick Start — Browser Demo
 
 ```bash
