@@ -104,7 +104,7 @@ fn parse_args() -> Args {
             "--debug-dir" => { i += 1; debug_dir   = Some(args[i].clone()); }
             "--list" => { list = true; }
             "--help" | "-h" => {
-                eprintln!("Usage: kitten_generate [--model PATH] [--voices PATH] [--voice NAME] [--text TEXT] [--speed FLOAT] [--output PATH] [--debug-dir DIR] [--list]");
+                eprintln!("Usage: kitten_generate [--model PATH] [--voices PATH] [--voice NAME] [--text TEXT] [--ipa IPA] [--speed FLOAT] [--output PATH] [--debug-dir DIR] [--list]");
                 std::process::exit(0);
             }
             other => {
