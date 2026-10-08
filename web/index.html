@@ -213,6 +213,17 @@
             grid-template-columns: repeat(4, 1fr);
             gap: 8px;
         }
+        .voice-grid.rows {
+            display: flex;
+            flex-direction: column;
+        }
+        .voice-row {
+            display: grid;
+            gap: 8px;
+        }
+        #languageGrid {
+            grid-template-columns: repeat(3, 1fr);
+        }
         .voice-btn {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 13px;
@@ -229,6 +240,9 @@
         }
         @media (max-width: 480px) {
             .voice-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            #languageGrid {
                 grid-template-columns: repeat(3, 1fr);
             }
             .voice-btn {
@@ -448,11 +462,17 @@
         const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
         // Same 26 voice names exist for every multilingual checkpoint (de/es/pt/it) — voice and
         // language are orthogonal, so this is one shared list, not a per-language map.
-        const POCKET_ML_VOICES = [
-            'alba', 'anna', 'azelma', 'bill_boerst', 'caro_davy', 'charles', 'cosette', 'eponine',
-            'estelle', 'eve', 'fantine', 'george', 'giovanni', 'jane', 'javert', 'jean', 'juergen',
-            'lola', 'marius', 'mary', 'michael', 'paul', 'peter_yearsley', 'rafael', 'stuart_bell', 'vera',
+        // Laid out in rows of 4, 5, 4, 4, 5, 4, alternating female and male voices
+        // (13 of each; alphabetical within each).
+        const POCKET_ML_VOICE_ROWS = [
+            ['alba', 'bill_boerst', 'anna', 'charles'],
+            ['azelma', 'george', 'caro_davy', 'giovanni', 'cosette'],
+            ['javert', 'eponine', 'jean', 'estelle'],
+            ['juergen', 'eve', 'marius', 'fantine'],
+            ['michael', 'jane', 'paul', 'lola', 'peter_yearsley'],
+            ['mary', 'rafael', 'vera', 'stuart_bell'],
         ];
+        const POCKET_ML_VOICES = POCKET_ML_VOICE_ROWS.flat();
         const LANG_LABELS = { en2: 'English (new)', fr: 'French', de: 'German', es: 'Spanish', pt: 'Portuguese', it: 'Italian' };
         const POCKET_ML_SIZES = { en2: 134, fr: 134, de: 134, es: 134, pt: 134, it: 134 };
         const LANG_DEFAULT_VOICE = { fr: 'estelle', de: 'juergen', es: 'lola', pt: 'rafael', it: 'giovanni' };
@@ -691,17 +711,26 @@
         // Shared between pocket-tts and pocket-multilingual — rebuilt with the right
         // name list when switching models, so the grid markup/CSS is never duplicated.
         const voiceGrid = document.getElementById('voiceGrid');
-        function buildVoiceGrid(names) {
+        function buildVoiceGrid(names, rows) {
             voiceGrid.innerHTML = '';
-            for (const name of names) {
+            voiceGrid.classList.toggle('rows', !!rows);
+            const rowEls = (rows || [names]).map(row => {
+                if (!rows) return voiceGrid;
+                const el = document.createElement('div');
+                el.className = 'voice-row';
+                el.style.gridTemplateColumns = `repeat(${row.length}, 1fr)`;
+                voiceGrid.appendChild(el);
+                return el;
+            });
+            (rows || [names]).forEach((row, i) => { for (const name of row) {
                 const btn = document.createElement('button');
                 btn.className = 'voice-btn';
                 btn.textContent = name;
                 btn.disabled = true;
                 btn.dataset.voice = name;
                 btn.addEventListener('click', () => selectVoice(name));
-                voiceGrid.appendChild(btn);
-            }
+                rowEls[i].appendChild(btn);
+            } });
         }
         buildVoiceGrid(VOICES);
 
@@ -1050,7 +1079,7 @@
                     downloadBtn.disabled = false;
                 }
             } else if (model === 'pocket-multilingual') {
-                buildVoiceGrid(POCKET_ML_VOICES);
+                buildVoiceGrid(POCKET_ML_VOICES, POCKET_ML_VOICE_ROWS);
                 tts = makeMultilingualClient(currentLanguage);
                 const cached = await isMultilingualCached(currentLanguage);
                 if (cached) {
