@@ -671,7 +671,7 @@
             });
             await applyModel('pocket-multilingual');
             const voiceName = (previousVoice && POCKET_ML_VOICES.includes(previousVoice)) ? previousVoice : LANG_DEFAULT_VOICE[lang] || POCKET_ML_VOICES[0];
-            selectVoice(voiceName);
+            if (tts && tts.isReady()) selectVoice(voiceName);
         }
 
         // ---- Voice grid ----
@@ -700,6 +700,9 @@
 
         function selectVoice(name) {
             if (loadingVoice || generating) return;
+            // Before the model is loaded (remote path: the language was switched but not
+            // downloaded yet) there is nothing to load the voice into.
+            if (!tts || !tts.isReady()) return;
             loadingVoice = true;
             setVoiceBtnsEnabled(false);
             voiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
