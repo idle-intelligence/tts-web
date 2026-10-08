@@ -560,6 +560,10 @@ pub fn generate(args: &Args) -> CResult<GenResult> {
     eprintln!("  token_ids ({} tokens): {:?}", token_ids.len(), token_ids);
 
     // --- Run prompt_text ---
+    // Generation time runs from text conditioning to the last audio chunk;
+    // model and voice loading are excluded.
+    let gen_start = std::time::Instant::now();
+    let mut first_audio_s: Option<f64> = None;
     eprintln!("\n[4] Running prompt_text...");
     let mut tts_state = voice_state.clone();
     model.prompt_text(&mut tts_state, &token_ids)?;
@@ -617,17 +621,31 @@ pub fn generate(args: &Args) -> CResult<GenResult> {
             eprintln!("  EOS detected at step {step}");
         }
 
+        if first_audio_s.is_none() && !pcm.is_empty() {
+            first_audio_s = Some(gen_start.elapsed().as_secs_f64());
+        }
         audio_chunks.extend_from_slice(&pcm);
         total_steps = step + 1;
 
         prev_latent = next_latent;
     }
 
+    let gen_seconds = gen_start.elapsed().as_secs_f64();
     let total_seconds = audio_chunks.len() as f64 / sample_rate as f64;
     eprintln!("\n[6] Generation complete:");
     eprintln!("  total_steps: {total_steps}");
     eprintln!("  total_samples: {}", audio_chunks.len());
     eprintln!("  total_duration: {:.2}s", total_seconds);
+    if total_seconds > 0.0 {
+        eprintln!(
+            "  generation: {:.2}s for {:.2}s of audio, RTF {:.3} ({:.2}x realtime), first audio after {:.2}s",
+            gen_seconds,
+            total_seconds,
+            gen_seconds / total_seconds,
+            total_seconds / gen_seconds,
+            first_audio_s.unwrap_or(gen_seconds)
+        );
+    }
     log_tensor_stats("final_audio", &audio_chunks);
 
     Ok(GenResult {
