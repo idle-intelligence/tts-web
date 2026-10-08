@@ -462,15 +462,28 @@
             bella: 0.8, jasper: 0.8, luna: 0.8, bruno: 0.8,
             rosie: 0.8, hugo: 0.9, kiki: 0.8, leo: 0.8,
         };
-        const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
-        const DEMO_TEXT_ML = {
-            en2: 'Hello, this is a test of the multilingual text-to-speech system.',
-            fr: "Bonjour, ceci est un test du système de synthèse vocale. C'est déjà prêt.",
-            de: 'Hallo, dies ist ein Test des Text-zu-Sprache-Systems.',
-            es: 'Hola, esta es una prueba del sistema de texto a voz.',
-            pt: 'Olá, este é um teste do sistema de texto para voz.',
-            it: 'Ciao, questo è un test del sistema da testo a voce.',
+        // Demo phrases: one entry per phrase ID, one string per locale. The English
+        // string is the reference; every other locale says the same thing.
+        const PHRASES = {
+            'tts-test': {
+                en: 'Hello, this is a test of the text-to-speech system.',
+            },
+            'multilingual-test': {
+                en: 'Hello, this is a test of the multilingual text-to-speech system.',
+                fr: 'Bonjour, ceci est un test du système de synthèse vocale multilingue.',
+                de: 'Hallo, dies ist ein Test des mehrsprachigen Text-zu-Sprache-Systems.',
+                es: 'Hola, esta es una prueba del sistema multilingüe de texto a voz.',
+                pt: 'Olá, este é um teste do sistema multilíngue de texto para fala.',
+                it: 'Ciao, questo è un test del sistema multilingue di sintesi vocale.',
+            },
         };
+        // Page language key -> locale.
+        const LANG_LOCALE = { en2: 'en', fr: 'fr', de: 'de', es: 'es', pt: 'pt', it: 'it' };
+        function phrase(id, lang) {
+            const entry = PHRASES[id];
+            return entry[LANG_LOCALE[lang] || lang] || entry.en;
+        }
+        const DEMO_TEXT = phrase('tts-test', 'en');
 
         let allChunks = [];
         let generating = false;
@@ -878,7 +891,7 @@
                 modelUrl: multilingualModelUrl(lang),
                 tokenizerUrl: multilingualTokenizerUrl(lang),
                 voiceBaseUrl: multilingualVoiceBaseUrl(lang),
-                demoText: DEMO_TEXT_ML[lang],
+                demoText: phrase('multilingual-test', lang),
                 filenamePrefix: `pocket-ml-${lang}`,
                 // Full Kyutai config name (french/german/...), so the engine
                 // applies that language's replace_characters/remove_semicolons.
@@ -984,7 +997,7 @@
             tempSliderGroup.style.display = model === 'kitten' ? 'none' : '';
             speedSliderGroup.style.display = model === 'kitten' ? '' : 'none';
             textInput.placeholder = model === 'pocket-multilingual'
-                ? DEMO_TEXT_ML[currentLanguage]
+                ? phrase('multilingual-test', currentLanguage)
                 : DEMO_TEXT;
             if (model === 'pocket-multilingual') {
                 languageSizeInfo.textContent = `Download size: ~${POCKET_ML_SIZES[currentLanguage]} MB`;
