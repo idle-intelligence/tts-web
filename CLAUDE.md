@@ -67,8 +67,8 @@ cargo run --example kitten_generate -p kitten-core --release -- --model model.sa
 ```bash
 # Native (candle Metal)
 cargo run --example tada_generate -p tada-core --release --features metal -- \
-  --model /Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-C-vvq8-eq4.gguf \
-  --tokenizer /Users/tc/Code/idle-intelligence/hf/Llama-3.2-1B/tokenizer.json \
+  --model hf/tada-1b/tada-1b-C-vvq8-eq4.gguf \
+  --tokenizer hf/Llama-3.2-1B/tokenizer.json \
   --voice voices/matrix/ex04_whisper.safetensors \
   --noise-temp 0.9 --temperature 0.6 --transition-steps 5 --seed 42 \
   --cfg-scale 1.6 --flow-steps 10 --top-p 0.9 --repetition-penalty 1.1 \
@@ -96,9 +96,9 @@ wasm-pack build crates/kitten-wasm --target web --release -- --features wasm
 ```
 
 ## Local Paths
-- Llama tokenizer: `/Users/tc/Code/idle-intelligence/hf/Llama-3.2-1B/tokenizer.json`
-- TADA models: `/Users/tc/Code/idle-intelligence/hf/tada-1b/tada-1b-*.gguf`
-- TADA codec decoder: `/Users/tc/Code/idle-intelligence/hf/tada-codec/decoder/model.safetensors`
+- Llama tokenizer: `hf/Llama-3.2-1B/tokenizer.json`
+- TADA models: `hf/tada-1b/tada-1b-*.gguf`
+- TADA codec decoder: `hf/tada-codec/decoder/model.safetensors`
 
 ## TADA Key Parameters (matching Python reference)
 - `noise_temp=0.9` (flow matching noise — critical, lower = flat audio)

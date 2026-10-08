@@ -41,7 +41,7 @@
 ///
 /// Requires locally-downloaded model/tokenizer/voice files (gated Hub repo);
 /// point at them with env vars, or the test is skipped. English now points
-/// at the `english_2026-09` checkpoint (quantized this session, worst-layer
+/// at the `english_2026-09` checkpoint (quantized on 2026-09-29, worst-layer
 /// SQNR 39.6 dB), matching the official `language="english"` alias, so it is
 /// included here too.
 ///

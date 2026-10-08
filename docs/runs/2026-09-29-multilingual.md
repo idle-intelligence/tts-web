@@ -165,7 +165,7 @@ unconditionally).
 ### Frame counts, Rust (Q8_0 GGUF, temperature 0) vs. official, before and after
 
 "Before" is the first-pass run doc's ratio table (old EOS/frame-count logic,
-`total_samples`, divided by 1920 samples/frame). "After" is this session's
+`total_samples`, divided by 1920 samples/frame). "After" is the 2026-09-29
 run against the same weights, tokenizers and voices with the fixes above and
 the same fixed text/voice per language. English was not part of the "before"
 table (excluded then; moved to the `english_2026-09` checkpoint in this
@@ -181,7 +181,7 @@ pass, see below).
 | it | 51 | 52 | 54 | -2 |
 
 Source: `cargo test -p tts-core --test official_parity --release -- --ignored --nocapture`,
-this session (`fr/de/es/pt/it` against the same GGUFs/tokenizers/voices as the
+on 2026-09-29 (`fr/de/es/pt/it` against the same GGUFs/tokenizers/voices as the
 first pass; `en` against the newly quantized `english_2026-09` GGUF). "Before"
 column from `docs/runs/2026-09-29-multilingual.md`'s "Official PyTorch parity"
 table (`total_samples / 1920`).
@@ -220,7 +220,7 @@ investigation — it reflects the actual measurement above, not an assumption.
 ### English checkpoint
 
 Moved to `english_2026-09` (same weights as the official `language="english"`
-alias, per its own config comment). Quantized this session with the same
+alias, per its own config comment). Quantized on 2026-09-29 with the same
 pipeline used for the other five languages:
 
 | Tensors | Layers | Worst-layer SQNR |
@@ -393,7 +393,7 @@ line-by-line check of `pocket_tts/modules/rope.py` against `mimi-rs`'s
 `RotaryEmbedding`, also unchanged).
 
 Checking the two `estelle.safetensors` voice-cache files directly confirmed
-it: the snapshot this session's multilingual work fetched
+it: the snapshot the 2026-09-29 multilingual work fetched
 (`069025daa1d6a8a9640bd52581e2a2252f8bede4`, see the "Source checkpoints"
 table above) has `transformer.layers.0.self_attn/offset = 154`; the
 commit `pocket_tts.utils.utils.get_predefined_voice()` hardcodes for
