@@ -447,10 +447,21 @@
         const audioSection = document.getElementById('audioSection');
         const audioPlayer = document.getElementById('audioPlayer');
         const saveWavLink = document.getElementById('saveWavLink');
-        function showKittenSaveLink() {
-            saveWavLink.href = audioPlayer.src;
-            saveWavLink.download = `kittentts-${KITTEN_VOICES[kittenVoiceIdx]}.wav`;
+        // One audio-result surface for every model: the player and the save-wav link.
+        let audioUrl = null;
+        function showAudio(pcm, sampleRate, filename, { autoplay = false } = {}) {
+            if (audioUrl) URL.revokeObjectURL(audioUrl);
+            audioUrl = URL.createObjectURL(new Blob([encodeWav(pcm, sampleRate)], { type: 'audio/wav' }));
+            audioPlayer.src = audioUrl;
+            saveWavLink.href = audioUrl;
+            saveWavLink.download = filename;
             saveWavLink.style.display = 'inline-block';
+            audioSection.style.display = 'block';
+            if (autoplay) audioPlayer.play().catch(() => {});
+        }
+        function hideAudio() {
+            audioSection.style.display = 'none';
+            saveWavLink.style.display = 'none';
         }
         const voiceSection = document.getElementById('voiceSection');
         const kittenVoiceSection = document.getElementById('kittenVoiceSection');
@@ -611,8 +622,7 @@
             generateBtn.disabled = true;
             allChunks = [];
             genStartTime = performance.now();
-            audioSection.style.display = 'none';
-            saveWavLink.style.display = 'none';
+            hideAudio();
             ipaDisplay.style.display = 'none';
             stepInfo.textContent = ipa ? 'Synthesizing...' : 'Phonemizing...';
             updateStatus('generating', ipa ? 'Synthesizing...' : 'Phonemizing...');
@@ -835,8 +845,7 @@
                     measurementDone = false;
                     dynamicPrebuffer = 0;
                     playbackStartTime = 0;
-                    audioSection.style.display = 'none';
-                    saveWavLink.style.display = 'none';
+                    hideAudio();
                     stepInfo.textContent = `Generating... (${numTokens} tokens)`;
                     updateStatus('generating', 'Generating...');
                     if (workletNode) workletNode.port.postMessage({ type: 'clear' });
@@ -906,13 +915,7 @@
                     const pcm = new Float32Array(totalLength);
                     let offset = 0;
                     for (const chunk of allChunks) { pcm.set(chunk, offset); offset += chunk.length; }
-                    const wav = encodeWav(pcm, tts.sampleRate);
-                    const blob = new Blob([wav], { type: 'audio/wav' });
-                    audioPlayer.src = URL.createObjectURL(blob);
-                    audioSection.style.display = 'block';
-                    saveWavLink.href = audioPlayer.src;
-                    saveWavLink.download = `${filenamePrefix}-${activeVoice}.wav`;
-                    saveWavLink.style.display = 'inline-block';
+                    showAudio(pcm, tts.sampleRate, `${filenamePrefix}-${activeVoice}.wav`);
                 }
             });
         }
@@ -990,29 +993,8 @@
                     const speedup = audioDur / totalTime;
                     stepInfo.textContent = `${audioDur.toFixed(2)}s audio in ${totalTime.toFixed(2)}s \u2014 ${speedup.toFixed(2)}x realtime`;
 
-                    if (isDemoGen) {
-                        isDemoGen = false;
-                        // Still show audio player for demo
-                        const wav = encodeWav(pcm, sampleRate);
-                        const blob = new Blob([wav], { type: 'audio/wav' });
-                        audioPlayer.src = URL.createObjectURL(blob);
-                        audioSection.style.display = 'block';
-                        showKittenSaveLink();
-                        audioPlayer.play().catch(() => {});
-                        if (usedIpa) {
-                            ipaDisplay.textContent = 'IPA: ' + usedIpa;
-                            ipaDisplay.style.display = '';
-                        }
-                        return;
-                    }
-
-                    const wav = encodeWav(pcm, sampleRate);
-                    const blob = new Blob([wav], { type: 'audio/wav' });
-                    audioPlayer.src = URL.createObjectURL(blob);
-                    audioSection.style.display = 'block';
-                    showKittenSaveLink();
-                    audioPlayer.play().catch(() => {});
-
+                    isDemoGen = false;
+                    showAudio(pcm, sampleRate, `kittentts-${KITTEN_VOICES[kittenVoiceIdx]}.wav`, { autoplay: true });
                     if (usedIpa) {
                         ipaDisplay.textContent = 'IPA: ' + usedIpa;
                         ipaDisplay.style.display = '';
@@ -1038,8 +1020,7 @@
                 languageSizeInfo.textContent = `Download size: ~${POCKET_ML_SIZES[currentLanguage]} MB`;
             }
             stepInfo.textContent = '';
-            audioSection.style.display = 'none';
-            saveWavLink.style.display = 'none';
+            hideAudio();
             ipaDisplay.style.display = 'none';
         }
 
@@ -1161,8 +1142,7 @@
                 generateBtn.disabled = true;
                 allChunks = [];
                 genStartTime = performance.now();
-                audioSection.style.display = 'none';
-                saveWavLink.style.display = 'none';
+                hideAudio();
                 ipaDisplay.style.display = 'none';
                 stepInfo.textContent = ipa ? 'Synthesizing...' : 'Phonemizing...';
                 updateStatus('generating', ipa ? 'Synthesizing...' : 'Phonemizing...');
