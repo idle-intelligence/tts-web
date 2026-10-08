@@ -30,6 +30,8 @@ A Pocket TTS voice is a KV cache computed by one specific model, so voices are a
 
 ## Command line
 
+You need Rust, installed with [rustup](https://rustup.rs). The repo pins its toolchain in `rust-toolchain.toml`, and rustup installs it on the first `cargo` command. The first build takes a minute or two.
+
 Pick a language and a voice by name. The weights, tokenizer and voice are downloaded on first use and cached under `~/.cache/tts-web`.
 
 ```bash
@@ -46,9 +48,14 @@ cargo run --example tts_generate -p tts-core --release -- \
 cargo run --example tts_generate -p tts-core --release -- --list
 ```
 
-`--model`, `--tokenizer` and `--voice` also accept local file paths, for offline use.
+`--model`, `--tokenizer` and `--voice` also accept local file paths, for offline use. It prints the generation time and the real-time factor. The built binary, `target/release/examples/tts_generate`, runs on its own:
 
-KittenTTS (English) works the same way, with 8 voices: bella, jasper, luna, bruno, rosie, hugo, kiki, leo. The model and voices (~56MB) are downloaded into `models/` on first run.
+```bash
+target/release/examples/tts_generate --language french --voice estelle \
+  --text "Bonjour, ceci est un test." --output french.wav
+```
+
+KittenTTS (English) works the same way, with 8 voices: bella, jasper, luna, bruno, rosie, hugo, kiki, leo. The model and voices (~56MB) are downloaded into `models/` in the current directory on first run.
 
 ```bash
 cargo run --example kitten_generate -p kitten-core --release --features espeak -- \
@@ -62,11 +69,11 @@ The `espeak` feature bundles a pure-Rust port of espeak-ng with English data, so
 The espeak-ng port is GPL. To avoid it, use a system espeak-ng or pass IPA directly:
 
 ```bash
-# System espeak-ng (brew install espeak-ng)
-cargo run --example kitten_generate -p kitten-core --release -- --text "Hello world"
+# System espeak-ng (macOS: brew install espeak-ng; Debian/Ubuntu: sudo apt install espeak-ng)
+cargo run --example kitten_generate -p kitten-core --release -- --text "Hello world" --output hello.wav
 
 # IPA input
-cargo run --example kitten_generate -p kitten-core --release -- --ipa "həlˈəʊ wˈɜːld"
+cargo run --example kitten_generate -p kitten-core --release -- --ipa "həlˈəʊ wˈɜːld" --output hello.wav
 ```
 
 ### Converting the original KittenTTS ONNX weights
