@@ -48,15 +48,32 @@ fn write_debug_tensor(dir: &str, name: &str, tensor: &Tensor) -> anyhow::Result<
 // CLI arg parsing (manual, no clap)
 // ---------------------------------------------------------------------------
 
+/// The 8 built-in voices (alphabetical, matching the WASM voice index order
+/// used on the web demo).
+const VOICES: &[&str] = &["bella", "bruno", "hugo", "jasper", "kiki", "leo", "luna", "rosie"];
+
+const KITTEN_MODEL_URL: &str =
+    "https://huggingface.co/idle-intelligence/kitten-tts-nano-safetensors/resolve/main/kitten-nano.safetensors";
+const KITTEN_VOICES_URL: &str =
+    "https://huggingface.co/idle-intelligence/kitten-tts-nano-safetensors/resolve/main/kitten-voices.safetensors";
+
+fn print_list() {
+    println!("model: kitten (tts_generate -p tts-core has Pocket TTS, with languages)");
+    println!("voices: {}", VOICES.join(", "));
+}
+
 struct Args {
     model_path: String,
+    model_path_overridden: bool,
     voices_path: String,
+    voices_path_overridden: bool,
     voice_name: String,
     text: String,
     ipa: Option<String>,
     speed: f32,
     output_path: String,
     debug_dir: Option<String>,
+    list: bool,
 }
 
 fn parse_args() -> Args {
@@ -64,26 +81,30 @@ fn parse_args() -> Args {
     let models_dir = std::env::var("MODELS_DIR").unwrap_or_else(|_| "models".into());
     let mut model_path = format!("{models_dir}/kitten-tts-nano-0.8/kitten-nano.safetensors");
     let mut voices_path = format!("{models_dir}/kitten-tts-nano-0.8/kitten-voices.safetensors");
+    let mut model_path_overridden = false;
+    let mut voices_path_overridden = false;
     let mut voice_name = String::from("jasper");
     let mut text = String::from("Hello, world.");
     let mut speed = 1.0f32;
     let mut output_path = String::from("/tmp/kitten_out.wav");
     let mut debug_dir: Option<String> = None;
     let mut ipa: Option<String> = None;
+    let mut list = false;
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
             "--ipa" => { i += 1; ipa = Some(args[i].clone()); }
-            "--model"     => { i += 1; model_path  = args[i].clone(); }
-            "--voices"    => { i += 1; voices_path = args[i].clone(); }
+            "--model"     => { i += 1; model_path  = args[i].clone(); model_path_overridden = true; }
+            "--voices"    => { i += 1; voices_path = args[i].clone(); voices_path_overridden = true; }
             "--voice"     => { i += 1; voice_name  = args[i].clone(); }
             "--text"      => { i += 1; text        = args[i].clone(); }
             "--speed"     => { i += 1; speed       = args[i].parse().expect("speed must be f32"); }
             "--output"    => { i += 1; output_path = args[i].clone(); }
             "--debug-dir" => { i += 1; debug_dir   = Some(args[i].clone()); }
+            "--list" => { list = true; }
             "--help" | "-h" => {
-                eprintln!("Usage: kitten_generate [--model PATH] [--voices PATH] [--voice NAME] [--text TEXT] [--speed FLOAT] [--output PATH] [--debug-dir DIR]");
+                eprintln!("Usage: kitten_generate [--model PATH] [--voices PATH] [--voice NAME] [--text TEXT] [--ipa IPA] [--speed FLOAT] [--output PATH] [--debug-dir DIR] [--list]");
                 std::process::exit(0);
             }
             other => {
@@ -94,7 +115,45 @@ fn parse_args() -> Args {
         i += 1;
     }
 
-    Args { model_path, voices_path, voice_name, text, ipa, speed, output_path, debug_dir }
+    Args {
+        model_path, model_path_overridden, voices_path, voices_path_overridden,
+        voice_name, text, ipa, speed, output_path, debug_dir, list,
+    }
+}
+
+/// Download `url` to `path` if `path` doesn't already exist (the model/voices
+/// files aren't per-voice — the whole safetensors is one download, so no
+/// separate cache dir is needed; the default location under `models/` is the
+/// cache). Verifies the downloaded size against the server's `Content-Length`.
+fn ensure_cached(path: &str, url: &str) -> anyhow::Result<()> {
+    if std::path::Path::new(path).exists() {
+        return Ok(());
+    }
+    eprintln!("  {path} not found locally, downloading from {url}...");
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    use std::io::Read;
+    let agent = ureq::AgentBuilder::new().build();
+    let resp = agent
+        .get(url)
+        .set("User-Agent", "tts-web/0.1 (+https://github.com/idle-intelligence/tts-web)")
+        .call()
+        .map_err(|e| anyhow::anyhow!("download failed for {url}: {e}"))?;
+    let expected_len: Option<usize> = resp.header("Content-Length").and_then(|s| s.parse().ok());
+    let mut bytes = Vec::new();
+    resp.into_reader().read_to_end(&mut bytes)?;
+    if let Some(expected) = expected_len
+        && bytes.len() != expected
+    {
+        anyhow::bail!("size mismatch downloading {url}: expected {expected} bytes, got {}", bytes.len());
+    }
+    if bytes.is_empty() {
+        anyhow::bail!("downloaded 0 bytes from {url}");
+    }
+    std::fs::write(path, &bytes)?;
+    eprintln!("  cached to {path} ({} bytes)", bytes.len());
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -180,6 +239,18 @@ fn phonemize(text: &str) -> anyhow::Result<String> {
 
 fn main() -> anyhow::Result<()> {
     let args = parse_args();
+
+    if args.list {
+        print_list();
+        return Ok(());
+    }
+
+    if !args.model_path_overridden {
+        ensure_cached(&args.model_path, KITTEN_MODEL_URL)?;
+    }
+    if !args.voices_path_overridden {
+        ensure_cached(&args.voices_path, KITTEN_VOICES_URL)?;
+    }
 
     let t0 = std::time::Instant::now();
     let text = preprocess_text(&args.text);

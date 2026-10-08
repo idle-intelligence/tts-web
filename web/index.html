@@ -213,18 +213,41 @@
             grid-template-columns: repeat(4, 1fr);
             gap: 8px;
         }
+        .voice-grid.rows {
+            display: flex;
+            flex-direction: column;
+        }
+        .voice-row {
+            display: grid;
+            gap: 8px;
+        }
+        #languageGrid {
+            grid-template-columns: repeat(3, 1fr);
+        }
         .voice-btn {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 13px;
             font-weight: 500;
-            padding: 6px 0;
+            padding: 6px 4px;
             cursor: pointer;
             border: 1px solid var(--border);
             background: transparent;
             color: var(--text);
             border-radius: 0;
             text-align: center;
+            overflow-wrap: break-word;
             transition: border-color 0.15s, background 0.15s, color 0.15s;
+        }
+        @media (max-width: 480px) {
+            .voice-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            #languageGrid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            .voice-btn {
+                font-size: 11px;
+            }
         }
         .voice-btn:hover:not(:disabled) {
             border-color: var(--text);
@@ -241,6 +264,13 @@
         .voice-btn.loading {
             border-color: var(--yellow);
             color: var(--yellow);
+        }
+        .grid-label {
+            display: block;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 8px;
         }
 
         .model-selector {
@@ -304,6 +334,14 @@
             text-decoration: none;
         }
         footer a:hover { color: var(--muted); }
+        footer .credit {
+            font-size: 13px;
+            color: var(--faint);
+            line-height: 1.6;
+            margin-top: 16px;
+        }
+        footer .credit a { text-decoration: underline; color: var(--faint); }
+        footer .credit a:hover { color: var(--muted); }
     </style>
 </head>
 <body>
@@ -323,6 +361,7 @@
         <h2>settings <span class="sub">· model</span></h2>
         <div class="model-selector">
             <label><input type="radio" name="model" value="pocket-tts" checked> Pocket TTS (128 MB)</label>
+            <label><input type="radio" name="model" value="pocket-multilingual"> Pocket Multilingual (134 MB)</label>
             <label><input type="radio" name="model" value="kitten"> KittenTTS (~45 MB)</label>
         </div>
     </section>
@@ -344,6 +383,11 @@
 
     <section id="voiceSection">
         <h2>voice</h2>
+        <div id="languageGridGroup" style="display:none;margin-bottom:12px">
+            <label class="grid-label">language</label>
+            <div class="voice-grid" id="languageGrid"></div>
+            <p class="info" id="languageSizeInfo" style="margin-top:8px"></p>
+        </div>
         <div class="voice-grid" id="voiceGrid"></div>
     </section>
 
@@ -382,6 +426,7 @@
 
     <footer>
         <a href="https://idleintelligence.org">idleintelligence.org</a>
+        <p class="credit">Voices and models: <a href="https://huggingface.co/kyutai/pocket-tts">Kyutai Pocket TTS</a> (CC-BY-4.0), per language. <a href="https://huggingface.co/KittenML/kitten-tts-nano-0.1">KittenTTS</a> (Apache-2.0).</p>
     </footer>
 
     <script type="module">
@@ -402,6 +447,22 @@
         const audioSection = document.getElementById('audioSection');
         const audioPlayer = document.getElementById('audioPlayer');
         const saveWavLink = document.getElementById('saveWavLink');
+        // One audio-result surface for every model: the player and the save-wav link.
+        let audioUrl = null;
+        function showAudio(pcm, sampleRate, filename, { autoplay = false } = {}) {
+            if (audioUrl) URL.revokeObjectURL(audioUrl);
+            audioUrl = URL.createObjectURL(new Blob([encodeWav(pcm, sampleRate)], { type: 'audio/wav' }));
+            audioPlayer.src = audioUrl;
+            saveWavLink.href = audioUrl;
+            saveWavLink.download = filename;
+            saveWavLink.style.display = 'inline-block';
+            audioSection.style.display = 'block';
+            if (autoplay) audioPlayer.play().catch(() => {});
+        }
+        function hideAudio() {
+            audioSection.style.display = 'none';
+            saveWavLink.style.display = 'none';
+        }
         const voiceSection = document.getElementById('voiceSection');
         const kittenVoiceSection = document.getElementById('kittenVoiceSection');
         const kittenVoiceGrid = document.getElementById('kittenVoiceGrid');
@@ -409,16 +470,30 @@
         const speedValue = document.getElementById('speedValue');
         const speedSliderGroup = document.getElementById('speedSliderGroup');
         const ipaDisplay = document.getElementById('ipaDisplay');
-        // kittenPhrases removed
+        const languageGrid = document.getElementById('languageGrid');
+        const languageGridGroup = document.getElementById('languageGridGroup');
+        const languageSizeInfo = document.getElementById('languageSizeInfo');
 
-        const VOICES = ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'];
-        // Must be alphabetical — matches WASM voice index order (sorted in load_voices)
-        const KITTEN_VOICES = ['bella', 'bruno', 'hugo', 'jasper', 'kiki', 'leo', 'luna', 'rosie'];
-        const KITTEN_SPEED_PRIORS = {
-            bella: 0.8, jasper: 0.8, luna: 0.8, bruno: 0.8,
-            rosie: 0.8, hugo: 0.9, kiki: 0.8, leo: 0.8,
+        // Demo phrases: one entry per phrase ID, one string per locale. The English
+        // string is the reference; every other locale says the same thing.
+        const PHRASES = {
+            'tts-test': {
+                en: 'Hello, this is a test of the text-to-speech system.',
+            },
+            'multilingual-test': {
+                en: 'Hello, this is a test of the multilingual text-to-speech system.',
+                fr: 'Bonjour, ceci est un test du système de synthèse vocale multilingue.',
+                de: 'Hallo, dies ist ein Test des mehrsprachigen Text-zu-Sprache-Systems.',
+                es: 'Hola, esta es una prueba del sistema multilingüe de texto a voz.',
+                pt: 'Olá, este é um teste do sistema multilíngue de texto para fala.',
+                it: 'Ciao, questo è un test del sistema multilingue di sintesi vocale.',
+            },
         };
-        const DEMO_TEXT = 'Hello, this is a test of the text-to-speech system.';
+        function phrase(id, lang) {
+            const entry = PHRASES[id];
+            return entry[LANGUAGES[lang]?.locale || lang] || entry.en;
+        }
+        const DEMO_TEXT = PHRASES['tts-test'].en;
 
         let allChunks = [];
         let generating = false;
@@ -427,9 +502,9 @@
         let loadingVoice = false;
         let isDemoGen = false;
         let currentModel = 'pocket-tts';
+        let currentLanguage = 'en2';
         let kittenVoiceIdx = 0;
         let lastIpa = null;
-        let kittenVoiceNames = KITTEN_VOICES;
         let kittenReady = false;
 
         const BATCH_MS = 500;
@@ -488,67 +563,14 @@
             speedValue.textContent = parseFloat(speedSlider.value).toFixed(2);
         });
 
-        // ---- Kitten voice grid ----
-        for (let i = 0; i < KITTEN_VOICES.length; i++) {
-            const name = KITTEN_VOICES[i];
-            const btn = document.createElement('button');
-            btn.className = 'voice-btn';
-            btn.textContent = name;
-            btn.dataset.voiceIdx = i;
-            btn.addEventListener('click', () => {
-                if (generating) return;
-                kittenVoiceIdx = i;
-                kittenVoiceGrid.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                // Auto-generate when engine is ready
-                if (kittenReady) {
-                    triggerKittenGenerate(true);
-                }
-            });
-            kittenVoiceGrid.appendChild(btn);
-        }
-
-        // Phrase chips removed — text input is freeform, IPA is shown as output
-
-        function triggerKittenGenerate(isDemo) {
-            if (generating) return;
-            const text = textInput.value.trim() || DEMO_TEXT;
-            const ipa = '';
-            lastIpa = null; // onPhonemized will set this when worker returns IPA
-            isDemoGen = isDemo;
-            generating = true;
-            generateBtn.disabled = true;
-            allChunks = [];
-            genStartTime = performance.now();
-            audioSection.style.display = 'none';
-            saveWavLink.style.display = 'none';
-            ipaDisplay.style.display = 'none';
-            stepInfo.textContent = ipa ? 'Synthesizing...' : 'Phonemizing...';
-            updateStatus('generating', ipa ? 'Synthesizing...' : 'Phonemizing...');
-            const prior = KITTEN_SPEED_PRIORS[KITTEN_VOICES[kittenVoiceIdx]] || 0.8;
-            const effectiveSpeed = parseFloat(speedSlider.value) * prior;
-            tts.generate(text, 1.0, {
-                ipa,
-                voiceIdx: kittenVoiceIdx,
-                speed: effectiveSpeed,
-                textLen: text.length,
-            });
-        }
-
         // Detect local dev server (not deployed to GitHub Pages)
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
-        const MODEL_CACHE = 'tts-model-v3';
-        const MODEL_CHECK_URL = isLocal
-            ? `${location.origin}/pocket-tts-q8_0.gguf`
-            : 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main/pocket-tts-q8_0.gguf';
-        async function isModelCached() {
-            if (isLocal) return true; // always available from dev server
-            try {
-                const cache = await caches.open(MODEL_CACHE);
-                return !!(await cache.match(MODEL_CHECK_URL));
-            } catch { return false; }
-        }
+        // Bump on every wasm/model-loading change so a stale cached worker/module can't
+        // silently keep serving the old build.
+        const ENGINE_BUILD = '2026-10-07-voice-pin-en';
+        const MODEL_CACHE = 'tts-model-v5';
+        const KITTEN_CACHE = 'kitten-model-v1';
 
         const KITTEN_MODEL_URL = isLocal
             ? `${location.origin}/kitten-model.safetensors`
@@ -559,25 +581,210 @@
         const KITTEN_WASM_BASE = isLocal
             ? `${location.origin}/kitten-pkg`
             : '../kitten-pkg';
-        const KITTEN_CACHE = 'kitten-model-v1';
-        async function isKittenCached() {
-            if (isLocal) return true;
+
+        // Pocket Multilingual (de/es/pt/it) uses the same engine/worker as pocket-tts, only
+        // the weights/tokenizer/voice base differ. Mirrors HF_BASE/VOICE_BASE from worker.js:1-2.
+        const POCKET_HF_BASE = 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main';
+        // Voice KV caches are tied to the exact weights that computed them. Pinned to the
+        // revision our GGUFs were quantized from (also the one pocket-tts 3.3.0 pins).
+        const POCKET_VOICE_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/4e1e0a3e611c51c0b4ed8174fc10f32a54644303';
+
+        // Language table: upstream folder name (Kyutai's repo lays folders out by full
+        // language name, not the short code used for our own local filenames), label,
+        // download size, default voice and locale (for PHRASES), keyed by page language.
+        const LANGUAGES = {
+            en2: { dir: 'english', label: 'English (new)', size: 134, defaultVoice: null, locale: 'en' },
+            fr: { dir: 'french', label: 'French', size: 134, defaultVoice: 'estelle', locale: 'fr' },
+            de: { dir: 'german', label: 'German', size: 134, defaultVoice: 'juergen', locale: 'de' },
+            es: { dir: 'spanish', label: 'Spanish', size: 134, defaultVoice: 'lola', locale: 'es' },
+            pt: { dir: 'portuguese', label: 'Portuguese', size: 134, defaultVoice: 'rafael', locale: 'pt' },
+            it: { dir: 'italian', label: 'Italian', size: 134, defaultVoice: 'giovanni', locale: 'it' },
+        };
+        function multilingualModelUrl(lang) {
+            return isLocal ? `${location.origin}/pocket-tts-${lang}-q8_0.gguf` : `${POCKET_HF_BASE}/languages/${LANGUAGES[lang].dir}/pocket-tts-q8_0.gguf`;
+        }
+        function multilingualTokenizerUrl(lang) {
+            return isLocal ? `${location.origin}/tokenizer-${lang}.model` : `${POCKET_HF_BASE}/languages/${LANGUAGES[lang].dir}/tokenizer.model`;
+        }
+        function multilingualVoiceBaseUrl(lang) {
+            // Voice embeddings are not staged locally — always fetched from the upstream Kyutai repo.
+            return `${POCKET_VOICE_BASE}/languages/${LANGUAGES[lang].dir}/embeddings`;
+        }
+
+        // One model table: everything that distinguishes pocket-tts, pocket-multilingual
+        // and kitten from one another, as data. The state machine below reads it instead
+        // of branching on the model name.
+        const MODEL_TABLE = {
+            'pocket-tts': {
+                engine: 'pocket',
+                modelType: 'pocket-tts',
+                workerUrl: `./worker.js?v=${ENGINE_BUILD}`,
+                voices: ['alba', 'azelma', 'cosette', 'eponine', 'fantine', 'javert', 'jean', 'marius'],
+                voiceRows: null,
+                languages: null,
+                phraseId: 'tts-test',
+                filename: () => `pocket-tts-${activeVoice}.wav`,
+                cacheName: MODEL_CACHE,
+                checkUrl: () => (isLocal ? `${location.origin}/pocket-tts-en2026-q8_0.gguf` : `${POCKET_HF_BASE}/languages/english/pocket-tts-q8_0.gguf`),
+                modelUrl: () => (isLocal ? '/pocket-tts-en2026-q8_0.gguf' : null),
+                tokenizerUrl: () => (isLocal ? '/tokenizer-english.model' : null),
+                voiceBaseUrl: () => null,
+                language: () => null,
+                notDownloadedText: 'Model not downloaded',
+                cachedLoadingText: 'Loading from cache...',
+                hasTemp: true,
+            },
+            'pocket-multilingual': {
+                engine: 'pocket',
+                modelType: 'pocket-multilingual',
+                workerUrl: `./worker.js?v=${ENGINE_BUILD}`,
+                // Same 26 voice names exist for every multilingual checkpoint (de/es/pt/it) —
+                // voice and language are orthogonal, so this is one shared list, not a
+                // per-language map. Laid out in rows of 4, 5, 4, 4, 5, 4, alternating female
+                // and male voices (13 of each; alphabetical within each).
+                voiceRows: [
+                    ['alba', 'bill_boerst', 'anna', 'charles'],
+                    ['azelma', 'george', 'caro_davy', 'giovanni', 'cosette'],
+                    ['javert', 'eponine', 'jean', 'estelle'],
+                    ['juergen', 'eve', 'marius', 'fantine'],
+                    ['michael', 'jane', 'paul', 'lola', 'peter_yearsley'],
+                    ['mary', 'rafael', 'vera', 'stuart_bell'],
+                ],
+                get voices() { return this.voiceRows.flat(); },
+                languages: LANGUAGES,
+                phraseId: 'multilingual-test',
+                filename: () => `pocket-ml-${currentLanguage}-${activeVoice}.wav`,
+                cacheName: MODEL_CACHE,
+                checkUrl: (lang) => multilingualModelUrl(lang),
+                modelUrl: (lang) => multilingualModelUrl(lang),
+                tokenizerUrl: (lang) => multilingualTokenizerUrl(lang),
+                voiceBaseUrl: (lang) => multilingualVoiceBaseUrl(lang),
+                // Full Kyutai config name (french/german/...), so the engine applies that
+                // language's replace_characters/remove_semicolons.
+                language: (lang) => LANGUAGES[lang].dir,
+                notDownloadedText: 'Model not downloaded',
+                cachedLoadingText: 'Loading from cache...',
+                hasTemp: true,
+            },
+            kitten: {
+                engine: 'kitten',
+                workerUrl: './kitten-worker.js',
+                // Must be alphabetical — matches WASM voice index order (sorted in load_voices)
+                voices: ['bella', 'bruno', 'hugo', 'jasper', 'kiki', 'leo', 'luna', 'rosie'],
+                voiceRows: null,
+                languages: null,
+                phraseId: 'tts-test',
+                filename: () => `kittentts-${MODEL_TABLE.kitten.voices[kittenVoiceIdx]}.wav`,
+                cacheName: KITTEN_CACHE,
+                checkUrl: () => KITTEN_MODEL_URL,
+                notDownloadedText: 'KittenTTS model not downloaded (~45 MB)',
+                cachedLoadingText: 'Loading KittenTTS...',
+                speedPriors: {
+                    bella: 0.8, jasper: 0.8, luna: 0.8, bruno: 0.8,
+                    rosie: 0.8, hugo: 0.9, kiki: 0.8, leo: 0.8,
+                },
+                hasSpeed: true, hasIpa: true,
+            },
+        };
+
+        async function isCached(url, cacheName) {
+            if (isLocal) return true; // always available from dev server
             try {
-                const cache = await caches.open(KITTEN_CACHE);
-                return !!(await cache.match(KITTEN_MODEL_URL));
+                const cache = await caches.open(cacheName);
+                return !!(await cache.match(url));
             } catch { return false; }
         }
 
-        // ---- Voice grid ----
-        const voiceGrid = document.getElementById('voiceGrid');
-        for (const name of VOICES) {
+        // ---- Kitten voice grid ----
+        // Built once: KittenTTS has one fixed voice list, independent of model/language
+        // switching, so the grid and the selected voice persist across switches.
+        for (let i = 0; i < MODEL_TABLE.kitten.voices.length; i++) {
+            const name = MODEL_TABLE.kitten.voices[i];
             const btn = document.createElement('button');
             btn.className = 'voice-btn';
             btn.textContent = name;
-            btn.disabled = true;
-            btn.dataset.voice = name;
-            btn.addEventListener('click', () => selectVoice(name));
-            voiceGrid.appendChild(btn);
+            btn.dataset.voiceIdx = i;
+            btn.addEventListener('click', () => {
+                if (generating) return;
+                kittenVoiceIdx = i;
+                kittenVoiceGrid.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                if (kittenReady) runKittenGenerate(textInput.value.trim() || DEMO_TEXT, true);
+            });
+            kittenVoiceGrid.appendChild(btn);
+        }
+
+        function runKittenGenerate(text, isDemo) {
+            if (generating) return;
+            const cfg = MODEL_TABLE.kitten;
+            isDemoGen = isDemo;
+            generating = true;
+            generateBtn.disabled = true;
+            allChunks = [];
+            genStartTime = performance.now();
+            hideAudio();
+            ipaDisplay.style.display = 'none';
+            stepInfo.textContent = 'Phonemizing...';
+            updateStatus('generating', 'Phonemizing...');
+            const voiceName = cfg.voices[kittenVoiceIdx];
+            const prior = cfg.speedPriors[voiceName] || 0.8;
+            const effectiveSpeed = parseFloat(speedSlider.value) * prior;
+            tts.generate(text, 1.0, {
+                ipa: '',
+                voiceIdx: kittenVoiceIdx,
+                speed: effectiveSpeed,
+                textLen: text.length,
+            });
+        }
+
+        // ---- Language grid ----
+        for (const lang of Object.keys(LANGUAGES)) {
+            const btn = document.createElement('button');
+            btn.className = 'voice-btn';
+            btn.textContent = LANGUAGES[lang].label;
+            btn.dataset.lang = lang;
+            if (lang === currentLanguage) btn.classList.add('active');
+            btn.addEventListener('click', () => switchLanguage(lang));
+            languageGrid.appendChild(btn);
+        }
+
+        async function switchLanguage(lang) {
+            if (generating || lang === currentLanguage) return;
+            const previousVoice = activeVoice;
+            currentLanguage = lang;
+            languageGrid.querySelectorAll('.voice-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.lang === lang);
+            });
+            await applyModel('pocket-multilingual');
+            const mlVoices = MODEL_TABLE['pocket-multilingual'].voices;
+            const voiceName = (previousVoice && mlVoices.includes(previousVoice)) ? previousVoice : (LANGUAGES[lang].defaultVoice || mlVoices[0]);
+            if (tts && tts.isReady()) selectVoice(voiceName);
+        }
+
+        // ---- Voice grid (pocket-tts and pocket-multilingual) ----
+        // Shared between both models — rebuilt with the right name list when switching
+        // models, so the grid markup/CSS is never duplicated.
+        const voiceGrid = document.getElementById('voiceGrid');
+        function buildVoiceGrid(names, rows) {
+            voiceGrid.innerHTML = '';
+            voiceGrid.classList.toggle('rows', !!rows);
+            const rowEls = (rows || [names]).map(row => {
+                if (!rows) return voiceGrid;
+                const el = document.createElement('div');
+                el.className = 'voice-row';
+                el.style.gridTemplateColumns = `repeat(${row.length}, 1fr)`;
+                voiceGrid.appendChild(el);
+                return el;
+            });
+            (rows || [names]).forEach((row, i) => { for (const name of row) {
+                const btn = document.createElement('button');
+                btn.className = 'voice-btn';
+                btn.textContent = name;
+                btn.disabled = true;
+                btn.dataset.voice = name;
+                btn.addEventListener('click', () => selectVoice(name));
+                rowEls[i].appendChild(btn);
+            } });
         }
 
         function setVoiceBtnsEnabled(enabled) {
@@ -588,6 +795,9 @@
 
         function selectVoice(name) {
             if (loadingVoice || generating) return;
+            // Before the model is loaded (remote path: the language was switched but not
+            // downloaded yet) there is nothing to load the voice into.
+            if (!tts || !tts.isReady()) return;
             loadingVoice = true;
             setVoiceBtnsEnabled(false);
             voiceGrid.querySelectorAll('.voice-btn').forEach(btn => {
@@ -597,15 +807,17 @@
             tts.loadVoice(name);
         }
 
-        // ---- Pocket TTS client ----
-        function makePocketClient() {
+        // ---- Pocket client (pocket-tts and pocket-multilingual share one engine/worker,
+        // the model table supplies the URLs, demo text, filename and language that differ) ----
+        function makePocketClient(cfg, lang) {
+            const demoText = phrase(cfg.phraseId, lang);
             return new TtsClient({
-                modelType: 'pocket-tts',
-                workerUrl: './worker.js',
-                ...(isLocal ? {
-                    modelUrl: '/pocket-tts-q8_0.gguf',
-                    tokenizerUrl: '/tokenizer.model',
-                } : {}),
+                modelType: cfg.modelType,
+                workerUrl: cfg.workerUrl,
+                modelUrl: cfg.modelUrl(lang),
+                tokenizerUrl: cfg.tokenizerUrl(lang),
+                voiceBaseUrl: cfg.voiceBaseUrl(lang),
+                language: cfg.language(lang),
                 onVoiceLoaded: (name) => {
                     loadingVoice = false;
                     activeVoice = name;
@@ -622,7 +834,7 @@
                     generating = true;
                     generateBtn.disabled = true;
                     setVoiceBtnsEnabled(false);
-                    tts.generate(userText || DEMO_TEXT, parseFloat(tempSlider.value));
+                    tts.generate(userText || demoText, parseFloat(tempSlider.value));
                 },
                 onStatus: (text, ready, progress) => {
                     if (ready) {
@@ -662,8 +874,7 @@
                     measurementDone = false;
                     dynamicPrebuffer = 0;
                     playbackStartTime = 0;
-                    audioSection.style.display = 'none';
-                    saveWavLink.style.display = 'none';
+                    hideAudio();
                     stepInfo.textContent = `Generating... (${numTokens} tokens)`;
                     updateStatus('generating', 'Generating...');
                     if (workletNode) workletNode.port.postMessage({ type: 'clear' });
@@ -725,31 +936,24 @@
                     setVoiceBtnsEnabled(true);
                     stepInfo.textContent = `${audioDur}s audio in ${totalTime}s — TTFB ${ttfb}s — ${rtf}x realtime`;
                     updateStatus('ready', 'Ready');
-                    if (isDemoGen) {
-                        isDemoGen = false;
-                        return;
-                    }
+                    // Voice clicks have already streamed to the speakers; still offer the
+                    // player and the download, like a typed generation.
+                    isDemoGen = false;
                     const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
                     if (totalLength === 0) return;
                     const pcm = new Float32Array(totalLength);
                     let offset = 0;
                     for (const chunk of allChunks) { pcm.set(chunk, offset); offset += chunk.length; }
-                    const wav = encodeWav(pcm, tts.sampleRate);
-                    const blob = new Blob([wav], { type: 'audio/wav' });
-                    audioPlayer.src = URL.createObjectURL(blob);
-                    audioSection.style.display = 'block';
-                    saveWavLink.href = audioPlayer.src;
-                    saveWavLink.download = `pocket-tts-${activeVoice}.wav`;
-                    saveWavLink.style.display = 'inline-block';
+                    showAudio(pcm, tts.sampleRate, cfg.filename());
                 }
             });
         }
 
         // ---- Kitten client ----
-        function makeKittenClient() {
+        function makeKittenClient(cfg) {
             return new TtsClient({
                 modelType: 'kitten',
-                workerUrl: './kitten-worker.js',
+                workerUrl: cfg.workerUrl,
                 modelUrl: KITTEN_MODEL_URL,
                 voicesUrl: KITTEN_VOICES_URL,
                 wasmBaseUrl: KITTEN_WASM_BASE,
@@ -801,29 +1005,10 @@
                     const sampleRate = tts.sampleRate || 24000;
                     const audioDur = totalLength / sampleRate;
                     const speedup = audioDur / totalTime;
-                    stepInfo.textContent = `${audioDur.toFixed(2)}s audio in ${totalTime.toFixed(2)}s \u2014 ${speedup.toFixed(2)}x realtime`;
+                    stepInfo.textContent = `${audioDur.toFixed(2)}s audio in ${totalTime.toFixed(2)}s — ${speedup.toFixed(2)}x realtime`;
 
-                    if (isDemoGen) {
-                        isDemoGen = false;
-                        // Still show audio player for demo
-                        const wav = encodeWav(pcm, sampleRate);
-                        const blob = new Blob([wav], { type: 'audio/wav' });
-                        audioPlayer.src = URL.createObjectURL(blob);
-                        audioSection.style.display = 'block';
-                        audioPlayer.play().catch(() => {});
-                        if (usedIpa) {
-                            ipaDisplay.textContent = 'IPA: ' + usedIpa;
-                            ipaDisplay.style.display = '';
-                        }
-                        return;
-                    }
-
-                    const wav = encodeWav(pcm, sampleRate);
-                    const blob = new Blob([wav], { type: 'audio/wav' });
-                    audioPlayer.src = URL.createObjectURL(blob);
-                    audioSection.style.display = 'block';
-                    audioPlayer.play().catch(() => {});
-
+                    isDemoGen = false;
+                    showAudio(pcm, sampleRate, cfg.filename(), { autoplay: true });
                     if (usedIpa) {
                         ipaDisplay.textContent = 'IPA: ' + usedIpa;
                         ipaDisplay.style.display = '';
@@ -834,23 +1019,35 @@
             });
         }
 
+        // One client factory for every model: dispatches to the engine the model table
+        // names, with the URLs/voices/demo text/filename supplied as data.
+        function makeClient(model, lang) {
+            const cfg = MODEL_TABLE[model];
+            return cfg.engine === 'kitten' ? makeKittenClient(cfg) : makePocketClient(cfg, lang);
+        }
+
         // ---- Model switching ----
         function updateUIForModel(model) {
-            voiceSection.style.display = model === 'pocket-tts' ? '' : 'none';
-            kittenVoiceSection.style.display = model === 'kitten' ? '' : 'none';
+            const cfg = MODEL_TABLE[model];
+            voiceSection.style.display = cfg.engine === 'pocket' ? '' : 'none';
+            kittenVoiceSection.style.display = cfg.engine === 'kitten' ? '' : 'none';
+            languageGridGroup.style.display = cfg.languages ? '' : 'none';
 
-            tempSliderGroup.style.display = model === 'kitten' ? 'none' : '';
-            speedSliderGroup.style.display = model === 'kitten' ? '' : 'none';
+            tempSliderGroup.style.display = cfg.hasTemp ? '' : 'none';
+            speedSliderGroup.style.display = cfg.hasSpeed ? '' : 'none';
+            textInput.placeholder = cfg.languages ? phrase(cfg.phraseId, currentLanguage) : DEMO_TEXT;
+            if (cfg.languages) {
+                languageSizeInfo.textContent = `Download size: ~${cfg.languages[currentLanguage].size} MB`;
+            }
             stepInfo.textContent = '';
-            audioSection.style.display = 'none';
-            saveWavLink.style.display = 'none';
+            hideAudio();
             ipaDisplay.style.display = 'none';
         }
 
-        async function switchModel(model) {
-            if (model === currentModel && tts) return;
-            currentModel = model;
-
+        // Teardown + reinit for the given model. Shared by switchModel() (model radio change)
+        // and switchLanguage() (same model, different weights) so there is one
+        // code path for "tear down the client and reload" rather than two.
+        async function applyModel(model) {
             // Destroy existing client
             if (tts) {
                 tts.destroy();
@@ -877,29 +1074,24 @@
 
             updateUIForModel(model);
 
-            if (model === 'kitten') {
-                tts = makeKittenClient();
-                const cached = await isKittenCached();
-                if (cached) {
-                    updateStatus('loading', 'Loading KittenTTS...');
-                    await initClient();
-                } else {
-                    updateStatus('', 'KittenTTS model not downloaded (~45 MB)');
-                    downloadBtn.style.display = '';
-                    downloadBtn.disabled = false;
-                }
+            const cfg = MODEL_TABLE[model];
+            if (cfg.engine === 'pocket') buildVoiceGrid(cfg.voices, cfg.voiceRows);
+            tts = makeClient(model, currentLanguage);
+            const cached = await isCached(cfg.checkUrl(currentLanguage), cfg.cacheName);
+            if (cached) {
+                updateStatus('loading', cfg.cachedLoadingText);
+                await initClient();
             } else {
-                tts = makePocketClient();
-                const cached = await isModelCached();
-                if (cached) {
-                    updateStatus('loading', 'Loading from cache...');
-                    await initClient();
-                } else {
-                    updateStatus('', 'Model not downloaded');
-                    downloadBtn.style.display = '';
-                    downloadBtn.disabled = false;
-                }
+                updateStatus('', cfg.notDownloadedText);
+                downloadBtn.style.display = '';
+                downloadBtn.disabled = false;
             }
+        }
+
+        async function switchModel(model) {
+            if (model === currentModel && tts) return;
+            currentModel = model;
+            await applyModel(model);
         }
 
         document.querySelectorAll('input[name="model"]').forEach(radio => {
@@ -935,42 +1127,27 @@
             await initClient();
         });
 
-        // Init flow: defer pocket-tts load to avoid noisy console errors on page load
-        // Use switchModel so all models go through the same code path
-        await switchModel('pocket-tts');
-
         generateBtn.addEventListener('click', () => {
             const text = textInput.value.trim();
             if (!text || generating) return;
-            if (currentModel === 'pocket-tts' && !activeVoice) return;
-            if (currentModel === 'kitten') {
-                const ipa = '';
-                isDemoGen = false;
-                generating = true;
-                generateBtn.disabled = true;
-                allChunks = [];
-                genStartTime = performance.now();
-                audioSection.style.display = 'none';
-                saveWavLink.style.display = 'none';
-                ipaDisplay.style.display = 'none';
-                stepInfo.textContent = ipa ? 'Synthesizing...' : 'Phonemizing...';
-                updateStatus('generating', ipa ? 'Synthesizing...' : 'Phonemizing...');
-                const prior = KITTEN_SPEED_PRIORS[KITTEN_VOICES[kittenVoiceIdx]] || 0.8;
-                const effectiveSpeed = parseFloat(speedSlider.value) * prior;
-                tts.generate(text, 1.0, {
-                    ipa,
-                    voiceIdx: kittenVoiceIdx,
-                    speed: effectiveSpeed,
-                    textLen: text.length,
-                });
+            const cfg = MODEL_TABLE[currentModel];
+            if (cfg.engine === 'pocket' && !activeVoice) return;
+            if (cfg.engine === 'kitten') {
+                runKittenGenerate(text, false);
                 return;
             }
             isDemoGen = false;
             generating = true;
             generateBtn.disabled = true;
-            if (currentModel === 'pocket-tts') setVoiceBtnsEnabled(false);
+            setVoiceBtnsEnabled(false);
             tts.generate(text, parseFloat(tempSlider.value));
         });
+
+        // Init flow: defer pocket-tts load to avoid noisy console errors on page load.
+        // This must come AFTER the generate handler is registered — it awaits the initial
+        // model load, and anyone who switches tabs before it resolves would otherwise end
+        // up with a generate button that silently does nothing.
+        await switchModel('pocket-tts');
 
         function encodeWav(samples, sampleRate) {
             const numChannels = 1;

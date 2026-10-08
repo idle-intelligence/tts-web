@@ -2,6 +2,8 @@ use candle_core::{Device, Result as CResult, Tensor};
 use mimi_rs::mimi::MimiState;
 use mimi_rs::transformer::{LayerAttentionState, StreamingMHAState, StreamingTransformerState};
 use tts_core::flow_lm::{FlowLMState, Rng};
+use tts_core::generation::EosGate;
+use tts_core::text_config::TextConfig;
 use tts_core::tts_model::TTSState;
 use wasm_bindgen::prelude::*;
 
@@ -47,9 +49,33 @@ struct GenState {
     prev_latent: Tensor,
     rng: WasmRng,
     max_frames: usize,
-    frames_after_eos: usize,
-    eos_countdown: Option<usize>,
+    eos_gate: EosGate,
     step: usize,
+}
+
+// ---- Tokenizer ----
+
+#[wasm_bindgen]
+pub struct Tokenizer {
+    inner: tts_core::tokenizer::Tokenizer,
+}
+
+#[wasm_bindgen]
+impl Tokenizer {
+    #[wasm_bindgen(constructor)]
+    pub fn new(model_bytes: &[u8]) -> Result<Tokenizer, JsError> {
+        let inner = tts_core::tokenizer::Tokenizer::from_model_bytes(model_bytes)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Tokenizer { inner })
+    }
+
+    pub fn encode(&self, text: &str) -> Vec<u32> {
+        self.inner.encode(text)
+    }
+
+    pub fn vocab_size(&self) -> usize {
+        self.inner.vocab_size()
+    }
 }
 
 // ---- Model ----
@@ -58,22 +84,28 @@ struct GenState {
 pub struct Model {
     inner: tts_core::tts_model::TTSModel,
     cfg: tts_core::config::TTSConfig,
+    text_config: TextConfig,
     gen_state: Option<GenState>,
     voice_states: Vec<TTSState>,
 }
 
 impl Model {
-    fn new_(model_weights: &[u8]) -> CResult<Model> {
+    fn new_(model_weights: &[u8], language: &str) -> CResult<Model> {
         let mut gguf = mimi_rs::gguf_loader::GgufTensors::from_bytes(model_weights, &Device::Cpu)?;
-        let cfg = tts_core::config::TTSConfig::v202601(0.7);
+        let cfg = tts_core::config::TTSConfig::v202601_for_gguf(&gguf, 0.7)?;
         let inner = tts_core::tts_model::TTSModel::load_gguf(&mut gguf, &cfg)?;
-        console_log!("[Model::new] model loaded from GGUF (Q8_0)");
-        Ok(Model { inner, cfg, gen_state: None, voice_states: Vec::new() })
+        console_log!(
+            "[Model::new] model loaded from GGUF (Q8_0), num_layers={}, language={}",
+            cfg.flow_lm.num_layers,
+            language
+        );
+        let text_config = TextConfig::for_language(language);
+        Ok(Model { inner, cfg, text_config, gen_state: None, voice_states: Vec::new() })
     }
 
     fn add_voice_(&mut self, voice_bytes: &[u8]) -> CResult<usize> {
         let tensors = candle_core::safetensors::load_buffer(voice_bytes, &Device::Cpu)?;
-        let num_layers = 6usize;
+        let num_layers = self.cfg.flow_lm.num_layers;
         let mut layer_states = Vec::with_capacity(num_layers);
 
         for i in 0..num_layers {
@@ -90,6 +122,17 @@ impl Model {
                 k.contiguous()?,
                 v.contiguous()?,
                 seq_len,
+            )));
+        }
+
+        // Loudly fail if the voice file has more layer caches than the model config
+        // expects, instead of silently ignoring the extras (e.g. a 6-layer voice
+        // loaded against a 24-layer model, or vice versa).
+        let extra_cache_name = format!("transformer.layers.{num_layers}.self_attn/cache");
+        if tensors.contains_key(&extra_cache_name) {
+            return Err(candle_core::Error::Msg(format!(
+                "voice file has a layer-{num_layers} cache ({extra_cache_name}) but the \
+                 model config only has {num_layers} layers; refusing to silently truncate"
             )));
         }
 
@@ -135,8 +178,7 @@ impl Model {
             prev_latent,
             rng,
             max_frames,
-            frames_after_eos,
-            eos_countdown: None,
+            eos_gate: EosGate::new(frames_after_eos),
             step: 0,
         });
         Ok(())
@@ -155,23 +197,15 @@ impl Model {
         let (next_latent, is_eos) =
             self.inner.generate_step(&mut state.tts_state, &state.prev_latent, &mut state.rng)?;
 
-        let audio_chunk =
-            self.inner.decode_latent(&next_latent, &mut state.mimi_state)?;
-
-        if is_eos && state.eos_countdown.is_none() {
-            state.eos_countdown = Some(state.frames_after_eos);
+        // Check-then-append order (matches tts_model.py:874-892): decide
+        // whether this step's latent is produced *before* decoding/appending
+        // its audio, not after.
+        if !state.eos_gate.accept(state.step, is_eos) {
+            return Ok(None);
         }
 
-        let done = if let Some(ref mut countdown) = state.eos_countdown {
-            if *countdown == 0 {
-                true
-            } else {
-                *countdown -= 1;
-                false
-            }
-        } else {
-            false
-        };
+        let audio_chunk =
+            self.inner.decode_latent(&next_latent, &mut state.mimi_state)?;
 
         state.prev_latent = next_latent;
         state.step += 1;
@@ -179,9 +213,7 @@ impl Model {
         let pcm = audio_chunk.flatten_all()?.to_vec1::<f32>()?;
         let result = js_sys::Float32Array::from(pcm.as_slice());
 
-        if !done {
-            self.gen_state = Some(state);
-        }
+        self.gen_state = Some(state);
 
         Ok(Some(result))
     }
@@ -190,9 +222,10 @@ impl Model {
 #[wasm_bindgen]
 impl Model {
     #[wasm_bindgen(constructor)]
-    pub fn new(model_weights: &[u8]) -> Result<Model, JsError> {
+    pub fn new(model_weights: &[u8], language: Option<String>) -> Result<Model, JsError> {
         console_error_panic_hook::set_once();
-        Self::new_(model_weights).map_err(|e| JsError::new(&e.to_string()))
+        let language = language.unwrap_or_else(|| "english".to_string());
+        Self::new_(model_weights, &language).map_err(|e| JsError::new(&e.to_string()))
     }
 
     pub fn add_voice(&mut self, voice_bytes: &[u8]) -> Result<usize, JsError> {
@@ -200,7 +233,11 @@ impl Model {
     }
 
     pub fn prepare_text(&self, text: &str) -> js_sys::Array {
-        let (processed, frames_after_eos) = tts_core::tts_model::prepare_text_prompt(text);
+        let (processed, frames_after_eos) = tts_core::tts_model::prepare_text_prompt(
+            text,
+            self.cfg.model_recommended_frames_after_eos,
+            &self.text_config,
+        );
         let arr = js_sys::Array::new();
         arr.push(&JsValue::from_str(&processed));
         arr.push(&JsValue::from_f64(frames_after_eos as f64));

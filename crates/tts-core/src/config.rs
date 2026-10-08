@@ -1,4 +1,6 @@
+use candle_core::Result;
 use mimi_rs::config::MimiConfig;
+use mimi_rs::gguf_loader::GgufTensors;
 
 pub struct FlowLMConfig {
     pub d_model: usize,
@@ -19,6 +21,11 @@ pub struct TTSConfig {
     pub temp: f32,
     pub lsd_decode_steps: usize,
     pub eos_threshold: f32,
+    /// Per-model override for `frames_after_eos`, matching
+    /// `Config.model_recommended_frames_after_eos` (`pocket_tts/utils/config.py`).
+    /// `None` for every currently shipped language config, in which case the
+    /// text-length-based guess (see `prepare_text_prompt`) is used instead.
+    pub model_recommended_frames_after_eos: Option<usize>,
 }
 
 impl TTSConfig {
@@ -40,6 +47,53 @@ impl TTSConfig {
             temp,
             lsd_decode_steps: 1,
             eos_threshold: -4.0,
+            model_recommended_frames_after_eos: None,
         }
+    }
+
+    /// Like `v202601`, but detects `num_layers` from the loaded GGUF's tensor names
+    /// instead of assuming 6, so checkpoints with a different transformer depth
+    /// (e.g. the 24-layer French checkpoint) load correctly.
+    pub fn v202601_for_gguf(gguf: &GgufTensors, temp: f32) -> Result<Self> {
+        let mut cfg = Self::v202601(temp);
+        let mut num_layers = 0;
+        while gguf.contains(&format!(
+            "flow_lm.transformer.layers.{num_layers}.self_attn.in_proj.weight"
+        )) {
+            num_layers += 1;
+        }
+        if num_layers == 0 {
+            return Err(candle_core::Error::Msg(
+                "no flow_lm.transformer.layers.*.self_attn.in_proj.weight tensors found in GGUF"
+                    .to_string(),
+            ));
+        }
+        cfg.flow_lm.num_layers = num_layers;
+        Ok(cfg)
+    }
+
+    /// Like `v202601_for_gguf`, but detects `num_layers` from a safetensors
+    /// tensor-name set (`candle_core::safetensors::load`'s keys) instead of a
+    /// `GgufTensors`. Used by the unquantized-weights parity path.
+    pub fn v202601_for_safetensors_keys<'a>(
+        keys: impl Iterator<Item = &'a String>,
+        temp: f32,
+    ) -> Result<Self> {
+        let mut cfg = Self::v202601(temp);
+        let key_set: std::collections::HashSet<&str> = keys.map(|s| s.as_str()).collect();
+        let mut num_layers = 0;
+        while key_set.contains(
+            format!("flow_lm.transformer.layers.{num_layers}.self_attn.in_proj.weight").as_str(),
+        ) {
+            num_layers += 1;
+        }
+        if num_layers == 0 {
+            return Err(candle_core::Error::Msg(
+                "no flow_lm.transformer.layers.*.self_attn.in_proj.weight tensors found in safetensors"
+                    .to_string(),
+            ));
+        }
+        cfg.flow_lm.num_layers = num_layers;
+        Ok(cfg)
     }
 }

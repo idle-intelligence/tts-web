@@ -104,7 +104,7 @@ async function handleGenerate(ipa, voiceIdx, speed, textLen, text) {
     // Phonemize if no IPA provided but text is available
     if (!ipa && text) {
         if (!phonemizeFn) {
-            postMessage({ type: 'error', error: 'No IPA available and phonemizer not loaded yet — try again in a moment' });
+            postMessage({ type: 'error', error: 'No IPA available and phonemizer not loaded yet, try again in a moment' });
             return;
         }
         postMessage({ type: 'status', text: 'Phonemizing...', ready: true });

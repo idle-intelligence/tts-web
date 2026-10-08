@@ -1,0 +1,3190 @@
+{
+  "english": {
+    "flags": {
+      "vocab_size": 4000,
+      "model_type": 1,
+      "byte_fallback": true,
+      "normalizer_name": "identity",
+      "precompiled_charsmap_len": 0,
+      "add_dummy_prefix": true,
+      "remove_extra_whitespaces": false,
+      "escape_whitespaces": true
+    },
+    "cases": [
+      {
+        "name": "sentence_0",
+        "text": "The quick brown fox jumps over the lazy dog.",
+        "ids": [
+          364,
+          976,
+          3683,
+          521,
+          1923,
+          1609,
+          261,
+          408,
+          265,
+          697,
+          690,
+          327,
+          1497,
+          263
+        ],
+        "pieces": [
+          "▁The",
+          "▁quick",
+          "▁brown",
+          "▁f",
+          "ox",
+          "▁jump",
+          "s",
+          "▁over",
+          "▁the",
+          "▁la",
+          "z",
+          "y",
+          "▁dog",
+          "."
+        ]
+      },
+      {
+        "name": "sentence_1",
+        "text": "She sells seashells by the seashore.",
+        "ids": [
+          638,
+          1345,
+          261,
+          706,
+          1911,
+          1400,
+          261,
+          378,
+          265,
+          1985,
+          261,
+          771,
+          280,
+          263
+        ],
+        "pieces": [
+          "▁She",
+          "▁sell",
+          "s",
+          "▁se",
+          "ash",
+          "ell",
+          "s",
+          "▁by",
+          "▁the",
+          "▁sea",
+          "s",
+          "ho",
+          "re",
+          "."
+        ]
+      },
+      {
+        "name": "sentence_2",
+        "text": "It was the best of times, it was the worst of times.",
+        "ids": [
+          333,
+          286,
+          265,
+          658,
+          272,
+          835,
+          262,
+          275,
+          286,
+          265,
+          2605,
+          272,
+          835,
+          263
+        ],
+        "pieces": [
+          "▁It",
+          "▁was",
+          "▁the",
+          "▁best",
+          "▁of",
+          "▁times",
+          ",",
+          "▁it",
+          "▁was",
+          "▁the",
+          "▁worst",
+          "▁of",
+          "▁times",
+          "."
+        ]
+      },
+      {
+        "name": "empty_string",
+        "text": "",
+        "ids": [],
+        "pieces": []
+      },
+      {
+        "name": "single_space",
+        "text": " ",
+        "ids": [
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "three_spaces",
+        "text": "   ",
+        "ids": [
+          260,
+          260,
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "eight_leading_spaces_hello",
+        "text": "        Hello world.",
+        "ids": [
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          2994,
+          578,
+          263
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁Hello",
+          "▁world",
+          "."
+        ]
+      },
+      {
+        "name": "hello_world_no_prefix",
+        "text": "Hello world.",
+        "ids": [
+          2994,
+          578,
+          263
+        ],
+        "pieces": [
+          "▁Hello",
+          "▁world",
+          "."
+        ]
+      },
+      {
+        "name": "real_tab_char",
+        "text": "a\tb",
+        "ids": [
+          267,
+          13,
+          512
+        ],
+        "pieces": [
+          "▁a",
+          "<0x09>",
+          "b"
+        ]
+      },
+      {
+        "name": "real_newline_char",
+        "text": "a\nb",
+        "ids": [
+          267,
+          14,
+          512
+        ],
+        "pieces": [
+          "▁a",
+          "<0x0A>",
+          "b"
+        ]
+      },
+      {
+        "name": "emoji_non_bmp",
+        "text": "café 🚀",
+        "ids": [
+          331,
+          2250,
+          745,
+          260,
+          244,
+          163,
+          158,
+          132
+        ],
+        "pieces": [
+          "▁c",
+          "af",
+          "é",
+          "▁",
+          "<0xF0>",
+          "<0x9F>",
+          "<0x9A>",
+          "<0x80>"
+        ]
+      },
+      {
+        "name": "rare_byte_fallback",
+        "text": "œuf ☃ ﬁ",
+        "ids": [
+          260,
+          201,
+          151,
+          483,
+          601,
+          260,
+          230,
+          156,
+          135,
+          260,
+          243,
+          176,
+          133
+        ],
+        "pieces": [
+          "▁",
+          "<0xC5>",
+          "<0x93>",
+          "u",
+          "f",
+          "▁",
+          "<0xE2>",
+          "<0x98>",
+          "<0x83>",
+          "▁",
+          "<0xEF>",
+          "<0xAC>",
+          "<0x81>"
+        ]
+      },
+      {
+        "name": "mixed_diacritics_currency",
+        "text": "Dr. Müller a payé 42,50 € à l'hôtel.",
+        "ids": [
+          1555,
+          263,
+          657,
+          3252,
+          335,
+          295,
+          267,
+          882,
+          745,
+          260,
+          487,
+          365,
+          262,
+          437,
+          316,
+          260,
+          230,
+          134,
+          176,
+          260,
+          2112,
+          1041,
+          264,
+          506,
+          3798,
+          274,
+          516,
+          263
+        ],
+        "pieces": [
+          "▁Dr",
+          ".",
+          "▁M",
+          "ü",
+          "ll",
+          "er",
+          "▁a",
+          "▁pay",
+          "é",
+          "▁",
+          "4",
+          "2",
+          ",",
+          "5",
+          "0",
+          "▁",
+          "<0xE2>",
+          "<0x82>",
+          "<0xAC>",
+          "▁",
+          "à",
+          "▁l",
+          "'",
+          "h",
+          "ô",
+          "t",
+          "el",
+          "."
+        ]
+      },
+      {
+        "name": "digits_float",
+        "text": "3.14159",
+        "ids": [
+          260,
+          450,
+          263,
+          341,
+          487,
+          341,
+          437,
+          501
+        ],
+        "pieces": [
+          "▁",
+          "3",
+          ".",
+          "1",
+          "4",
+          "1",
+          "5",
+          "9"
+        ]
+      },
+      {
+        "name": "digits_date",
+        "text": "2026-07-26",
+        "ids": [
+          260,
+          365,
+          316,
+          365,
+          543,
+          337,
+          316,
+          579,
+          337,
+          365,
+          543
+        ],
+        "pieces": [
+          "▁",
+          "2",
+          "0",
+          "2",
+          "6",
+          "-",
+          "0",
+          "7",
+          "-",
+          "2",
+          "6"
+        ]
+      },
+      {
+        "name": "punctuation_run",
+        "text": "a,b;c!d?e",
+        "ids": [
+          267,
+          262,
+          512,
+          1230,
+          440,
+          682,
+          307,
+          292,
+          336
+        ],
+        "pieces": [
+          "▁a",
+          ",",
+          "b",
+          ";",
+          "c",
+          "!",
+          "d",
+          "?",
+          "e"
+        ]
+      },
+      {
+        "name": "repeated_adjacent_spaces",
+        "text": "a  b   c",
+        "ids": [
+          267,
+          260,
+          557,
+          260,
+          260,
+          331
+        ],
+        "pieces": [
+          "▁a",
+          "▁",
+          "▁b",
+          "▁",
+          "▁",
+          "▁c"
+        ]
+      },
+      {
+        "name": "leading_whitespace",
+        "text": " leading",
+        "ids": [
+          260,
+          893,
+          273
+        ],
+        "pieces": [
+          "▁",
+          "▁lead",
+          "ing"
+        ]
+      },
+      {
+        "name": "trailing_whitespace",
+        "text": "trailing ",
+        "ids": [
+          3007,
+          273,
+          260
+        ],
+        "pieces": [
+          "▁trail",
+          "ing",
+          "▁"
+        ]
+      },
+      {
+        "name": "cross_language_french_sentence_via_english_tokenizer",
+        "text": "L'eau qu'il a bue était glacée, dit-elle « n'est-ce pas ? »",
+        "ids": [
+          963,
+          264,
+          336,
+          1065,
+          260,
+          1431,
+          264,
+          457,
+          267,
+          842,
+          336,
+          260,
+          745,
+          550,
+          562,
+          605,
+          3042,
+          745,
+          336,
+          262,
+          621,
+          274,
+          337,
+          2837,
+          260,
+          198,
+          175,
+          953,
+          264,
+          552,
+          337,
+          576,
+          832,
+          261,
+          260,
+          292,
+          260,
+          198,
+          191
+        ],
+        "pieces": [
+          "▁L",
+          "'",
+          "e",
+          "au",
+          "▁",
+          "qu",
+          "'",
+          "il",
+          "▁a",
+          "▁bu",
+          "e",
+          "▁",
+          "é",
+          "ta",
+          "it",
+          "▁g",
+          "lac",
+          "é",
+          "e",
+          ",",
+          "▁di",
+          "t",
+          "-",
+          "elle",
+          "▁",
+          "<0xC2>",
+          "<0xAB>",
+          "▁n",
+          "'",
+          "est",
+          "-",
+          "ce",
+          "▁pa",
+          "s",
+          "▁",
+          "?",
+          "▁",
+          "<0xC2>",
+          "<0xBB>"
+        ]
+      }
+    ]
+  },
+  "french": {
+    "flags": {
+      "vocab_size": 4000,
+      "model_type": 1,
+      "byte_fallback": true,
+      "normalizer_name": "identity",
+      "precompiled_charsmap_len": 0,
+      "add_dummy_prefix": true,
+      "remove_extra_whitespaces": false,
+      "escape_whitespaces": true
+    },
+    "cases": [
+      {
+        "name": "sentence_0",
+        "text": "L'eau qu'il a bue était glacée, dit-elle « n'est-ce pas ? »",
+        "ids": [
+          362,
+          262,
+          446,
+          284,
+          262,
+          289,
+          301,
+          547,
+          822,
+          345,
+          3698,
+          266,
+          261,
+          327,
+          277,
+          320,
+          260,
+          198,
+          175,
+          297,
+          262,
+          317,
+          277,
+          425,
+          288,
+          260,
+          306,
+          260,
+          198,
+          191
+        ],
+        "pieces": [
+          "▁L",
+          "'",
+          "eau",
+          "▁qu",
+          "'",
+          "il",
+          "▁a",
+          "▁b",
+          "ue",
+          "▁était",
+          "▁glacé",
+          "e",
+          ",",
+          "▁dit",
+          "-",
+          "elle",
+          "▁",
+          "<0xC2>",
+          "<0xAB>",
+          "▁n",
+          "'",
+          "est",
+          "-",
+          "ce",
+          "▁pas",
+          "▁",
+          "?",
+          "▁",
+          "<0xC2>",
+          "<0xBB>"
+        ]
+      },
+      {
+        "name": "sentence_1",
+        "text": "L'eau est très froide à cette heure-ci, n'est-ce pas ?",
+        "ids": [
+          362,
+          262,
+          446,
+          333,
+          584,
+          1012,
+          266,
+          271,
+          343,
+          457,
+          277,
+          529,
+          261,
+          297,
+          262,
+          317,
+          277,
+          425,
+          288,
+          260,
+          306
+        ],
+        "pieces": [
+          "▁L",
+          "'",
+          "eau",
+          "▁est",
+          "▁très",
+          "▁froid",
+          "e",
+          "▁à",
+          "▁cette",
+          "▁heure",
+          "-",
+          "ci",
+          ",",
+          "▁n",
+          "'",
+          "est",
+          "-",
+          "ce",
+          "▁pas",
+          "▁",
+          "?"
+        ]
+      },
+      {
+        "name": "sentence_2",
+        "text": "Le cœur a ses raisons que la raison ne connaît point.",
+        "ids": [
+          347,
+          784,
+          301,
+          339,
+          260,
+          672,
+          264,
+          274,
+          267,
+          260,
+          672,
+          290,
+          286,
+          2433,
+          430,
+          263
+        ],
+        "pieces": [
+          "▁Le",
+          "▁cœur",
+          "▁a",
+          "▁ses",
+          "▁",
+          "raison",
+          "s",
+          "▁que",
+          "▁la",
+          "▁",
+          "raison",
+          "▁ne",
+          "▁c",
+          "onnaît",
+          "▁point",
+          "."
+        ]
+      },
+      {
+        "name": "empty_string",
+        "text": "",
+        "ids": [],
+        "pieces": []
+      },
+      {
+        "name": "single_space",
+        "text": " ",
+        "ids": [
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "three_spaces",
+        "text": "   ",
+        "ids": [
+          260,
+          260,
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "eight_leading_spaces_hello",
+        "text": "        Hello world.",
+        "ids": [
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          712,
+          485,
+          754,
+          260,
+          123,
+          375,
+          382,
+          394,
+          263
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁H",
+          "el",
+          "lo",
+          "▁",
+          "<0x77>",
+          "or",
+          "l",
+          "d",
+          "."
+        ]
+      },
+      {
+        "name": "hello_world_no_prefix",
+        "text": "Hello world.",
+        "ids": [
+          712,
+          485,
+          754,
+          260,
+          123,
+          375,
+          382,
+          394,
+          263
+        ],
+        "pieces": [
+          "▁H",
+          "el",
+          "lo",
+          "▁",
+          "<0x77>",
+          "or",
+          "l",
+          "d",
+          "."
+        ]
+      },
+      {
+        "name": "real_tab_char",
+        "text": "a\tb",
+        "ids": [
+          301,
+          13,
+          495
+        ],
+        "pieces": [
+          "▁a",
+          "<0x09>",
+          "b"
+        ]
+      },
+      {
+        "name": "real_newline_char",
+        "text": "a\nb",
+        "ids": [
+          301,
+          14,
+          495
+        ],
+        "pieces": [
+          "▁a",
+          "<0x0A>",
+          "b"
+        ]
+      },
+      {
+        "name": "emoji_non_bmp",
+        "text": "café 🚀",
+        "ids": [
+          3016,
+          260,
+          244,
+          163,
+          158,
+          132
+        ],
+        "pieces": [
+          "▁café",
+          "▁",
+          "<0xF0>",
+          "<0x9F>",
+          "<0x9A>",
+          "<0x80>"
+        ]
+      },
+      {
+        "name": "rare_byte_fallback",
+        "text": "œuf ☃ ﬁ",
+        "ids": [
+          260,
+          3516,
+          260,
+          230,
+          156,
+          135,
+          260,
+          243,
+          176,
+          133
+        ],
+        "pieces": [
+          "▁",
+          "œuf",
+          "▁",
+          "<0xE2>",
+          "<0x98>",
+          "<0x83>",
+          "▁",
+          "<0xEF>",
+          "<0xAC>",
+          "<0x81>"
+        ]
+      },
+      {
+        "name": "mixed_diacritics_currency",
+        "text": "Dr. Müller a payé 42,50 € à l'hôtel.",
+        "ids": [
+          401,
+          314,
+          263,
+          351,
+          199,
+          192,
+          1564,
+          314,
+          301,
+          3336,
+          260,
+          56,
+          54,
+          261,
+          57,
+          52,
+          260,
+          230,
+          134,
+          176,
+          271,
+          270,
+          262,
+          1608,
+          263
+        ],
+        "pieces": [
+          "▁D",
+          "r",
+          ".",
+          "▁M",
+          "<0xC3>",
+          "<0xBC>",
+          "lle",
+          "r",
+          "▁a",
+          "▁payé",
+          "▁",
+          "<0x34>",
+          "<0x32>",
+          ",",
+          "<0x35>",
+          "<0x30>",
+          "▁",
+          "<0xE2>",
+          "<0x82>",
+          "<0xAC>",
+          "▁à",
+          "▁l",
+          "'",
+          "hôtel",
+          "."
+        ]
+      },
+      {
+        "name": "digits_float",
+        "text": "3.14159",
+        "ids": [
+          260,
+          55,
+          263,
+          53,
+          56,
+          53,
+          57,
+          61
+        ],
+        "pieces": [
+          "▁",
+          "<0x33>",
+          ".",
+          "<0x31>",
+          "<0x34>",
+          "<0x31>",
+          "<0x35>",
+          "<0x39>"
+        ]
+      },
+      {
+        "name": "digits_date",
+        "text": "2026-07-26",
+        "ids": [
+          260,
+          54,
+          52,
+          54,
+          58,
+          277,
+          52,
+          59,
+          277,
+          54,
+          58
+        ],
+        "pieces": [
+          "▁",
+          "<0x32>",
+          "<0x30>",
+          "<0x32>",
+          "<0x36>",
+          "-",
+          "<0x30>",
+          "<0x37>",
+          "-",
+          "<0x32>",
+          "<0x36>"
+        ]
+      },
+      {
+        "name": "punctuation_run",
+        "text": "a,b;c!d?e",
+        "ids": [
+          301,
+          261,
+          495,
+          63,
+          368,
+          37,
+          394,
+          306,
+          266
+        ],
+        "pieces": [
+          "▁a",
+          ",",
+          "b",
+          "<0x3B>",
+          "c",
+          "<0x21>",
+          "d",
+          "?",
+          "e"
+        ]
+      },
+      {
+        "name": "repeated_adjacent_spaces",
+        "text": "a  b   c",
+        "ids": [
+          301,
+          260,
+          547,
+          260,
+          260,
+          286
+        ],
+        "pieces": [
+          "▁a",
+          "▁",
+          "▁b",
+          "▁",
+          "▁",
+          "▁c"
+        ]
+      },
+      {
+        "name": "leading_whitespace",
+        "text": " leading",
+        "ids": [
+          260,
+          268,
+          582,
+          1246
+        ],
+        "pieces": [
+          "▁",
+          "▁le",
+          "ad",
+          "ing"
+        ]
+      },
+      {
+        "name": "trailing_whitespace",
+        "text": "trailing ",
+        "ids": [
+          1493,
+          289,
+          1246,
+          260
+        ],
+        "pieces": [
+          "▁tra",
+          "il",
+          "ing",
+          "▁"
+        ]
+      }
+    ]
+  },
+  "german": {
+    "flags": {
+      "vocab_size": 4000,
+      "model_type": 1,
+      "byte_fallback": true,
+      "normalizer_name": "identity",
+      "precompiled_charsmap_len": 0,
+      "add_dummy_prefix": true,
+      "remove_extra_whitespaces": false,
+      "escape_whitespaces": true
+    },
+    "cases": [
+      {
+        "name": "sentence_0",
+        "text": "Die Straßenverkehrszulassungsordnung regelt vieles.",
+        "ids": [
+          340,
+          1905,
+          262,
+          568,
+          1487,
+          265,
+          455,
+          2032,
+          1006,
+          2428,
+          296,
+          260,
+          2134,
+          273,
+          395,
+          295,
+          269
+        ],
+        "pieces": [
+          "▁Die",
+          "▁Straß",
+          "en",
+          "ver",
+          "kehr",
+          "s",
+          "zu",
+          "lass",
+          "ungs",
+          "ordn",
+          "ung",
+          "▁",
+          "regel",
+          "t",
+          "▁viel",
+          "es",
+          "."
+        ]
+      },
+      {
+        "name": "sentence_1",
+        "text": "Können Sie mir bitte einen Kaffee mit Milch geben?",
+        "ids": [
+          398,
+          429,
+          270,
+          270,
+          262,
+          320,
+          321,
+          1890,
+          345,
+          260,
+          2982,
+          283,
+          3500,
+          974,
+          348
+        ],
+        "pieces": [
+          "▁K",
+          "ö",
+          "n",
+          "n",
+          "en",
+          "▁Sie",
+          "▁mir",
+          "▁bitte",
+          "▁einen",
+          "▁",
+          "Kaffee",
+          "▁mit",
+          "▁Milch",
+          "▁geben",
+          "?"
+        ]
+      },
+      {
+        "name": "sentence_2",
+        "text": "Der Fußballweltmeisterschaftsendspieltermin steht fest.",
+        "ids": [
+          359,
+          1234,
+          331,
+          606,
+          2605,
+          1386,
+          268,
+          415,
+          265,
+          393,
+          2541,
+          268,
+          339,
+          366,
+          1339,
+          756,
+          269
+        ],
+        "pieces": [
+          "▁Der",
+          "▁Fuß",
+          "b",
+          "all",
+          "welt",
+          "meist",
+          "er",
+          "schaft",
+          "s",
+          "end",
+          "spielt",
+          "er",
+          "m",
+          "in",
+          "▁steht",
+          "▁fest",
+          "."
+        ]
+      },
+      {
+        "name": "empty_string",
+        "text": "",
+        "ids": [],
+        "pieces": []
+      },
+      {
+        "name": "single_space",
+        "text": " ",
+        "ids": [
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "three_spaces",
+        "text": "   ",
+        "ids": [
+          260,
+          260,
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "eight_leading_spaces_hello",
+        "text": "        Hello world.",
+        "ids": [
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          2542,
+          451,
+          422,
+          304,
+          355,
+          328,
+          269
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁Hell",
+          "o",
+          "▁wo",
+          "r",
+          "l",
+          "d",
+          "."
+        ]
+      },
+      {
+        "name": "hello_world_no_prefix",
+        "text": "Hello world.",
+        "ids": [
+          2542,
+          451,
+          422,
+          304,
+          355,
+          328,
+          269
+        ],
+        "pieces": [
+          "▁Hell",
+          "o",
+          "▁wo",
+          "r",
+          "l",
+          "d",
+          "."
+        ]
+      },
+      {
+        "name": "real_tab_char",
+        "text": "a\tb",
+        "ids": [
+          260,
+          516,
+          13,
+          331
+        ],
+        "pieces": [
+          "▁",
+          "a",
+          "<0x09>",
+          "b"
+        ]
+      },
+      {
+        "name": "real_newline_char",
+        "text": "a\nb",
+        "ids": [
+          260,
+          516,
+          14,
+          331
+        ],
+        "pieces": [
+          "▁",
+          "a",
+          "<0x0A>",
+          "b"
+        ]
+      },
+      {
+        "name": "emoji_non_bmp",
+        "text": "café 🚀",
+        "ids": [
+          260,
+          2925,
+          352,
+          199,
+          173,
+          260,
+          244,
+          163,
+          158,
+          132
+        ],
+        "pieces": [
+          "▁",
+          "ca",
+          "f",
+          "<0xC3>",
+          "<0xA9>",
+          "▁",
+          "<0xF0>",
+          "<0x9F>",
+          "<0x9A>",
+          "<0x80>"
+        ]
+      },
+      {
+        "name": "rare_byte_fallback",
+        "text": "œuf ☃ ﬁ",
+        "ids": [
+          260,
+          201,
+          151,
+          1131,
+          260,
+          230,
+          156,
+          135,
+          260,
+          243,
+          176,
+          133
+        ],
+        "pieces": [
+          "▁",
+          "<0xC5>",
+          "<0x93>",
+          "uf",
+          "▁",
+          "<0xE2>",
+          "<0x98>",
+          "<0x83>",
+          "▁",
+          "<0xEF>",
+          "<0xAC>",
+          "<0x81>"
+        ]
+      },
+      {
+        "name": "mixed_diacritics_currency",
+        "text": "Dr. Müller a payé 42,50 € à l'hôtel.",
+        "ids": [
+          1320,
+          269,
+          644,
+          1733,
+          1102,
+          260,
+          516,
+          260,
+          1048,
+          444,
+          199,
+          173,
+          260,
+          56,
+          54,
+          261,
+          57,
+          52,
+          260,
+          230,
+          134,
+          176,
+          260,
+          199,
+          164,
+          260,
+          355,
+          386,
+          312,
+          199,
+          184,
+          273,
+          383,
+          269
+        ],
+        "pieces": [
+          "▁Dr",
+          ".",
+          "▁M",
+          "ül",
+          "ler",
+          "▁",
+          "a",
+          "▁",
+          "pa",
+          "y",
+          "<0xC3>",
+          "<0xA9>",
+          "▁",
+          "<0x34>",
+          "<0x32>",
+          ",",
+          "<0x35>",
+          "<0x30>",
+          "▁",
+          "<0xE2>",
+          "<0x82>",
+          "<0xAC>",
+          "▁",
+          "<0xC3>",
+          "<0xA0>",
+          "▁",
+          "l",
+          "'",
+          "h",
+          "<0xC3>",
+          "<0xB4>",
+          "t",
+          "el",
+          "."
+        ]
+      },
+      {
+        "name": "digits_float",
+        "text": "3.14159",
+        "ids": [
+          260,
+          55,
+          269,
+          53,
+          56,
+          53,
+          57,
+          61
+        ],
+        "pieces": [
+          "▁",
+          "<0x33>",
+          ".",
+          "<0x31>",
+          "<0x34>",
+          "<0x31>",
+          "<0x35>",
+          "<0x39>"
+        ]
+      },
+      {
+        "name": "digits_date",
+        "text": "2026-07-26",
+        "ids": [
+          260,
+          54,
+          52,
+          54,
+          58,
+          49,
+          52,
+          59,
+          49,
+          54,
+          58
+        ],
+        "pieces": [
+          "▁",
+          "<0x32>",
+          "<0x30>",
+          "<0x32>",
+          "<0x36>",
+          "<0x2D>",
+          "<0x30>",
+          "<0x37>",
+          "<0x2D>",
+          "<0x32>",
+          "<0x36>"
+        ]
+      },
+      {
+        "name": "punctuation_run",
+        "text": "a,b;c!d?e",
+        "ids": [
+          260,
+          516,
+          261,
+          331,
+          300,
+          743,
+          324,
+          328,
+          348,
+          263
+        ],
+        "pieces": [
+          "▁",
+          "a",
+          ",",
+          "b",
+          ";",
+          "c",
+          "!",
+          "d",
+          "?",
+          "e"
+        ]
+      },
+      {
+        "name": "repeated_adjacent_spaces",
+        "text": "a  b   c",
+        "ids": [
+          260,
+          516,
+          260,
+          260,
+          331,
+          260,
+          260,
+          260,
+          743
+        ],
+        "pieces": [
+          "▁",
+          "a",
+          "▁",
+          "▁",
+          "b",
+          "▁",
+          "▁",
+          "▁",
+          "c"
+        ]
+      },
+      {
+        "name": "leading_whitespace",
+        "text": " leading",
+        "ids": [
+          260,
+          260,
+          521,
+          811,
+          1041
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "le",
+          "ad",
+          "ing"
+        ]
+      },
+      {
+        "name": "trailing_whitespace",
+        "text": "trailing ",
+        "ids": [
+          260,
+          1509,
+          505,
+          670,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "tra",
+          "i",
+          "ling",
+          "▁"
+        ]
+      }
+    ]
+  },
+  "spanish": {
+    "flags": {
+      "vocab_size": 4000,
+      "model_type": 1,
+      "byte_fallback": true,
+      "normalizer_name": "identity",
+      "precompiled_charsmap_len": 0,
+      "add_dummy_prefix": true,
+      "remove_extra_whitespaces": false,
+      "escape_whitespaces": true
+    },
+    "cases": [
+      {
+        "name": "sentence_0",
+        "text": "¿Cómo estás? ¡Muy bien, gracias!",
+        "ids": [
+          260,
+          198,
+          195,
+          1794,
+          300,
+          436,
+          534,
+          263,
+          67,
+          260,
+          198,
+          165,
+          2225,
+          334,
+          429,
+          394,
+          261,
+          260,
+          826,
+          263,
+          600
+        ],
+        "pieces": [
+          "▁",
+          "<0xC2>",
+          "<0xBF>",
+          "C",
+          "ó",
+          "mo",
+          "▁está",
+          "s",
+          "<0x3F>",
+          "▁",
+          "<0xC2>",
+          "<0xA1>",
+          "M",
+          "u",
+          "y",
+          "▁bien",
+          ",",
+          "▁",
+          "gracia",
+          "s",
+          "!"
+        ]
+      },
+      {
+        "name": "sentence_1",
+        "text": "El niño pequeño comió mañana en el jardín.",
+        "ids": [
+          346,
+          1349,
+          312,
+          2112,
+          514,
+          612,
+          260,
+          863,
+          267,
+          269,
+          260,
+          3016,
+          270
+        ],
+        "pieces": [
+          "▁El",
+          "▁niño",
+          "▁p",
+          "equeño",
+          "▁com",
+          "ió",
+          "▁",
+          "mañana",
+          "▁en",
+          "▁el",
+          "▁",
+          "jardín",
+          "."
+        ]
+      },
+      {
+        "name": "sentence_2",
+        "text": "La señora García vive cerca del río.",
+        "ids": [
+          383,
+          260,
+          841,
+          916,
+          293,
+          1069,
+          2133,
+          767,
+          281,
+          1183,
+          270
+        ],
+        "pieces": [
+          "▁La",
+          "▁",
+          "señora",
+          "▁G",
+          "ar",
+          "cía",
+          "▁vive",
+          "▁cerca",
+          "▁del",
+          "▁río",
+          "."
+        ]
+      },
+      {
+        "name": "empty_string",
+        "text": "",
+        "ids": [],
+        "pieces": []
+      },
+      {
+        "name": "single_space",
+        "text": " ",
+        "ids": [
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "three_spaces",
+        "text": "   ",
+        "ids": [
+          260,
+          260,
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "eight_leading_spaces_hello",
+        "text": "        Hello world.",
+        "ids": [
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          855,
+          896,
+          260,
+          123,
+          538,
+          310,
+          340,
+          270
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁He",
+          "llo",
+          "▁",
+          "<0x77>",
+          "or",
+          "l",
+          "d",
+          "."
+        ]
+      },
+      {
+        "name": "hello_world_no_prefix",
+        "text": "Hello world.",
+        "ids": [
+          855,
+          896,
+          260,
+          123,
+          538,
+          310,
+          340,
+          270
+        ],
+        "pieces": [
+          "▁He",
+          "llo",
+          "▁",
+          "<0x77>",
+          "or",
+          "l",
+          "d",
+          "."
+        ]
+      },
+      {
+        "name": "real_tab_char",
+        "text": "a\tb",
+        "ids": [
+          268,
+          13,
+          372
+        ],
+        "pieces": [
+          "▁a",
+          "<0x09>",
+          "b"
+        ]
+      },
+      {
+        "name": "real_newline_char",
+        "text": "a\nb",
+        "ids": [
+          268,
+          14,
+          372
+        ],
+        "pieces": [
+          "▁a",
+          "<0x0A>",
+          "b"
+        ]
+      },
+      {
+        "name": "emoji_non_bmp",
+        "text": "café 🚀",
+        "ids": [
+          3569,
+          260,
+          244,
+          163,
+          158,
+          132
+        ],
+        "pieces": [
+          "▁café",
+          "▁",
+          "<0xF0>",
+          "<0x9F>",
+          "<0x9A>",
+          "<0x80>"
+        ]
+      },
+      {
+        "name": "rare_byte_fallback",
+        "text": "œuf ☃ ﬁ",
+        "ids": [
+          260,
+          201,
+          151,
+          334,
+          508,
+          260,
+          230,
+          156,
+          135,
+          260,
+          243,
+          176,
+          133
+        ],
+        "pieces": [
+          "▁",
+          "<0xC5>",
+          "<0x93>",
+          "u",
+          "f",
+          "▁",
+          "<0xE2>",
+          "<0x98>",
+          "<0x83>",
+          "▁",
+          "<0xEF>",
+          "<0xAC>",
+          "<0x81>"
+        ]
+      },
+      {
+        "name": "mixed_diacritics_currency",
+        "text": "Dr. Müller a payé 42,50 € à l'hôtel.",
+        "ids": [
+          452,
+          286,
+          270,
+          1130,
+          199,
+          192,
+          928,
+          286,
+          268,
+          684,
+          429,
+          331,
+          260,
+          56,
+          54,
+          261,
+          57,
+          52,
+          260,
+          230,
+          134,
+          176,
+          260,
+          199,
+          164,
+          260,
+          310,
+          43,
+          778,
+          199,
+          184,
+          339,
+          310,
+          270
+        ],
+        "pieces": [
+          "▁D",
+          "r",
+          ".",
+          "▁M",
+          "<0xC3>",
+          "<0xBC>",
+          "lle",
+          "r",
+          "▁a",
+          "▁pa",
+          "y",
+          "é",
+          "▁",
+          "<0x34>",
+          "<0x32>",
+          ",",
+          "<0x35>",
+          "<0x30>",
+          "▁",
+          "<0xE2>",
+          "<0x82>",
+          "<0xAC>",
+          "▁",
+          "<0xC3>",
+          "<0xA0>",
+          "▁",
+          "l",
+          "<0x27>",
+          "h",
+          "<0xC3>",
+          "<0xB4>",
+          "te",
+          "l",
+          "."
+        ]
+      },
+      {
+        "name": "digits_float",
+        "text": "3.14159",
+        "ids": [
+          260,
+          55,
+          270,
+          53,
+          56,
+          53,
+          57,
+          61
+        ],
+        "pieces": [
+          "▁",
+          "<0x33>",
+          ".",
+          "<0x31>",
+          "<0x34>",
+          "<0x31>",
+          "<0x35>",
+          "<0x39>"
+        ]
+      },
+      {
+        "name": "digits_date",
+        "text": "2026-07-26",
+        "ids": [
+          260,
+          54,
+          52,
+          54,
+          58,
+          632,
+          52,
+          59,
+          632,
+          54,
+          58
+        ],
+        "pieces": [
+          "▁",
+          "<0x32>",
+          "<0x30>",
+          "<0x32>",
+          "<0x36>",
+          "-",
+          "<0x30>",
+          "<0x37>",
+          "-",
+          "<0x32>",
+          "<0x36>"
+        ]
+      },
+      {
+        "name": "punctuation_run",
+        "text": "a,b;c!d?e",
+        "ids": [
+          268,
+          261,
+          372,
+          283,
+          348,
+          600,
+          340,
+          67,
+          297
+        ],
+        "pieces": [
+          "▁a",
+          ",",
+          "b",
+          ";",
+          "c",
+          "!",
+          "d",
+          "<0x3F>",
+          "e"
+        ]
+      },
+      {
+        "name": "repeated_adjacent_spaces",
+        "text": "a  b   c",
+        "ids": [
+          268,
+          260,
+          1007,
+          260,
+          260,
+          343
+        ],
+        "pieces": [
+          "▁a",
+          "▁",
+          "▁b",
+          "▁",
+          "▁",
+          "▁c"
+        ]
+      },
+      {
+        "name": "leading_whitespace",
+        "text": " leading",
+        "ids": [
+          260,
+          289,
+          832,
+          2299
+        ],
+        "pieces": [
+          "▁",
+          "▁le",
+          "ad",
+          "ing"
+        ]
+      },
+      {
+        "name": "trailing_whitespace",
+        "text": "trailing ",
+        "ids": [
+          1886,
+          310,
+          2299,
+          260
+        ],
+        "pieces": [
+          "▁trai",
+          "l",
+          "ing",
+          "▁"
+        ]
+      }
+    ]
+  },
+  "portuguese": {
+    "flags": {
+      "vocab_size": 4000,
+      "model_type": 1,
+      "byte_fallback": true,
+      "normalizer_name": "identity",
+      "precompiled_charsmap_len": 0,
+      "add_dummy_prefix": true,
+      "remove_extra_whitespaces": false,
+      "escape_whitespaces": true
+    },
+    "cases": [
+      {
+        "name": "sentence_0",
+        "text": "Não sei se ele vai à praça amanhã.",
+        "ids": [
+          359,
+          868,
+          277,
+          349,
+          1030,
+          314,
+          2372,
+          260,
+          2857,
+          265
+        ],
+        "pieces": [
+          "▁Não",
+          "▁sei",
+          "▁se",
+          "▁ele",
+          "▁vai",
+          "▁à",
+          "▁praça",
+          "▁",
+          "amanhã",
+          "."
+        ]
+      },
+      {
+        "name": "sentence_1",
+        "text": "O pão quente é ótimo com manteiga.",
+        "ids": [
+          313,
+          300,
+          407,
+          267,
+          412,
+          312,
+          260,
+          443,
+          2587,
+          276,
+          638,
+          335,
+          1413,
+          265
+        ],
+        "pieces": [
+          "▁O",
+          "▁p",
+          "ão",
+          "▁que",
+          "nte",
+          "▁é",
+          "▁",
+          "ó",
+          "timo",
+          "▁com",
+          "▁man",
+          "te",
+          "iga",
+          "."
+        ]
+      },
+      {
+        "name": "sentence_2",
+        "text": "As crianças cantam canções na educação infantil.",
+        "ids": [
+          777,
+          566,
+          1403,
+          1292,
+          284,
+          1074,
+          545,
+          290,
+          2033,
+          327,
+          1448,
+          764,
+          1471,
+          265
+        ],
+        "pieces": [
+          "▁As",
+          "▁cri",
+          "anças",
+          "▁canta",
+          "m",
+          "▁can",
+          "ções",
+          "▁na",
+          "▁educ",
+          "ação",
+          "▁inf",
+          "an",
+          "til",
+          "."
+        ]
+      },
+      {
+        "name": "empty_string",
+        "text": "",
+        "ids": [],
+        "pieces": []
+      },
+      {
+        "name": "single_space",
+        "text": " ",
+        "ids": [
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "three_spaces",
+        "text": "   ",
+        "ids": [
+          260,
+          260,
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "eight_leading_spaces_hello",
+        "text": "        Hello world.",
+        "ids": [
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          1674,
+          296,
+          344,
+          260,
+          123,
+          279,
+          271,
+          296,
+          418,
+          265
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁He",
+          "l",
+          "lo",
+          "▁",
+          "<0x77>",
+          "o",
+          "r",
+          "l",
+          "d",
+          "."
+        ]
+      },
+      {
+        "name": "hello_world_no_prefix",
+        "text": "Hello world.",
+        "ids": [
+          1674,
+          296,
+          344,
+          260,
+          123,
+          279,
+          271,
+          296,
+          418,
+          265
+        ],
+        "pieces": [
+          "▁He",
+          "l",
+          "lo",
+          "▁",
+          "<0x77>",
+          "o",
+          "r",
+          "l",
+          "d",
+          "."
+        ]
+      },
+      {
+        "name": "real_tab_char",
+        "text": "a\tb",
+        "ids": [
+          263,
+          13,
+          450
+        ],
+        "pieces": [
+          "▁a",
+          "<0x09>",
+          "b"
+        ]
+      },
+      {
+        "name": "real_newline_char",
+        "text": "a\nb",
+        "ids": [
+          263,
+          14,
+          450
+        ],
+        "pieces": [
+          "▁a",
+          "<0x0A>",
+          "b"
+        ]
+      },
+      {
+        "name": "emoji_non_bmp",
+        "text": "café 🚀",
+        "ids": [
+          2503,
+          260,
+          244,
+          163,
+          158,
+          132
+        ],
+        "pieces": [
+          "▁café",
+          "▁",
+          "<0xF0>",
+          "<0x9F>",
+          "<0x9A>",
+          "<0x80>"
+        ]
+      },
+      {
+        "name": "rare_byte_fallback",
+        "text": "œuf ☃ ﬁ",
+        "ids": [
+          260,
+          201,
+          151,
+          280,
+          361,
+          260,
+          230,
+          156,
+          135,
+          260,
+          243,
+          176,
+          133
+        ],
+        "pieces": [
+          "▁",
+          "<0xC5>",
+          "<0x93>",
+          "u",
+          "f",
+          "▁",
+          "<0xE2>",
+          "<0x98>",
+          "<0x83>",
+          "▁",
+          "<0xEF>",
+          "<0xAC>",
+          "<0x81>"
+        ]
+      },
+      {
+        "name": "mixed_diacritics_currency",
+        "text": "Dr. Müller a payé 42,50 € à l'hôtel.",
+        "ids": [
+          419,
+          271,
+          265,
+          1255,
+          199,
+          192,
+          1661,
+          271,
+          263,
+          387,
+          125,
+          403,
+          260,
+          56,
+          54,
+          261,
+          57,
+          52,
+          260,
+          230,
+          134,
+          176,
+          314,
+          260,
+          296,
+          395,
+          610,
+          746,
+          335,
+          296,
+          265
+        ],
+        "pieces": [
+          "▁D",
+          "r",
+          ".",
+          "▁M",
+          "<0xC3>",
+          "<0xBC>",
+          "lle",
+          "r",
+          "▁a",
+          "▁pa",
+          "<0x79>",
+          "é",
+          "▁",
+          "<0x34>",
+          "<0x32>",
+          ",",
+          "<0x35>",
+          "<0x30>",
+          "▁",
+          "<0xE2>",
+          "<0x82>",
+          "<0xAC>",
+          "▁à",
+          "▁",
+          "l",
+          "'",
+          "h",
+          "ô",
+          "te",
+          "l",
+          "."
+        ]
+      },
+      {
+        "name": "digits_float",
+        "text": "3.14159",
+        "ids": [
+          260,
+          55,
+          265,
+          53,
+          56,
+          53,
+          57,
+          61
+        ],
+        "pieces": [
+          "▁",
+          "<0x33>",
+          ".",
+          "<0x31>",
+          "<0x34>",
+          "<0x31>",
+          "<0x35>",
+          "<0x39>"
+        ]
+      },
+      {
+        "name": "digits_date",
+        "text": "2026-07-26",
+        "ids": [
+          260,
+          54,
+          52,
+          54,
+          58,
+          269,
+          52,
+          59,
+          269,
+          54,
+          58
+        ],
+        "pieces": [
+          "▁",
+          "<0x32>",
+          "<0x30>",
+          "<0x32>",
+          "<0x36>",
+          "-",
+          "<0x30>",
+          "<0x37>",
+          "-",
+          "<0x32>",
+          "<0x36>"
+        ]
+      },
+      {
+        "name": "punctuation_run",
+        "text": "a,b;c!d?e",
+        "ids": [
+          263,
+          261,
+          450,
+          275,
+          330,
+          294,
+          418,
+          338,
+          309
+        ],
+        "pieces": [
+          "▁a",
+          ",",
+          "b",
+          ";",
+          "c",
+          "!",
+          "d",
+          "?",
+          "e"
+        ]
+      },
+      {
+        "name": "repeated_adjacent_spaces",
+        "text": "a  b   c",
+        "ids": [
+          263,
+          260,
+          920,
+          260,
+          260,
+          326
+        ],
+        "pieces": [
+          "▁a",
+          "▁",
+          "▁b",
+          "▁",
+          "▁",
+          "▁c"
+        ]
+      },
+      {
+        "name": "leading_whitespace",
+        "text": " leading",
+        "ids": [
+          260,
+          1033,
+          270,
+          420,
+          308,
+          341
+        ],
+        "pieces": [
+          "▁",
+          "▁le",
+          "a",
+          "di",
+          "n",
+          "g"
+        ]
+      },
+      {
+        "name": "trailing_whitespace",
+        "text": "trailing ",
+        "ids": [
+          3229,
+          2021,
+          341,
+          260
+        ],
+        "pieces": [
+          "▁trai",
+          "lin",
+          "g",
+          "▁"
+        ]
+      }
+    ]
+  },
+  "italian": {
+    "flags": {
+      "vocab_size": 4000,
+      "model_type": 1,
+      "byte_fallback": true,
+      "normalizer_name": "identity",
+      "precompiled_charsmap_len": 0,
+      "add_dummy_prefix": true,
+      "remove_extra_whitespaces": false,
+      "escape_whitespaces": true
+    },
+    "cases": [
+      {
+        "name": "sentence_0",
+        "text": "È bello passeggiare per il centro città.",
+        "ids": [
+          722,
+          1341,
+          1390,
+          1747,
+          275,
+          269,
+          2021,
+          310,
+          800,
+          262
+        ],
+        "pieces": [
+          "▁È",
+          "▁bello",
+          "▁passe",
+          "ggiare",
+          "▁per",
+          "▁il",
+          "▁cent",
+          "ro",
+          "▁città",
+          "."
+        ]
+      },
+      {
+        "name": "sentence_1",
+        "text": "Gli spaghetti sono più buoni con l'olio d'oliva.",
+        "ids": [
+          1007,
+          1368,
+          1051,
+          492,
+          462,
+          318,
+          2566,
+          281,
+          288,
+          265,
+          3261,
+          291,
+          265,
+          273,
+          325,
+          282,
+          262
+        ],
+        "pieces": [
+          "▁Gli",
+          "▁spa",
+          "ghe",
+          "tti",
+          "▁sono",
+          "▁più",
+          "▁buoni",
+          "▁con",
+          "▁l",
+          "'",
+          "olio",
+          "▁d",
+          "'",
+          "o",
+          "li",
+          "va",
+          "."
+        ]
+      },
+      {
+        "name": "sentence_2",
+        "text": "Che tempo fa oggi? Fa freddo e piove.",
+        "ids": [
+          552,
+          489,
+          366,
+          1555,
+          306,
+          1195,
+          260,
+          2104,
+          264,
+          2680,
+          278,
+          262
+        ],
+        "pieces": [
+          "▁Che",
+          "▁tempo",
+          "▁fa",
+          "▁oggi",
+          "?",
+          "▁Fa",
+          "▁",
+          "freddo",
+          "▁e",
+          "▁piov",
+          "e",
+          "."
+        ]
+      },
+      {
+        "name": "empty_string",
+        "text": "",
+        "ids": [],
+        "pieces": []
+      },
+      {
+        "name": "single_space",
+        "text": " ",
+        "ids": [
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "three_spaces",
+        "text": "   ",
+        "ids": [
+          260,
+          260,
+          260,
+          260
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁"
+        ]
+      },
+      {
+        "name": "eight_leading_spaces_hello",
+        "text": "        Hello world.",
+        "ids": [
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          260,
+          76,
+          534,
+          260,
+          123,
+          699,
+          320,
+          412,
+          262
+        ],
+        "pieces": [
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "▁",
+          "<0x48>",
+          "ello",
+          "▁",
+          "<0x77>",
+          "or",
+          "l",
+          "d",
+          "."
+        ]
+      },
+      {
+        "name": "hello_world_no_prefix",
+        "text": "Hello world.",
+        "ids": [
+          260,
+          76,
+          534,
+          260,
+          123,
+          699,
+          320,
+          412,
+          262
+        ],
+        "pieces": [
+          "▁",
+          "<0x48>",
+          "ello",
+          "▁",
+          "<0x77>",
+          "or",
+          "l",
+          "d",
+          "."
+        ]
+      },
+      {
+        "name": "real_tab_char",
+        "text": "a\tb",
+        "ids": [
+          267,
+          13,
+          409
+        ],
+        "pieces": [
+          "▁a",
+          "<0x09>",
+          "b"
+        ]
+      },
+      {
+        "name": "real_newline_char",
+        "text": "a\nb",
+        "ids": [
+          267,
+          14,
+          409
+        ],
+        "pieces": [
+          "▁a",
+          "<0x0A>",
+          "b"
+        ]
+      },
+      {
+        "name": "emoji_non_bmp",
+        "text": "café 🚀",
+        "ids": [
+          468,
+          466,
+          1787,
+          260,
+          244,
+          163,
+          158,
+          132
+        ],
+        "pieces": [
+          "▁ca",
+          "f",
+          "é",
+          "▁",
+          "<0xF0>",
+          "<0x9F>",
+          "<0x9A>",
+          "<0x80>"
+        ]
+      },
+      {
+        "name": "rare_byte_fallback",
+        "text": "œuf ☃ ﬁ",
+        "ids": [
+          260,
+          201,
+          151,
+          328,
+          466,
+          260,
+          230,
+          156,
+          135,
+          260,
+          243,
+          176,
+          133
+        ],
+        "pieces": [
+          "▁",
+          "<0xC5>",
+          "<0x93>",
+          "u",
+          "f",
+          "▁",
+          "<0xE2>",
+          "<0x98>",
+          "<0x83>",
+          "▁",
+          "<0xEF>",
+          "<0xAC>",
+          "<0x81>"
+        ]
+      },
+      {
+        "name": "mixed_diacritics_currency",
+        "text": "Dr. Müller a payé 42,50 € à l'hôtel.",
+        "ids": [
+          1039,
+          290,
+          262,
+          1480,
+          199,
+          192,
+          734,
+          290,
+          267,
+          441,
+          125,
+          1787,
+          260,
+          56,
+          54,
+          261,
+          57,
+          52,
+          260,
+          230,
+          134,
+          176,
+          260,
+          878,
+          288,
+          265,
+          1054,
+          199,
+          184,
+          300,
+          320,
+          262
+        ],
+        "pieces": [
+          "▁D",
+          "r",
+          ".",
+          "▁M",
+          "<0xC3>",
+          "<0xBC>",
+          "lle",
+          "r",
+          "▁a",
+          "▁pa",
+          "<0x79>",
+          "é",
+          "▁",
+          "<0x34>",
+          "<0x32>",
+          ",",
+          "<0x35>",
+          "<0x30>",
+          "▁",
+          "<0xE2>",
+          "<0x82>",
+          "<0xAC>",
+          "▁",
+          "à",
+          "▁l",
+          "'",
+          "h",
+          "<0xC3>",
+          "<0xB4>",
+          "te",
+          "l",
+          "."
+        ]
+      },
+      {
+        "name": "digits_float",
+        "text": "3.14159",
+        "ids": [
+          260,
+          55,
+          262,
+          53,
+          56,
+          53,
+          57,
+          61
+        ],
+        "pieces": [
+          "▁",
+          "<0x33>",
+          ".",
+          "<0x31>",
+          "<0x34>",
+          "<0x31>",
+          "<0x35>",
+          "<0x39>"
+        ]
+      },
+      {
+        "name": "digits_date",
+        "text": "2026-07-26",
+        "ids": [
+          260,
+          54,
+          52,
+          54,
+          58,
+          279,
+          52,
+          59,
+          279,
+          54,
+          58
+        ],
+        "pieces": [
+          "▁",
+          "<0x32>",
+          "<0x30>",
+          "<0x32>",
+          "<0x36>",
+          "-",
+          "<0x30>",
+          "<0x37>",
+          "-",
+          "<0x32>",
+          "<0x36>"
+        ]
+      },
+      {
+        "name": "punctuation_run",
+        "text": "a,b;c!d?e",
+        "ids": [
+          267,
+          261,
+          409,
+          287,
+          376,
+          297,
+          412,
+          306,
+          278
+        ],
+        "pieces": [
+          "▁a",
+          ",",
+          "b",
+          ";",
+          "c",
+          "!",
+          "d",
+          "?",
+          "e"
+        ]
+      },
+      {
+        "name": "repeated_adjacent_spaces",
+        "text": "a  b   c",
+        "ids": [
+          267,
+          260,
+          260,
+          409,
+          260,
+          260,
+          357
+        ],
+        "pieces": [
+          "▁a",
+          "▁",
+          "▁",
+          "b",
+          "▁",
+          "▁",
+          "▁c"
+        ]
+      },
+      {
+        "name": "leading_whitespace",
+        "text": " leading",
+        "ids": [
+          260,
+          285,
+          271,
+          354,
+          322,
+          445
+        ],
+        "pieces": [
+          "▁",
+          "▁le",
+          "a",
+          "di",
+          "n",
+          "g"
+        ]
+      },
+      {
+        "name": "trailing_whitespace",
+        "text": "trailing ",
+        "ids": [
+          367,
+          276,
+          325,
+          322,
+          445,
+          260
+        ],
+        "pieces": [
+          "▁tra",
+          "i",
+          "li",
+          "n",
+          "g",
+          "▁"
+        ]
+      }
+    ]
+  }
+}

@@ -20,6 +20,8 @@ export class TtsClient {
         this.voiceUrl = options.voiceUrl || null;
         this.tokenizerUrl = options.tokenizerUrl || null;
         this.voicesUrl = options.voicesUrl || null;
+        this.voiceBaseUrl = options.voiceBaseUrl || null;
+        this.language = options.language || null;
 
         this.worker = null;
         this.sampleRate = 24000;
@@ -35,7 +37,7 @@ export class TtsClient {
             this.worker.onerror = (err) => {
                 const msg = err.message || err.filename
                     ? `Worker error: ${err.message} (${err.filename}:${err.lineno}:${err.colno})`
-                    : 'Worker failed to load — check browser console';
+                    : 'Worker failed to load, check browser console';
                 console.error('[tts-client] worker error event:', err);
                 this.onError(new Error(msg));
                 if (this._pendingReject) {
@@ -59,6 +61,8 @@ export class TtsClient {
                 if (this.modelUrl) config.modelUrl = this.modelUrl;
                 if (this.voiceUrl) config.voiceUrl = this.voiceUrl;
                 if (this.tokenizerUrl) config.tokenizerUrl = this.tokenizerUrl;
+                if (this.voiceBaseUrl) config.voiceBaseUrl = this.voiceBaseUrl;
+                if (this.language) config.language = this.language;
                 this.worker.postMessage({ type: 'load', config });
             }
         });
