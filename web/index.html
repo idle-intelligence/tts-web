@@ -447,6 +447,11 @@
         const audioSection = document.getElementById('audioSection');
         const audioPlayer = document.getElementById('audioPlayer');
         const saveWavLink = document.getElementById('saveWavLink');
+        function showKittenSaveLink() {
+            saveWavLink.href = audioPlayer.src;
+            saveWavLink.download = `kittentts-${KITTEN_VOICES[kittenVoiceIdx]}.wav`;
+            saveWavLink.style.display = 'inline-block';
+        }
         const voiceSection = document.getElementById('voiceSection');
         const kittenVoiceSection = document.getElementById('kittenVoiceSection');
         const kittenVoiceGrid = document.getElementById('kittenVoiceGrid');
@@ -893,10 +898,9 @@
                     setVoiceBtnsEnabled(true);
                     stepInfo.textContent = `${audioDur}s audio in ${totalTime}s — TTFB ${ttfb}s — ${rtf}x realtime`;
                     updateStatus('ready', 'Ready');
-                    if (isDemoGen) {
-                        isDemoGen = false;
-                        return;
-                    }
+                    // Voice clicks have already streamed to the speakers; still offer the
+                    // player and the download, like a typed generation.
+                    isDemoGen = false;
                     const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
                     if (totalLength === 0) return;
                     const pcm = new Float32Array(totalLength);
@@ -993,6 +997,7 @@
                         const blob = new Blob([wav], { type: 'audio/wav' });
                         audioPlayer.src = URL.createObjectURL(blob);
                         audioSection.style.display = 'block';
+                        showKittenSaveLink();
                         audioPlayer.play().catch(() => {});
                         if (usedIpa) {
                             ipaDisplay.textContent = 'IPA: ' + usedIpa;
@@ -1005,6 +1010,7 @@
                     const blob = new Blob([wav], { type: 'audio/wav' });
                     audioPlayer.src = URL.createObjectURL(blob);
                     audioSection.style.display = 'block';
+                    showKittenSaveLink();
                     audioPlayer.play().catch(() => {});
 
                     if (usedIpa) {
