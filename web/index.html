@@ -1128,8 +1128,8 @@
         });
 
         generateBtn.addEventListener('click', () => {
-            const text = textInput.value.trim();
-            if (!text || generating) return;
+            const text = textInput.value.trim() || textInput.placeholder;
+            if (generating) return;
             const cfg = MODEL_TABLE[currentModel];
             if (cfg.engine === 'pocket' && !activeVoice) return;
             if (cfg.engine === 'kitten') {
