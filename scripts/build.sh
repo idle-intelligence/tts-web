@@ -25,13 +25,17 @@ cd "$REPO_ROOT"
 
 CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
 
+# Remap flags are passed via --config (forwarded by wasm-pack to cargo after
+# `--`) so cargo merges them with .cargo/config.toml's target rustflags
+# instead of replacing them. Setting RUSTFLAGS directly would drop
+# +simd128, the getrandom_backend cfg and the stack-size/max-memory link args.
+REMAP_CONFIG="target.wasm32-unknown-unknown.rustflags=[\"--remap-path-prefix=$HOME=/home\",\"--remap-path-prefix=$CARGO_HOME_DIR=/cargo\"]"
+
 echo "==> Building tts-wasm for ENGINE_BUILD=$ENGINE_BUILD"
-RUSTFLAGS="--remap-path-prefix=$HOME=/home --remap-path-prefix=$CARGO_HOME_DIR=/cargo" \
-  wasm-pack build crates/tts-wasm --target web --release
+wasm-pack build crates/tts-wasm --target web --release -- --config "$REMAP_CONFIG"
 
 echo "==> Building kitten-wasm (wasm feature) for ENGINE_BUILD=$ENGINE_BUILD"
-RUSTFLAGS="--remap-path-prefix=$HOME=/home --remap-path-prefix=$CARGO_HOME_DIR=/cargo" \
-  wasm-pack build crates/kitten-wasm --target web --release --no-default-features --features wasm
+wasm-pack build crates/kitten-wasm --target web --release -- --no-default-features --features wasm --config "$REMAP_CONFIG"
 
 TTS_WASM="crates/tts-wasm/pkg/tts_wasm_bg.wasm"
 KITTEN_WASM="crates/kitten-wasm/pkg/kitten_wasm_bg.wasm"
