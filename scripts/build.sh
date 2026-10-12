@@ -23,19 +23,25 @@ ENGINE_BUILD="${ENGINE_BUILD:-dev}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Per-target flags (+simd128, the getrandom_backend cfg, the stack-size and
+# max-memory link args) live in .cargo/config.toml. Only the
+# machine-dependent --remap-path-prefix flags are passed inline, so
+# compiled-in source paths carry no home directory. They go in with
+# --config, which merges with the config file (RUSTFLAGS would replace it);
+# wasm-pack forwards the extra args to `cargo build` with no `--`
+# separator. The cfg(all()) key puts them after any user-level cfg(all())
+# remap, so they win (rustc applies the last matching remap); with --target
+# they still apply only to the wasm, not to host build scripts.
+# This moves to `trim-paths = "all"` in the release profile once cargo
+# stabilizes it.
 CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
-
-# Remap flags are passed via --config (forwarded by wasm-pack to cargo after
-# `--`) so cargo merges them with .cargo/config.toml's target rustflags
-# instead of replacing them. Setting RUSTFLAGS directly would drop
-# +simd128, the getrandom_backend cfg and the stack-size/max-memory link args.
-REMAP_CONFIG="target.wasm32-unknown-unknown.rustflags=[\"--remap-path-prefix=$HOME=/home\",\"--remap-path-prefix=$CARGO_HOME_DIR=/cargo\"]"
+REMAP="target.'cfg(all())'.rustflags=[\"--remap-path-prefix=$HOME=/home\", \"--remap-path-prefix=$CARGO_HOME_DIR=/cargo\"]"
 
 echo "==> Building tts-wasm for ENGINE_BUILD=$ENGINE_BUILD"
-wasm-pack build crates/tts-wasm --target web --release -- --config "$REMAP_CONFIG"
+wasm-pack build crates/tts-wasm --target web --release --config "$REMAP"
 
 echo "==> Building kitten-wasm (wasm feature) for ENGINE_BUILD=$ENGINE_BUILD"
-wasm-pack build crates/kitten-wasm --target web --release -- --no-default-features --features wasm --config "$REMAP_CONFIG"
+wasm-pack build crates/kitten-wasm --target web --release --no-default-features --features wasm --config "$REMAP"
 
 TTS_WASM="crates/tts-wasm/pkg/tts_wasm_bg.wasm"
 KITTEN_WASM="crates/kitten-wasm/pkg/kitten_wasm_bg.wasm"
@@ -72,5 +78,9 @@ if [ "$COUNT" -ne 2 ]; then
     echo "error: expected 2 ENGINE_BUILD assignments rewritten to $ENGINE_BUILD, found $COUNT" >&2
     exit 1
 fi
+
+# --- Target features: every wasm keeps SIMD ---
+echo "==> Checking wasm target features"
+python3 scripts/check_wasm_features.py "$TTS_WASM" +simd128 -- "$KITTEN_WASM" +simd128
 
 echo "==> Wrote _site"
