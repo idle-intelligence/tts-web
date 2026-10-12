@@ -96,6 +96,16 @@ python3 scripts/serve.py --port 8082
 
 Open http://localhost:8082/web/.
 
+CI (`.github/workflows/pages.yml`) runs these on the pinned toolchain:
+
+```bash
+cargo test --workspace --release     # non-GPU tests only; parity gates need model files
+cargo clippy --workspace --all-targets -- -D warnings
+ENGINE_BUILD=<tag> scripts/build.sh
+```
+
+`scripts/build.sh` rewrites the `?v=` build tag on every wasm and model loading URL to `ENGINE_BUILD` (CI passes the commit sha, local builds default to `dev`). Use a new tag for every real deploy, otherwise browsers keep running the cached module. It needs `wasm-pack` and a `wasm-bindgen-cli` matching the version in `Cargo.lock`.
+
 ## Architecture
 
 ```
